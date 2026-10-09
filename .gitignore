@@ -1,0 +1,16 @@
+node_modules/
+dist/
+release/
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+profiles/
+userdata/
+downloads/
+exports/
+tmp/
+*.log
+.DS_Store
+Thumbs.db
