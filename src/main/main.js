@@ -75,6 +75,8 @@ function createWindow() {
 app.whenReady().then(() => {
   ipcMain.handle('connections:list', () => sessions.getStatuses());
   ipcMain.handle('connections:login', (_event, serviceId) => sessions.login(serviceId));
+  ipcMain.handle('connections:test', (_event, serviceId) => sessions.test(serviceId));
+  ipcMain.handle('connections:preflight', () => sessions.preflight(['chatgpt', 'vectorizer', 'redbubble']));
   ipcMain.handle('connections:logout', (_event, serviceId) => sessions.logout(serviceId));
   ipcMain.handle('pod:rules', () => POD_RULES);
   ipcMain.handle('projects:list', () => projects.list().map(enrich));
@@ -153,7 +155,14 @@ app.whenReady().then(() => {
   ipcMain.handle('automation:update', (_event, { rowId, patch }) => automation.updateRow(rowId, patch));
   ipcMain.handle('automation:remove', (_event, rowId) => automation.removeRow(rowId));
   ipcMain.handle('automation:clear-completed', () => automation.clearCompleted());
-  ipcMain.handle('automation:start', () => automation.start());
+  ipcMain.handle('automation:start', async () => {
+    const preflight = await sessions.preflight(['chatgpt', 'vectorizer', 'redbubble']);
+    if (!preflight.ok) {
+      const names = preflight.needsLogin.map((id) => sessions.getStatuses()[id]?.name || id).join(', ');
+      throw new Error(`Login required before starting the queue: ${names}. Open Connections, sign in normally, then test the session.`);
+    }
+    return { ...automation.start(), preflight };
+  });
   ipcMain.handle('automation:pause', () => automation.pause());
   ipcMain.handle('automation:stop', () => automation.stop());
 
