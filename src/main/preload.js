@@ -24,7 +24,10 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     health: () => ipcRenderer.invoke('workspace:health'),
     diagnostics: () => ipcRenderer.invoke('workspace:diagnostics')
   },
-  generation: { start: (payload) => ipcRenderer.invoke('generation:start', payload) },
+  generation: {
+    start: (payload) => ipcRenderer.invoke('generation:start', payload),
+    newChat: () => ipcRenderer.invoke('generation:new-chat')
+  },
   review: {
     reject: (payload) => ipcRenderer.invoke('review:reject', payload),
     pass: (payload) => ipcRenderer.invoke('review:pass', payload)
