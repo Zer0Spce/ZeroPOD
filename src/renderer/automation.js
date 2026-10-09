@@ -42,8 +42,8 @@ async function refreshAutomationList() {
     <td><input class="auto-notes" value="${automationEscape(row.notes)}" placeholder="Optional instructions"></td>
     <td><span class="stage-badge auto-status-${automationEscape(row.status)}">${automationEscape(automationStatusLabel(row.status))}</span>${row.lastError ? `<div class="auto-error" title="${automationEscape(row.lastError)}">${automationEscape(row.lastError)}</div>` : ''}</td>
     <td>${automationEscape(row.step || 'Waiting')}</td>
-    <td>${row.projectId ? `<button class="auto-project small-button" data-project="${automationEscape(row.projectId)}">Open</button>` : '—'}</td>
-    <td><button class="auto-remove danger small-button">Remove</button></td>
+    <td>${row.projectId ? `<button class="auto-project small-button" data-project="${automationEscape(row.projectId)}">Projects</button>` : '—'}</td>
+    <td><div class="auto-actions">${row.status === 'needs-attention' ? '<button class="auto-retry small-button">Retry</button>' : ''}<button class="auto-remove danger small-button">Remove</button></div></td>
   </tr>`).join('');
 
   root.querySelectorAll('tr[data-row-id]').forEach((tr) => {
@@ -64,6 +64,10 @@ async function refreshAutomationList() {
       if (!file) return;
       tr.querySelector('.auto-image').value = file;
       await save();
+    });
+    tr.querySelector('.auto-retry')?.addEventListener('click', async () => {
+      await window.zeroPOD.automation.update({ rowId, patch: { status: 'ready', step: 'Retry queued', lastError: null } });
+      await refreshAutomationList();
     });
     tr.querySelector('.auto-remove').addEventListener('click', async () => {
       if (!confirm('Remove this automation row? The linked ZeroPOD project, if any, will remain in Projects.')) return;
