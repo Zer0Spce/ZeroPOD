@@ -33,13 +33,16 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     list: () => ipcRenderer.invoke('automation:list'),
     add: (rows) => ipcRenderer.invoke('automation:add', rows),
     update: (payload) => ipcRenderer.invoke('automation:update', payload),
+    move: (payload) => ipcRenderer.invoke('automation:move', payload),
     remove: (rowId) => ipcRenderer.invoke('automation:remove', rowId),
     clearCompleted: () => ipcRenderer.invoke('automation:clear-completed'),
     start: () => ipcRenderer.invoke('automation:start'),
     pause: () => ipcRenderer.invoke('automation:pause'),
     stop: () => ipcRenderer.invoke('automation:stop'),
     importCsv: () => ipcRenderer.invoke('automation:import-csv'),
-    exportCsv: () => ipcRenderer.invoke('automation:export-csv')
+    exportCsv: () => ipcRenderer.invoke('automation:export-csv'),
+    importXlsx: () => ipcRenderer.invoke('automation:import-xlsx'),
+    exportXlsx: () => ipcRenderer.invoke('automation:export-xlsx')
   },
   files: {
     chooseReference: () => ipcRenderer.invoke('file:choose-reference'),
