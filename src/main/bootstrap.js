@@ -80,4 +80,5 @@ require('./chatgptUploadReadyPatch');
 require('./chatgptNetworkCapturePatch');
 require('./chatgptLiveReliabilityPatch');
 require('./chatThreadPreferencePatch');
+require('./metadataVisibleJsonPatch');
 require('./main');
