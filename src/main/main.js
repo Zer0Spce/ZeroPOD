@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const { SessionManager } = require('./sessionManager');
 const { ProjectStore } = require('./projectStore');
@@ -7,6 +8,9 @@ const { MetadataController } = require('./metadataController');
 const { VectorizerController } = require('./vectorizerController');
 const { ExportController } = require('./exportController');
 const { RedbubbleController } = require('./redbubbleController');
+const { AutomationQueueStore } = require('./automationQueueStore');
+const { AutomationQueueController } = require('./automationQueueController');
+const { parseCsv, toCsv } = require('./automationCsv');
 const { validateMetadata, validateProject } = require('./qualityControl');
 const workflow = require('./workflowState');
 
@@ -34,6 +38,16 @@ const metadata = new MetadataController({ sessions, projects });
 const vectorizer = new VectorizerController({ sessions, projects });
 const exporter = new ExportController({ projects });
 const redbubble = new RedbubbleController({ sessions, projects });
+const automationStore = new AutomationQueueStore();
+const automation = new AutomationQueueController({
+  store: automationStore,
+  projects,
+  chatgpt,
+  metadata,
+  vectorizer,
+  exporter,
+  redbubble
+});
 
 function enrich(project) {
   return { ...project, workflow: workflow.describe(project) };
@@ -134,6 +148,40 @@ app.whenReady().then(() => {
     return redbubble.publish(projectId);
   });
 
+  ipcMain.handle('automation:list', () => automation.snapshot());
+  ipcMain.handle('automation:add', (_event, rows) => automation.addRows(rows));
+  ipcMain.handle('automation:update', (_event, { rowId, patch }) => automation.updateRow(rowId, patch));
+  ipcMain.handle('automation:remove', (_event, rowId) => automation.removeRow(rowId));
+  ipcMain.handle('automation:clear-completed', () => automation.clearCompleted());
+  ipcMain.handle('automation:start', () => automation.start());
+  ipcMain.handle('automation:pause', () => automation.pause());
+  ipcMain.handle('automation:stop', () => automation.stop());
+
+  ipcMain.handle('automation:import-csv', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Import ZeroPOD Automation List CSV',
+      properties: ['openFile'],
+      filters: [{ name: 'CSV files', extensions: ['csv'] }]
+    });
+    if (result.canceled) return { canceled: true };
+    const text = fs.readFileSync(result.filePaths[0], 'utf8');
+    const rows = parseCsv(text);
+    if (!rows.length) throw new Error('CSV did not contain any automation rows.');
+    automation.addRows(rows);
+    return { canceled: false, imported: rows.length, snapshot: automation.snapshot() };
+  });
+
+  ipcMain.handle('automation:export-csv', async () => {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export ZeroPOD Automation List',
+      defaultPath: 'ZeroPOD-Automation-List.csv',
+      filters: [{ name: 'CSV files', extensions: ['csv'] }]
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    fs.writeFileSync(result.filePath, toCsv(automation.snapshot().rows), 'utf8');
+    return { canceled: false, path: result.filePath };
+  });
+
   ipcMain.handle('file:choose-reference', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Choose reference image',
@@ -143,10 +191,20 @@ app.whenReady().then(() => {
     return result.canceled ? null : result.filePaths[0];
   });
 
+  ipcMain.handle('file:choose-multiple-references', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose reference images for Automation List',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
+    });
+    return result.canceled ? [] : result.filePaths;
+  });
+
   createWindow();
 });
 
 app.on('window-all-closed', async () => {
+  automation.stop();
   await sessions.closeAll();
   app.quit();
 });

@@ -1,0 +1,4 @@
+enabled,reference_image,amazon_link,notes
+true,C:\ZeroPOD\inputs\design1.png,https://www.amazon.com/example1,optional design instruction
+true,C:\ZeroPOD\inputs\design2.png,https://www.amazon.com/example2,
+true,C:\ZeroPOD\inputs\design3.png,https://www.amazon.com/example3,make text larger and keep elements minimal
