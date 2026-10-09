@@ -87,5 +87,6 @@ require('./redbubbleVectorizerSpeedPatch');
 require('./vectorizerFirstStageRestorePatch');
 require('./redbubbleEditorFieldsPatch');
 require('./redbubbleUploadCompletionPatch');
+require('./redbubbleCurrentFieldsPatch');
 require('./redbubbleWideEditorPatch');
 require('./main');
