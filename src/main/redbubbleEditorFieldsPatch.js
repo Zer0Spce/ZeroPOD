@@ -29,9 +29,6 @@ async function visibleBusy(page) {
   }).catch(() => false);
 }
 
-// Redbubble can remove/hide Replace all images after a successful replacement.
-// Do not use that button reappearing as the success signal. The copied-work editor
-// being stable again is sufficient to continue to the metadata fields.
 RedbubbleController.prototype.waitForArtworkUpload = async function waitForArtworkUploadCurrent(page, timeoutMs = 120000) {
   const started = Date.now();
   let stableSince = null;
@@ -85,8 +82,6 @@ async function forceValue(control, value) {
     }
   }
 
-  // React-controlled inputs sometimes restore their old value after a plain fill.
-  // Verify after a render tick; if necessary use the native setter and input/change.
   await wait(120);
   const current = await control.inputValue().catch(() => null);
   if (current === stringValue) return true;
@@ -106,9 +101,6 @@ async function tagInputAfterLabel(page, labelRegex) {
   const label = await exactText(page, labelRegex);
   if (!label) return null;
 
-  // Redbubble currently uses chip/tag controls containing a real input. Prefer the
-  // first input after the field heading, which keeps Main Tag and Supporting Tags
-  // separated even though both controls use the same component.
   const input = label.locator('xpath=following::input[1]');
   if (!(await input.count().catch(() => 0))) return null;
   return input;
@@ -118,13 +110,9 @@ async function clearChipControl(page, input, maxChips = 20) {
   await input.scrollIntoViewIfNeeded().catch(() => {});
   await input.focus().catch(() => {});
 
-  // Ensure any typed search text is empty first.
   await input.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A').catch(() => {});
   await input.press('Backspace').catch(() => {});
 
-  // React Select-style tag widgets remove the final chip on Backspace when the
-  // text input is empty. This is more reliable than trying to identify the tiny X
-  // icon inside each Redbubble chip.
   for (let i = 0; i < maxChips; i += 1) {
     await input.press('Backspace').catch(() => {});
     await wait(35);
@@ -194,7 +182,6 @@ RedbubbleController.prototype.fillListingFields = async function fillListingFiel
     throw new Error('Redbubble copied-work metadata editor is not ready.');
   }
 
-  // Title: use the visible current Redbubble heading instead of name/id attributes.
   const titleInput = await nextControlAfterLabel(page, /^Title \(required\)$/i, 'input');
   if (!titleInput || !(await forceValue(titleInput, metadata.title))) {
     throw new Error('Redbubble Title field could not be updated.');
@@ -215,14 +202,12 @@ RedbubbleController.prototype.fillListingFields = async function fillListingFiel
   if (!supportingInput) throw new Error('Redbubble Supporting Tags chip input was not found.');
   await enterChipTags(page, supportingInput, supporting);
 
-  const description = await nextControlAfterLabel(page, /^Description$/i, 'textarea');
+  const description = (await nextControlAfterLabel(page, /^Description$/i, 'textarea'))
     || page.locator('textarea[placeholder*="drawing" i], textarea').last();
   if (!description || !(await forceValue(description, metadata.description))) {
     throw new Error('Redbubble Description field could not be updated.');
   }
 
-  // Verify the title/description values and that the new tag text is present before
-  // allowing ZeroPOD to advance to Final Review.
   const titleValue = await titleInput.inputValue().catch(() => '');
   const descriptionValue = await description.inputValue().catch(() => '');
   if (titleValue.trim() !== String(metadata.title).trim()) {
