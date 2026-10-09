@@ -8,7 +8,6 @@ on:
   push:
     branches:
       - main
-      - 'dev/**'
 
 jobs:
   check:
@@ -25,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Syntax check
+      - name: Syntax and release smoke checks
         run: npm run check
 
       - name: Build portable Windows package
