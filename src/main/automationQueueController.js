@@ -38,7 +38,8 @@ class AutomationQueueController {
         amazonLink,
         notes: String(row.notes || '').trim(),
         status: referenceImage && amazonLink ? 'pending' : 'draft',
-        step: referenceImage && amazonLink ? 'Waiting' : 'Complete image + Amazon link'
+        step: referenceImage && amazonLink ? 'Waiting' : 'Complete image + Amazon link',
+        checkpoint: referenceImage && amazonLink ? 'input-ready' : 'draft'
       };
     });
     return this.store.addRows(cleaned);
@@ -52,6 +53,7 @@ class AutomationQueueController {
       const complete = String(next.referenceImage || '').trim() && String(next.amazonLink || '').trim();
       patch.status = complete ? 'pending' : 'draft';
       patch.step = complete ? 'Waiting' : 'Complete image + Amazon link';
+      patch.checkpoint = complete ? 'input-ready' : 'draft';
       if (complete) patch.lastError = null;
     }
     return this.store.updateRow(rowId, patch);
@@ -65,6 +67,7 @@ class AutomationQueueController {
       return this.store.updateRow(rowId, {
         status: complete ? 'pending' : 'draft',
         step: complete ? 'Waiting' : 'Complete image + Amazon link',
+        checkpoint: complete ? 'input-ready' : 'draft',
         lastError: null
       });
     }
@@ -79,9 +82,138 @@ class AutomationQueueController {
     return this.store.clearCompleted();
   }
 
+  async recoverAfterRestart() {
+    const data = this.store.read();
+    const recoveredAt = new Date().toISOString();
+    let changed = false;
+    let recoveredRows = 0;
+
+    if (data.state === 'running') {
+      data.state = 'paused';
+      changed = true;
+    }
+
+    for (const row of data.rows) {
+      if (!row.projectId) {
+        if (row.status === 'running') {
+          const complete = row.referenceImage && row.amazonLink;
+          row.status = complete ? 'pending' : 'draft';
+          row.step = complete ? 'Recovered · Waiting' : 'Complete image + Amazon link';
+          row.checkpoint = complete ? 'input-ready' : 'draft';
+          row.recoveredAt = recoveredAt;
+          changed = true;
+          recoveredRows += 1;
+        }
+        continue;
+      }
+
+      let project;
+      try {
+        project = this.projects.read(row.projectId);
+      } catch {
+        row.status = 'needs-attention';
+        row.step = 'Linked project missing';
+        row.lastError = `Project ${row.projectId} could not be found after restart.`;
+        row.recoveredAt = recoveredAt;
+        changed = true;
+        recoveredRows += 1;
+        continue;
+      }
+
+      const recoveredProject = this.recoverTransientProject(project, recoveredAt);
+      if (recoveredProject.changed) {
+        project = recoveredProject.project;
+        changed = true;
+        recoveredRows += 1;
+      }
+
+      const mapped = this.mapProjectToRow(project);
+      if (mapped) {
+        Object.assign(row, mapped, { recoveredAt: recoveredProject.changed ? recoveredAt : row.recoveredAt || null });
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      data.recovery = {
+        type: 'restart-reconciliation',
+        at: recoveredAt,
+        recoveredRows,
+        message: recoveredRows
+          ? `ZeroPOD recovered ${recoveredRows} queue item${recoveredRows === 1 ? '' : 's'} after restart. The queue is paused so you can review sessions before resuming.`
+          : 'ZeroPOD restored the Automation List after restart. The queue is paused until you resume it.'
+      };
+      this.store.write(data);
+    }
+
+    return this.snapshot();
+  }
+
+  recoverTransientProject(project, recoveredAt) {
+    const patch = {};
+    let changed = false;
+
+    if (['generating', 'regenerating'].includes(project.status)) {
+      if (project.generatedImagePath && fs.existsSync(project.generatedImagePath)) {
+        patch.status = 'awaiting-review';
+      } else {
+        patch.status = 'chatgpt-recovery-needed';
+        patch.chatgptError = {
+          step: 'restart-recovery',
+          message: 'Generation was interrupted when ZeroPOD closed.',
+          recovery: 'Open ChatGPT if needed, then Retry this queue row. ZeroPOD will reuse the same project and reference image.',
+          at: recoveredAt
+        };
+      }
+      changed = true;
+    } else if (project.status === 'metadata-generating') {
+      if (project.metadata) patch.status = 'metadata-ready';
+      else {
+        patch.status = 'metadata-recovery-needed';
+        patch.metadataError = {
+          service: 'ChatGPT',
+          step: 'restart-recovery',
+          message: 'Metadata generation was interrupted when ZeroPOD closed.',
+          recovery: 'Retry Metadata. ZeroPOD will reuse the approved project and Amazon/source URL.',
+          at: recoveredAt
+        };
+      }
+      changed = true;
+    } else if (['vectorizing', 'vectorizer-manual-download'].includes(project.status)) {
+      if (project.vectorPath && fs.existsSync(project.vectorPath)) patch.status = 'vector-ready';
+      else {
+        patch.status = 'vectorizer-recovery-needed';
+        patch.lastAutomationError = {
+          service: 'Vectorizer.ai',
+          step: 'restart-recovery',
+          message: 'Vectorization/download capture was interrupted when ZeroPOD closed.',
+          recovery: 'Retry Vectorizer. If Vectorizer.ai already finished, use its normal SVG download control after reconnecting.',
+          at: recoveredAt
+        };
+      }
+      changed = true;
+    } else if (project.status === 'redbubble-preparing') {
+      if (project.redbubble?.preparedAt) patch.status = 'redbubble-review';
+      else {
+        patch.status = 'redbubble-recovery-needed';
+        patch.lastAutomationError = {
+          service: 'Redbubble',
+          step: 'restart-recovery',
+          message: 'Redbubble preparation was interrupted when ZeroPOD closed.',
+          recovery: 'Open Redbubble, verify the copied work state, then Retry Redbubble preparation. Final publish remains manual.',
+          at: recoveredAt
+        };
+      }
+      changed = true;
+    }
+
+    if (!changed) return { changed: false, project };
+    return { changed: true, project: this.projects.update(project.id, patch) };
+  }
+
   start() {
     this.stopRequested = false;
-    this.store.setState('running');
+    this.store.setState('running', { recovery: null });
     if (!this.loopPromise) {
       this.loopPromise = this.runLoop().finally(() => { this.loopPromise = null; });
     }
@@ -142,25 +274,27 @@ class AutomationQueueController {
 
   mapProjectToRow(project) {
     const map = {
-      generating: ['running', 'Generating image'],
-      regenerating: ['running', 'Regenerating image'],
-      'awaiting-review': ['awaiting-review', 'Waiting for image review'],
-      'chatgpt-recovery-needed': ['needs-attention', 'ChatGPT needs attention'],
-      'approved-image': ['ready', 'Ready for POD WINNER metadata'],
-      'metadata-recovery-needed': ['needs-attention', 'Metadata needs attention'],
-      'metadata-ready': ['ready', 'Ready for Vectorizer.ai'],
-      vectorizing: ['running', 'Vectorizing'],
-      'vectorizer-recovery-needed': ['needs-attention', 'Vectorizer.ai needs attention'],
-      'vector-ready': ['ready', 'Ready for 4500×5400 export'],
-      'export-ready': ['ready', 'Ready for Redbubble preparation'],
-      'redbubble-preparing': ['running', 'Preparing Redbubble copy'],
-      'redbubble-recovery-needed': ['needs-attention', 'Redbubble needs attention'],
-      'redbubble-review': ['awaiting-publish-review', 'Waiting for final Redbubble review'],
-      published: ['completed', 'Published']
+      generating: ['running', 'Generating image', 'chatgpt-generation'],
+      regenerating: ['running', 'Regenerating image', 'chatgpt-generation'],
+      'awaiting-review': ['awaiting-review', 'Waiting for image review', 'image-review'],
+      'chatgpt-recovery-needed': ['needs-attention', 'ChatGPT needs attention', 'chatgpt-recovery'],
+      'approved-image': ['ready', 'Ready for POD WINNER metadata', 'image-approved'],
+      'metadata-generating': ['running', 'Generating POD WINNER metadata', 'metadata-generation'],
+      'metadata-recovery-needed': ['needs-attention', 'Metadata needs attention', 'metadata-recovery'],
+      'metadata-ready': ['ready', 'Ready for Vectorizer.ai', 'metadata-ready'],
+      vectorizing: ['running', 'Vectorizing', 'vectorizing'],
+      'vectorizer-manual-download': ['running', 'Waiting for Vectorizer SVG download', 'vectorizer-download'],
+      'vectorizer-recovery-needed': ['needs-attention', 'Vectorizer.ai needs attention', 'vectorizer-recovery'],
+      'vector-ready': ['ready', 'Ready for 4500×5400 export', 'vector-ready'],
+      'export-ready': ['ready', 'Ready for Redbubble preparation', 'export-ready'],
+      'redbubble-preparing': ['running', 'Preparing Redbubble copy', 'redbubble-prepare'],
+      'redbubble-recovery-needed': ['needs-attention', 'Redbubble needs attention', 'redbubble-recovery'],
+      'redbubble-review': ['awaiting-publish-review', 'Waiting for final Redbubble review', 'publish-review'],
+      published: ['completed', 'Published', 'completed']
     };
     const mapped = map[project.status];
     if (!mapped) return null;
-    return { status: mapped[0], step: mapped[1], lastError: this.projectError(project) };
+    return { status: mapped[0], step: mapped[1], checkpoint: mapped[2], lastError: this.projectError(project) };
   }
 
   projectError(project) {
@@ -179,24 +313,38 @@ class AutomationQueueController {
     }) || null;
   }
 
+  markRunning(rowId, step, checkpoint) {
+    return this.store.updateRow(rowId, {
+      status: 'running',
+      step,
+      checkpoint,
+      lastError: null
+    });
+  }
+
   async processRow(row) {
     if (!row.projectId) {
       if (!row.referenceImage || !row.amazonLink) throw new Error('Reference image and Amazon/source link are required.');
       if (!fs.existsSync(row.referenceImage)) throw new Error(`Reference image not found: ${row.referenceImage}`);
-      this.store.updateRow(row.id, { status: 'running', step: 'Submitting to ChatGPT', lastError: null });
+      this.markRunning(row.id, 'Submitting to ChatGPT', 'chatgpt-submit');
       const result = await this.chatgpt.start({
         referencePath: row.referenceImage,
         sourceUrl: row.amazonLink,
         reviewNotes: row.notes || ''
       });
-      this.store.updateRow(row.id, { projectId: result.projectId, status: 'running', step: 'Generating image' });
+      this.store.updateRow(row.id, {
+        projectId: result.projectId,
+        status: 'running',
+        step: 'Generating image',
+        checkpoint: 'chatgpt-generation'
+      });
       return;
     }
 
     const project = this.projects.read(row.projectId);
 
     if (project.status === 'chatgpt-recovery-needed') {
-      this.store.updateRow(row.id, { status: 'running', step: 'Retrying ChatGPT generation/download', lastError: null });
+      this.markRunning(row.id, 'Retrying ChatGPT generation/download', 'chatgpt-retry');
       await this.chatgpt.start({
         referencePath: project.referencePath,
         sourceUrl: project.sourceUrl,
@@ -207,29 +355,29 @@ class AutomationQueueController {
     }
 
     if (['approved-image', 'metadata-recovery-needed'].includes(project.status)) {
-      this.store.updateRow(row.id, { status: 'running', step: 'Generating POD WINNER metadata', lastError: null });
+      this.markRunning(row.id, 'Generating POD WINNER metadata', 'metadata-generation');
       await this.metadata.generate(project.id);
       return;
     }
 
     if (['metadata-ready', 'vectorizer-recovery-needed'].includes(project.status)) {
-      this.store.updateRow(row.id, { status: 'running', step: 'Vectorizing approved design', lastError: null });
+      this.markRunning(row.id, 'Vectorizing approved design', 'vectorizing');
       await this.vectorizer.start(project.id);
       return;
     }
 
     if (project.status === 'vector-ready') {
-      this.store.updateRow(row.id, { status: 'running', step: 'Exporting 4500×5400 PNG', lastError: null });
+      this.markRunning(row.id, 'Exporting 4500×5400 PNG', 'exporting');
       await this.exporter.exportPng(project.id);
       return;
     }
 
     if (['export-ready', 'redbubble-recovery-needed'].includes(project.status)) {
-      this.store.updateRow(row.id, { status: 'running', step: 'Running quality check', lastError: null });
+      this.markRunning(row.id, 'Running quality check', 'quality-check');
       const validation = await validateProject(project, this.projects.list());
       this.projects.update(project.id, { qualityCheck: { ...validation, checkedAt: new Date().toISOString() } });
       if (!validation.ok) throw new Error(`Quality check failed: ${validation.errors.join(' ')}`);
-      this.store.updateRow(row.id, { status: 'running', step: 'Preparing Redbubble Copy Existing Work' });
+      this.markRunning(row.id, 'Preparing Redbubble Copy Existing Work', 'redbubble-prepare');
       await this.redbubble.prepare(project.id);
       return;
     }
