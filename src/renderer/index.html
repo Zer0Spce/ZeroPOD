@@ -17,9 +17,9 @@
       <button class="nav" data-view="review">Review Queue</button>
       <button class="nav" data-view="workflow">Metadata & Export</button>
       <button class="nav" data-view="projects">Projects</button>
-      <button class="nav" data-view="upload">Upload Queue</button>
+      <button class="nav" data-view="upload">Final Publish Queue</button>
       <button class="nav" data-view="settings">Settings</button>
-      <div class="footer-note">Windows only · v0.4.3-beta</div>
+      <div class="footer-note">Windows only · v0.5-beta</div>
     </aside>
     <main class="content">
       <section id="dashboard" class="view active-view">
@@ -55,7 +55,7 @@
 
       <section id="projects" class="view"><div class="eyebrow">LOCAL LIBRARY</div><div class="heading-row"><div><h2>Projects</h2><p class="muted">Every design, its current stage, and the next required action.</p></div><div class="queue-filters"><button class="project-filter active-filter" data-filter="all">All</button><button class="project-filter" data-filter="active">Active</button><button class="project-filter" data-filter="attention">Needs Attention</button><button class="project-filter" data-filter="review">Review</button><button class="project-filter" data-filter="upload">Upload</button><button class="project-filter" data-filter="completed">Completed</button></div></div><div id="projectList" class="cards"></div></section>
 
-      <section id="upload" class="view"><div class="eyebrow">REDBUBBLE PUBLISHING</div><h2>Upload Queue</h2><div class="panel"><strong id="uploadProjectLabel">No export-ready project selected.</strong><div id="uploadStatus" class="muted"></div><div id="uploadRecovery" class="muted"></div></div><div class="panel"><div class="heading-row"><div><h3>Final Pre-Publish Quality Check</h3><p class="muted">Checks metadata, duplicate title/tag problems, PNG format, 4500×5400 dimensions, and transparency.</p></div><button id="runQualityCheck">Run Quality Check</button></div><div id="qualityResults" class="validation-box muted">Quality check has not been run yet.</div><div class="manual-checks"><label><input type="checkbox" id="checkSlogan" /> Slogan/spelling matches the approved design</label><label><input type="checkbox" id="checkTrademark" /> Trademark/brand safety reviewed</label><label><input type="checkbox" id="checkProducts" /> Redbubble product placement/settings reviewed</label></div></div><div class="cards"><article class="connection-card"><div><div class="service-name">1. Prepare Copy Existing Work</div><div class="last-seen">Use Copy Existing Work, select the first existing work, keep product settings, replace artwork and POD WINNER metadata.</div></div><button id="prepareRedbubble">Prepare Redbubble</button></article><article class="connection-card"><div><div class="service-name">2. Final Review</div><div class="last-seen">Review inherited placement, enabled products, colors, title, tags, description, and artwork.</div></div></article><article class="connection-card"><div><div class="service-name">3. Publish / Verify</div><div class="last-seen">ZeroPOD marks Published only after a Redbubble success signal is verified. Uncertain results stay pending verification.</div></div><button class="primary" id="publishRedbubble">Publish / Save Work</button></article></div></section>
+      <section id="upload" class="view"><div class="eyebrow">REDBUBBLE PUBLISHING</div><h2>Final Publish Queue</h2><div class="panel"><strong id="uploadProjectLabel">No export-ready project selected.</strong><div id="uploadStatus" class="muted"></div><div id="uploadRecovery" class="muted"></div></div><div class="panel"><div class="heading-row"><div><h3>Final Pre-Publish Quality Check</h3><p class="muted">Checks metadata, duplicate title/tag problems, PNG format, 4500×5400 dimensions, and transparency.</p></div><button id="runQualityCheck">Run Quality Check</button></div><div id="qualityResults" class="validation-box muted">Quality check has not been run yet.</div><div class="manual-checks"><label><input type="checkbox" id="checkSlogan" /> Slogan/spelling matches the approved design</label><label><input type="checkbox" id="checkTrademark" /> Trademark/brand safety reviewed</label><label><input type="checkbox" id="checkProducts" /> Redbubble product placement/settings reviewed</label></div></div><div class="cards"><article class="connection-card"><div><div class="service-name">1. Prepare Copy Existing Work</div><div class="last-seen">Use Copy Existing Work, select the first existing work, keep product settings, replace artwork and POD WINNER metadata.</div></div><button id="prepareRedbubble">Prepare Redbubble</button></article><article class="connection-card"><div><div class="service-name">2. Final Review</div><div class="last-seen">Review inherited placement, enabled products, colors, title, tags, description, and artwork.</div></div></article><article class="connection-card"><div><div class="service-name">3. Publish / Verify</div><div class="last-seen">ZeroPOD marks Published only after a Redbubble success signal is verified. Uncertain results stay pending verification.</div></div><button class="primary" id="publishRedbubble">Publish / Save Work</button></article></div></section>
 
       <section id="settings" class="view"><div class="eyebrow">CONFIGURATION</div><h2>Settings</h2><div class="empty">ZeroPOD stores operational data locally under its Windows app-data directory.</div></section>
     </main>
@@ -64,5 +64,7 @@
   <script src="connections.js"></script>
   <script src="automation.js"></script>
   <script src="reviewQueue.js"></script>
+  <script src="automationBatch.js"></script>
+  <script src="publishQueue.js"></script>
 </body>
 </html>
