@@ -1,6 +1,6 @@
 {
   "name": "zeropod",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "ZeroPOD Windows desktop automation workspace for POD generation, review, vectorization, export, and upload workflows.",
   "main": "src/main/main.js",
   "author": "Zer0Spce",
@@ -8,7 +8,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "check": "node --check src/main/main.js && node --check src/main/preload.js && node --check src/main/sessionManager.js && node --check src/main/projectStore.js && node --check src/main/chatgptController.js && node --check src/main/metadataController.js && node --check src/main/vectorizerController.js && node --check src/main/exportController.js && node --check src/main/redbubbleController.js && node --check src/renderer/app.js",
+    "check": "node --check src/main/main.js && node --check src/main/preload.js && node --check src/main/sessionManager.js && node --check src/main/projectStore.js && node --check src/main/automationUtils.js && node --check src/main/chatgptController.js && node --check src/main/metadataController.js && node --check src/main/vectorizerController.js && node --check src/main/exportController.js && node --check src/main/redbubbleController.js && node --check src/renderer/app.js",
     "package:win": "electron-builder --win portable"
   },
   "dependencies": {
