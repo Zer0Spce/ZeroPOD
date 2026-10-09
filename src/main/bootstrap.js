@@ -79,5 +79,5 @@ require('./chromeDockPatch');
 require('./chatgptUploadReadyPatch');
 require('./chatgptNetworkCapturePatch');
 require('./chatgptLiveReliabilityPatch');
-require('./metadataSendPatch');
+require('./chatThreadPreferencePatch');
 require('./main');
