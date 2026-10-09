@@ -27,17 +27,10 @@ jobs:
       - name: Syntax and release smoke checks
         run: npm run check
 
-      - name: Build portable Windows package
+      - name: Build unpacked Windows package
         run: npm run package:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-
-      - name: Upload portable artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ZeroPOD-Windows-Portable
-          path: dist/*.exe
-          if-no-files-found: error
 
       - name: Upload unpacked fast-start artifact
         uses: actions/upload-artifact@v4
