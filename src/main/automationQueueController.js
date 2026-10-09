@@ -29,18 +29,31 @@ class AutomationQueueController {
   }
 
   addRows(rows) {
-    const cleaned = rows.map((row) => ({
-      enabled: row.enabled !== false,
-      referenceImage: String(row.referenceImage || '').trim(),
-      amazonLink: String(row.amazonLink || '').trim(),
-      notes: String(row.notes || '').trim()
-    }));
-    const invalid = cleaned.find((row) => !row.referenceImage || !row.amazonLink);
-    if (invalid) throw new Error('Each automation row needs both a reference image path and an Amazon/source link.');
+    const cleaned = rows.map((row) => {
+      const referenceImage = String(row.referenceImage || '').trim();
+      const amazonLink = String(row.amazonLink || '').trim();
+      return {
+        enabled: row.enabled !== false,
+        referenceImage,
+        amazonLink,
+        notes: String(row.notes || '').trim(),
+        status: referenceImage && amazonLink ? 'pending' : 'draft',
+        step: referenceImage && amazonLink ? 'Waiting' : 'Complete image + Amazon link'
+      };
+    });
     return this.store.addRows(cleaned);
   }
 
   updateRow(rowId, patch) {
+    const current = this.store.read().rows.find((row) => row.id === rowId);
+    if (!current) throw new Error(`Automation row not found: ${rowId}`);
+    const next = { ...current, ...patch };
+    if (!next.projectId && ['draft', 'pending', 'needs-attention'].includes(next.status)) {
+      const complete = String(next.referenceImage || '').trim() && String(next.amazonLink || '').trim();
+      patch.status = complete ? 'pending' : 'draft';
+      patch.step = complete ? 'Waiting' : 'Complete image + Amazon link';
+      if (complete) patch.lastError = null;
+    }
     return this.store.updateRow(rowId, patch);
   }
 
@@ -147,13 +160,14 @@ class AutomationQueueController {
 
     return data.rows.find((row) => {
       if (!row.enabled) return false;
-      if (['completed', 'awaiting-review', 'awaiting-publish-review', 'needs-attention', 'skipped'].includes(row.status)) return false;
+      if (['draft', 'completed', 'awaiting-review', 'awaiting-publish-review', 'needs-attention', 'skipped'].includes(row.status)) return false;
       return ['pending', 'ready'].includes(row.status);
     }) || null;
   }
 
   async processRow(row) {
     if (!row.projectId) {
+      if (!row.referenceImage || !row.amazonLink) throw new Error('Reference image and Amazon/source link are required.');
       if (!fs.existsSync(row.referenceImage)) throw new Error(`Reference image not found: ${row.referenceImage}`);
       this.store.updateRow(row.id, { status: 'running', step: 'Submitting to ChatGPT', lastError: null });
       const result = await this.chatgpt.start({
