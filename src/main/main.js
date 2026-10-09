@@ -145,12 +145,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('automation:remove', (_event, rowId) => automation.removeRow(rowId));
   ipcMain.handle('automation:clear-completed', () => automation.clearCompleted());
   ipcMain.handle('automation:start', async () => {
-    const preflight = await sessions.preflight(['chatgpt', 'vectorizer', 'redbubble']);
-    if (!preflight.ok) {
-      const names = preflight.needsLogin.map((id) => sessions.getStatuses()[id]?.name || id).join(', ');
-      throw new Error(`Login required before starting the queue: ${names}. Open Connections, sign in normally, then test the session.`);
-    }
-    return { ...automation.start(), preflight };
+    // Do not open/test every service up front. The queue validates the service needed by
+    // the current stage when that stage begins, so Start Queue no longer launches idle browsers.
+    return automation.start();
   });
   ipcMain.handle('automation:pause', () => automation.pause());
   ipcMain.handle('automation:stop', () => automation.stop());
