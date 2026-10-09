@@ -83,4 +83,5 @@ require('./chatThreadPreferencePatch');
 require('./metadataVisibleJsonPatch');
 require('./metadataComposerStabilityPatch');
 require('./redbubbleVectorizerSpeedPatch');
+require('./vectorizerFirstStageRestorePatch');
 require('./main');
