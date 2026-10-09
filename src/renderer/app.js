@@ -2,6 +2,7 @@ const navButtons = document.querySelectorAll('.nav');
 const views = document.querySelectorAll('.view');
 const serviceOrder = ['chatgpt', 'vectorizer', 'redbubble'];
 let currentProjectId = null;
+let projectFilter = 'all';
 
 function setView(id) {
   navButtons.forEach((button) => button.classList.toggle('active', button.dataset.view === id));
@@ -10,6 +11,7 @@ function setView(id) {
 
 navButtons.forEach((button) => button.addEventListener('click', async () => {
   setView(button.dataset.view);
+  if (button.dataset.view === 'dashboard') await renderDashboard();
   if (button.dataset.view === 'projects') await renderProjects();
   if (button.dataset.view === 'review') await refreshReview();
   if (button.dataset.view === 'workflow') await refreshWorkflow();
@@ -32,6 +34,23 @@ function nextText(project) {
   return project.workflow?.next ? ` · Next: ${project.workflow.next}` : '';
 }
 
+function queueLabel(queue) {
+  return ({ active: 'Active', attention: 'Needs Attention', review: 'Review', upload: 'Upload', completed: 'Completed' })[queue] || 'Active';
+}
+
+function projectCard(project, compact = false) {
+  const flow = project.workflow || {};
+  const progress = Number.isFinite(flow.progress) ? flow.progress : 0;
+  return `<article class="project-card ${compact ? 'project-card-compact' : ''}">
+    <div class="project-card-main">
+      <div class="project-card-top"><div class="service-name">${project.id}</div><span class="stage-badge queue-${flow.queue || 'active'}">${flow.label || project.status}</span></div>
+      <div class="last-seen">${flow.next || 'Review project'} · Updated ${formatDate(project.updatedAt)}</div>
+      <div class="progress-row"><div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div><strong>${progress}%</strong></div>
+    </div>
+    <button class="continue-project" data-id="${project.id}">Continue</button>
+  </article>`;
+}
+
 async function routeProject(project) {
   const view = project.workflow?.view || 'projects';
   setView(view);
@@ -39,6 +58,41 @@ async function routeProject(project) {
   else if (view === 'workflow') await refreshWorkflow();
   else if (view === 'upload') await refreshUpload();
   else await renderProjects();
+}
+
+function wireContinueButtons(root) {
+  root.querySelectorAll('.continue-project').forEach((button) => button.addEventListener('click', async () => {
+    currentProjectId = button.dataset.id;
+    const project = await window.zeroPOD.projects.get(currentProjectId);
+    await routeProject(project);
+  }));
+}
+
+async function renderDashboard() {
+  const projects = await window.zeroPOD.projects.list();
+  const counts = projects.reduce((acc, project) => {
+    const q = project.workflow?.queue || 'active';
+    acc[q] = (acc[q] || 0) + 1;
+    return acc;
+  }, {});
+  const stats = [
+    ['Total Projects', projects.length],
+    ['Active', counts.active || 0],
+    ['Needs Attention', counts.attention || 0],
+    ['Ready for Review', counts.review || 0],
+    ['Upload Queue', counts.upload || 0],
+    ['Published', counts.completed || 0]
+  ];
+  document.getElementById('dashboardStats').innerHTML = stats.map(([label, value]) => `<article class="stat-card"><strong>${value}</strong><span>${label}</span></article>`).join('');
+
+  const attention = projects.filter((project) => ['attention', 'review'].includes(project.workflow?.queue)).slice(0, 5);
+  const recent = projects.filter((project) => project.workflow?.queue !== 'completed').slice(0, 5);
+  const attentionRoot = document.getElementById('attentionQueue');
+  const recentRoot = document.getElementById('recentQueue');
+  attentionRoot.innerHTML = attention.length ? attention.map((project) => projectCard(project, true)).join('') : '<div class="empty small-empty">Nothing needs attention right now.</div>';
+  recentRoot.innerHTML = recent.length ? recent.map((project) => projectCard(project, true)).join('') : '<div class="empty small-empty">No active projects yet.</div>';
+  wireContinueButtons(attentionRoot);
+  wireContinueButtons(recentRoot);
 }
 
 async function renderConnections() {
@@ -73,13 +127,10 @@ async function renderRules() {
 async function renderProjects() {
   const projects = await window.zeroPOD.projects.list();
   const root = document.getElementById('projectList');
-  if (!projects.length) { root.innerHTML = '<div class="empty">No local projects yet.</div>'; return; }
-  root.innerHTML = projects.map((project) => `<article class="connection-card"><div><div class="service-name">${project.id}</div><div class="status">${project.status}</div><div class="last-seen">Next: ${project.workflow?.next || 'Review project'} · Updated: ${formatDate(project.updatedAt)}</div></div><button class="open-project" data-id="${project.id}">Continue</button></article>`).join('');
-  root.querySelectorAll('.open-project').forEach((button) => button.addEventListener('click', async () => {
-    currentProjectId = button.dataset.id;
-    const project = await window.zeroPOD.projects.get(currentProjectId);
-    await routeProject(project);
-  }));
+  const filtered = projectFilter === 'all' ? projects : projects.filter((project) => project.workflow?.queue === projectFilter);
+  if (!filtered.length) { root.innerHTML = `<div class="empty">No ${projectFilter === 'all' ? '' : queueLabel(projectFilter).toLowerCase()} projects.</div>`; return; }
+  root.innerHTML = filtered.map((project) => projectCard(project)).join('');
+  wireContinueButtons(root);
 }
 
 async function refreshReview() {
@@ -92,7 +143,7 @@ async function refreshReview() {
   const project = await window.zeroPOD.projects.get(currentProjectId);
   document.getElementById('reviewProjectLabel').textContent = project.id;
   const recoveryText = project.chatgptError?.recovery ? ` · Recovery: ${project.chatgptError.recovery}` : '';
-  document.getElementById('reviewStatus').textContent = `Status: ${project.status}${nextText(project)}${recoveryText}`;
+  document.getElementById('reviewStatus').textContent = `Status: ${project.workflow?.label || project.status}${nextText(project)}${recoveryText}`;
   document.getElementById('reviewNotes').value = project.review?.notes || '';
   setButton('rejectDesign', project.status === 'awaiting-review');
   setButton('passDesign', project.status === 'awaiting-review');
@@ -119,7 +170,7 @@ async function refreshWorkflow() {
   const project = await window.zeroPOD.projects.get(currentProjectId);
   document.getElementById('workflowProjectLabel').textContent = project.id;
   const metaRecovery = project.metadataError?.recovery ? ` · Recovery: ${project.metadataError.recovery}` : '';
-  document.getElementById('workflowStatus').textContent = `Status: ${project.status}${nextText(project)}${metaRecovery}`;
+  document.getElementById('workflowStatus').textContent = `Status: ${project.workflow?.label || project.status}${nextText(project)}${metaRecovery}`;
   const meta = project.metadata || {};
   document.getElementById('metaTitle').value = meta.title || '';
   document.getElementById('metaMainTag').value = meta.mainTag || '';
@@ -139,12 +190,19 @@ async function refreshUpload() {
   if (!currentProjectId) return;
   const project = await window.zeroPOD.projects.get(currentProjectId);
   document.getElementById('uploadProjectLabel').textContent = project.id;
-  document.getElementById('uploadStatus').textContent = `Status: ${project.status}${nextText(project)}${project.redbubble?.publishedAt ? ` · Published ${formatDate(project.redbubble.publishedAt)}` : ''}`;
+  document.getElementById('uploadStatus').textContent = `Status: ${project.workflow?.label || project.status}${nextText(project)}${project.redbubble?.publishedAt ? ` · Published ${formatDate(project.redbubble.publishedAt)}` : ''}`;
   const recovery = document.getElementById('uploadRecovery');
   recovery.textContent = project.lastAutomationError ? `Recovery: ${project.lastAutomationError.recovery} Last error: ${project.lastAutomationError.message}` : '';
   setButton('prepareRedbubble', ['export-ready', 'redbubble-recovery-needed'].includes(project.status), project.status === 'redbubble-recovery-needed' ? 'Retry Redbubble' : 'Prepare Redbubble');
   setButton('publishRedbubble', project.status === 'redbubble-review');
 }
+
+document.getElementById('dashboardNewDesign').addEventListener('click', () => setView('create'));
+document.querySelectorAll('.project-filter').forEach((button) => button.addEventListener('click', async () => {
+  projectFilter = button.dataset.filter;
+  document.querySelectorAll('.project-filter').forEach((item) => item.classList.toggle('active-filter', item === button));
+  await renderProjects();
+}));
 
 document.getElementById('chooseReference').addEventListener('click', async () => {
   const file = await window.zeroPOD.files.chooseReference();
@@ -177,17 +235,13 @@ document.getElementById('rejectDesign').addEventListener('click', async () => {
 
 document.getElementById('passDesign').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No project selected.');
-  try {
-    await window.zeroPOD.review.pass({ projectId: currentProjectId });
-    const project = await window.zeroPOD.projects.get(currentProjectId);
-    await routeProject(project);
-  } catch (error) { alert(error.message || error); }
+  try { await window.zeroPOD.review.pass({ projectId: currentProjectId }); await routeProject(await window.zeroPOD.projects.get(currentProjectId)); }
+  catch (error) { alert(error.message || error); }
 });
 
 document.getElementById('generateMetadata').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No approved project selected.');
-  const button = document.getElementById('generateMetadata');
-  button.disabled = true;
+  const button = document.getElementById('generateMetadata'); button.disabled = true;
   document.getElementById('workflowStatus').textContent = 'Generating POD WINNER metadata in ChatGPT…';
   try { await window.zeroPOD.metadata.generate(currentProjectId); }
   catch (error) { document.getElementById('workflowStatus').textContent = `Metadata needs attention: ${error.message || error}`; }
@@ -204,20 +258,14 @@ document.getElementById('startVectorizer').addEventListener('click', async () =>
 document.getElementById('exportPng').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No project selected.');
   document.getElementById('workflowStatus').textContent = 'Exporting transparent 4500×5400 PNG…';
-  try {
-    const result = await window.zeroPOD.export.png(currentProjectId);
-    document.getElementById('workflowStatus').textContent = `Export ready: ${result.path}`;
-    const project = await window.zeroPOD.projects.get(currentProjectId);
-    await routeProject(project);
-  } catch (error) { alert(`Export failed: ${error.message || error}`); }
+  try { const result = await window.zeroPOD.export.png(currentProjectId); document.getElementById('workflowStatus').textContent = `Export ready: ${result.path}`; await routeProject(await window.zeroPOD.projects.get(currentProjectId)); }
+  catch (error) { alert(`Export failed: ${error.message || error}`); }
 });
 
 document.getElementById('prepareRedbubble').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No export-ready project selected.');
-  const status = document.getElementById('uploadStatus');
-  const button = document.getElementById('prepareRedbubble');
-  button.disabled = true;
-  status.textContent = 'Opening Redbubble, copying the first existing work, and replacing artwork + metadata…';
+  const status = document.getElementById('uploadStatus'); const button = document.getElementById('prepareRedbubble');
+  button.disabled = true; status.textContent = 'Opening Redbubble, copying the first existing work, and replacing artwork + metadata…';
   try { const result = await window.zeroPOD.redbubble.prepare(currentProjectId); status.textContent = result.message; }
   catch (error) { status.textContent = `Redbubble needs attention: ${error.message || error}`; }
   finally { button.disabled = false; await refreshUpload(); }
@@ -226,10 +274,11 @@ document.getElementById('prepareRedbubble').addEventListener('click', async () =
 document.getElementById('publishRedbubble').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No Redbubble project selected.');
   if (!confirm('Publish/save this copied Redbubble work now? Confirm that the artwork, inherited product settings, title, tags, description, and product configuration look correct.')) return;
-  try { await window.zeroPOD.redbubble.publish(currentProjectId); await refreshUpload(); }
+  try { await window.zeroPOD.redbubble.publish(currentProjectId); await refreshUpload(); await renderDashboard(); }
   catch (error) { alert(`Redbubble publish failed: ${error.message || error}`); }
 });
 
 renderConnections();
 renderRules();
 renderProjects();
+renderDashboard();
