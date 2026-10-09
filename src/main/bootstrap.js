@@ -86,4 +86,5 @@ require('./metadataComposerStabilityPatch');
 require('./redbubbleVectorizerSpeedPatch');
 require('./vectorizerFirstStageRestorePatch');
 require('./redbubbleEditorFieldsPatch');
+require('./redbubbleWideEditorPatch');
 require('./main');
