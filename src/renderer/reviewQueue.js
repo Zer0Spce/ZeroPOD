@@ -29,6 +29,33 @@ function ensureReviewGallery() {
   document.getElementById('reviewNext').addEventListener('click', () => moveReviewSelection(1));
 }
 
+function ensureV105Controls() {
+  const footer = document.querySelector('.footer-note');
+  if (footer) footer.textContent = footer.textContent.replace(/v\d+\.\d+\.\d+/, 'v1.0.5');
+
+  const startButton = document.getElementById('startGeneration');
+  if (!startButton || document.getElementById('newChatButton')) return;
+  const newChatButton = document.createElement('button');
+  newChatButton.id = 'newChatButton';
+  newChatButton.className = 'secondary';
+  newChatButton.textContent = 'NEW CHAT';
+  newChatButton.style.marginLeft = '8px';
+  startButton.insertAdjacentElement('afterend', newChatButton);
+  newChatButton.addEventListener('click', async () => {
+    const status = document.getElementById('generationStatus');
+    newChatButton.disabled = true;
+    if (status) status.textContent = 'Opening a fresh ChatGPT conversation…';
+    try {
+      const result = await window.zeroPOD.generation.newChat();
+      if (status) status.textContent = result.message;
+    } catch (error) {
+      if (status) status.textContent = `Could not create a new ChatGPT conversation: ${error.message || error}`;
+    } finally {
+      newChatButton.disabled = false;
+    }
+  });
+}
+
 async function selectReviewProject(projectId) {
   currentProjectId = projectId;
   await refreshReview();
@@ -111,6 +138,22 @@ async function enhancePublishVerification() {
   }
 }
 
+async function refreshActiveGenerationReview() {
+  if (!document.getElementById('review')?.classList.contains('active-view') || !currentProjectId) return;
+  const project = await window.zeroPOD.projects.get(currentProjectId).catch(() => null);
+  if (!project) return;
+  const passButton = document.getElementById('passDesign');
+  const shouldRefresh = ['generating', 'regenerating', 'chatgpt-recovery-needed'].includes(project.status)
+    || (project.status === 'awaiting-review' && passButton?.disabled);
+  if (!shouldRefresh) return;
+  await refreshReview();
+  await renderBatchReview();
+  if (['generating', 'regenerating'].includes(project.status)) {
+    const message = document.getElementById('previewMessage');
+    if (message && !message.hidden) message.textContent = 'ChatGPT is generating. ZeroPOD is waiting for the original image asset from the new response.';
+  }
+}
+
 const reviewNavButton = document.querySelector('.nav[data-view="review"]');
 reviewNavButton?.addEventListener('click', () => renderBatchReview().catch(() => {}));
 const uploadNavButton = document.querySelector('.nav[data-view="upload"]');
@@ -121,5 +164,7 @@ document.getElementById('rejectDesign')?.addEventListener('click', () => setTime
 document.getElementById('publishRedbubble')?.addEventListener('click', () => setTimeout(() => enhancePublishVerification().catch(() => {}), 800));
 
 ensureReviewGallery();
+ensureV105Controls();
 renderBatchReview().catch(() => {});
 setInterval(() => enhancePublishVerification().catch(() => {}), 1500);
+setInterval(() => refreshActiveGenerationReview().catch(() => {}), 1000);

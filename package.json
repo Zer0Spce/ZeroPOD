@@ -1,14 +1,14 @@
 {
   "name": "zeropod",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "ZeroPOD Windows desktop automation workspace for POD generation, review, vectorization, export, and upload workflows.",
-  "main": "src/main/main.js",
+  "main": "src/main/bootstrap.js",
   "author": "Zer0Spce",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "check": "node --check src/main/main.js && node --check src/main/preload.js && node --check src/main/sessionManager.js && node --check src/main/projectStore.js && node --check src/main/workspaceManager.js && node --check src/main/automationUtils.js && node --check src/main/automationQueueStore.js && node --check src/main/automationQueueController.js && node --check src/main/automationCsv.js && node --check src/main/automationSpreadsheet.js && node --check src/main/workflowState.js && node --check src/main/qualityControl.js && node --check src/main/chatgptController.js && node --check src/main/metadataController.js && node --check src/main/vectorizerController.js && node --check src/main/exportController.js && node --check src/main/redbubbleController.js && node --check src/renderer/app.js && node --check src/renderer/connections.js && node --check src/renderer/automation.js && node --check src/renderer/reviewQueue.js && node --check src/renderer/automationBatch.js && node --check src/renderer/publishQueue.js && node --check src/renderer/workspace.js && node --check src/renderer/appearance.js && node --check src/renderer/readiness.js && node scripts/releaseSmoke.js",
+    "check": "node --check src/main/bootstrap.js && node --check src/main/main.js && node --check src/main/preload.js && node --check src/main/sessionManager.js && node --check src/main/projectStore.js && node --check src/main/workspaceManager.js && node --check src/main/automationUtils.js && node --check src/main/automationQueueStore.js && node --check src/main/automationQueueController.js && node --check src/main/automationCsv.js && node --check src/main/automationSpreadsheet.js && node --check src/main/workflowState.js && node --check src/main/qualityControl.js && node --check src/main/chatgptController.js && node --check src/main/metadataController.js && node --check src/main/vectorizerController.js && node --check src/main/exportController.js && node --check src/main/redbubbleController.js && node --check src/renderer/app.js && node --check src/renderer/connections.js && node --check src/renderer/automation.js && node --check src/renderer/reviewQueue.js && node --check src/renderer/automationBatch.js && node --check src/renderer/publishQueue.js && node --check src/renderer/workspace.js && node --check src/renderer/appearance.js && node --check src/renderer/readiness.js && node scripts/releaseSmoke.js",
     "package:win": "electron-builder --win portable"
   },
   "dependencies": {
