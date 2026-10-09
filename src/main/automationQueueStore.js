@@ -117,6 +117,38 @@ class AutomationQueueStore {
     return this.write(data);
   }
 
+  moveRows(rowIds, direction) {
+    const data = this.read();
+    const selected = new Set(rowIds || []);
+    if (!selected.size) return data;
+    if (!['up', 'down', 'top', 'bottom'].includes(direction)) throw new Error(`Unsupported queue move: ${direction}`);
+    if (data.rows.some((row) => selected.has(row.id) && row.status === 'running')) {
+      throw new Error('Running rows cannot be reordered. Pause or let the current stage finish first.');
+    }
+
+    if (direction === 'top' || direction === 'bottom') {
+      const chosen = data.rows.filter((row) => selected.has(row.id));
+      const other = data.rows.filter((row) => !selected.has(row.id));
+      data.rows = direction === 'top' ? [...chosen, ...other] : [...other, ...chosen];
+      return this.write(data);
+    }
+
+    if (direction === 'up') {
+      for (let i = 1; i < data.rows.length; i += 1) {
+        if (selected.has(data.rows[i].id) && !selected.has(data.rows[i - 1].id)) {
+          [data.rows[i - 1], data.rows[i]] = [data.rows[i], data.rows[i - 1]];
+        }
+      }
+    } else {
+      for (let i = data.rows.length - 2; i >= 0; i -= 1) {
+        if (selected.has(data.rows[i].id) && !selected.has(data.rows[i + 1].id)) {
+          [data.rows[i + 1], data.rows[i]] = [data.rows[i], data.rows[i + 1]];
+        }
+      }
+    }
+    return this.write(data);
+  }
+
   removeRow(rowId) {
     const data = this.read();
     data.rows = data.rows.filter((row) => row.id !== rowId);
