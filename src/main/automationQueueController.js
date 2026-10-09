@@ -290,6 +290,7 @@ class AutomationQueueController {
       'redbubble-preparing': ['running', 'Preparing Redbubble copy', 'redbubble-prepare'],
       'redbubble-recovery-needed': ['needs-attention', 'Redbubble needs attention', 'redbubble-recovery'],
       'redbubble-review': ['awaiting-publish-review', 'Waiting for final Redbubble review', 'publish-review'],
+      'redbubble-publish-pending': ['awaiting-publish-review', 'Publish pending verification', 'publish-verification'],
       published: ['completed', 'Published', 'completed']
     };
     const mapped = map[project.status];
