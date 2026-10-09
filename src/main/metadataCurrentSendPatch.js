@@ -38,10 +38,25 @@ async function waitForAccepted(page, composer, baselineUserCount, promptStart, t
   return false;
 }
 
-async function findEnabledSendButton(page, composer, timeoutMs = 15000) {
+async function isReadyButton(button) {
+  return button.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 0
+      && rect.height > 0
+      && style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && style.pointerEvents !== 'none'
+      && !element.disabled
+      && element.getAttribute('aria-disabled') !== 'true';
+  }).catch(() => false);
+}
+
+async function findSemanticSendButton(page) {
   const selectors = [
     '#composer-submit-button',
     'button[data-testid="send-button"]',
+    'button[data-testid*="send" i]',
     'button[aria-label="Send prompt"]',
     'button[aria-label="Send message"]',
     'button[aria-label*="send" i]',
@@ -49,31 +64,65 @@ async function findEnabledSendButton(page, composer, timeoutMs = 15000) {
     'button[type="submit"]'
   ];
 
+  // Search the full page. The current ChatGPT DOM can place the blue arrow outside
+  // the contenteditable's nearest <form>, so restricting the search to that form
+  // misses the exact visible button.
+  for (const selector of selectors) {
+    const buttons = page.locator(selector);
+    const count = await buttons.count().catch(() => 0);
+    for (let index = count - 1; index >= 0; index -= 1) {
+      const button = buttons.nth(index);
+      if (await isReadyButton(button)) return button;
+    }
+  }
+  return null;
+}
+
+async function findGeometricSendButton(page, composer) {
+  const composerBox = await composer.boundingBox().catch(() => null);
+  if (!composerBox) return null;
+
+  const buttons = page.locator('button');
+  const count = await buttons.count().catch(() => 0);
+  const targetX = composerBox.x + composerBox.width;
+  const targetY = composerBox.y + composerBox.height;
+  const candidates = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const button = buttons.nth(index);
+    if (!(await isReadyButton(button))) continue;
+    const box = await button.boundingBox().catch(() => null);
+    if (!box) continue;
+
+    const centerX = box.x + box.width / 2;
+    const centerY = box.y + box.height / 2;
+
+    // The send arrow is normally at the lower-right edge of the composer shell.
+    // Allow some vertical slack because long metadata prompts make the editable
+    // region tall while the action row remains pinned to the bottom.
+    const rightEnough = centerX >= composerBox.x + composerBox.width * 0.55;
+    const nearComposer = centerY >= composerBox.y - 140 && centerY <= composerBox.y + composerBox.height + 180;
+    if (!rightEnough || !nearComposer) continue;
+
+    const dx = Math.abs(targetX - centerX);
+    const dy = Math.abs(targetY - centerY);
+    const sizePenalty = (box.width > 90 || box.height > 90) ? 200 : 0;
+    candidates.push({ index, score: dx + dy * 1.4 + sizePenalty });
+  }
+
+  candidates.sort((a, b) => a.score - b.score);
+  return candidates.length ? buttons.nth(candidates[0].index) : null;
+}
+
+async function findEnabledSendButton(page, composer, timeoutMs = 20000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    let scope = page.locator('body');
-    const form = composer.locator('xpath=ancestor::form[1]');
-    if (await form.count().catch(() => 0)) scope = form;
+    const semantic = await findSemanticSendButton(page);
+    if (semantic) return semantic;
 
-    for (const selector of selectors) {
-      const buttons = scope.locator(selector);
-      const count = await buttons.count().catch(() => 0);
-      for (let index = count - 1; index >= 0; index -= 1) {
-        const button = buttons.nth(index);
-        const ready = await button.evaluate((element) => {
-          const rect = element.getBoundingClientRect();
-          const style = getComputedStyle(element);
-          return rect.width > 0
-            && rect.height > 0
-            && style.display !== 'none'
-            && style.visibility !== 'hidden'
-            && style.pointerEvents !== 'none'
-            && !element.disabled
-            && element.getAttribute('aria-disabled') !== 'true';
-        }).catch(() => false);
-        if (ready) return button;
-      }
-    }
+    const geometric = await findGeometricSendButton(page, composer);
+    if (geometric) return geometric;
+
     await wait(100);
   }
   return null;
@@ -81,21 +130,43 @@ async function findEnabledSendButton(page, composer, timeoutMs = 15000) {
 
 async function clickSend(page, button) {
   await button.scrollIntoViewIfNeeded().catch(() => {});
+
+  // Playwright click first: this is the closest equivalent to the user clicking
+  // the visible blue arrow in Chrome.
   try {
-    await button.click({ timeout: 2500 });
+    await button.click({ timeout: 2500, force: true });
     return true;
   } catch {}
 
+  // Then a physical coordinate click through the attached Chrome page.
   const box = await button.boundingBox().catch(() => null);
   if (box) {
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2).catch(() => {});
-    return true;
+    try {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      return true;
+    } catch {}
   }
 
+  // Final DOM click for React layouts where the locator is valid but Playwright's
+  // hit testing is blocked by a transient overlay.
   return button.evaluate((element) => {
     if (!(element instanceof HTMLElement)) return false;
     element.click();
     return true;
+  }).catch(() => false);
+}
+
+async function submitViaComposerForm(page, composer) {
+  return composer.evaluate((element) => {
+    let node = element;
+    for (let depth = 0; depth < 10 && node; depth += 1, node = node.parentElement) {
+      if (node instanceof HTMLFormElement) {
+        if (typeof node.requestSubmit === 'function') node.requestSubmit();
+        else node.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        return true;
+      }
+    }
+    return false;
   }).catch(() => false);
 }
 
@@ -118,17 +189,24 @@ MetadataController.prototype.submitPrompt = async function submitPromptCurrentCh
 
   const baselineUserCount = await userTurnCount(page);
 
-  // Current ChatGPT exposes the blue arrow as #composer-submit-button. It may be
-  // visible before attachments finish hydrating, so wait for the actual control to
-  // become enabled instead of treating visibility as send-readiness.
-  const button = await findEnabledSendButton(page, composer, 15000);
+  // The approved image can still be finishing attachment hydration after the text
+  // is already visible. Wait for either a semantic send control or the enabled
+  // bottom-right composer action instead of assuming visibility means readiness.
+  const button = await findEnabledSendButton(page, composer, 20000);
   if (button) {
     await clickSend(page, button);
-    if (await waitForAccepted(page, composer, baselineUserCount, promptStart, 5000)) return true;
+    if (await waitForAccepted(page, composer, baselineUserCount, promptStart, 7000)) return true;
   }
 
-  // If the click did not move the prompt, it is safe to try the normal keyboard
-  // submission once because acceptance was explicitly not observed.
+  // Re-resolve the composer because ChatGPT frequently replaces the editable node
+  // after attachment hydration.
+  composer = await this.locateComposer(page);
+  if ((await composerText(composer)).includes(promptStart)) {
+    // Try native form submission before keyboard fallback.
+    await submitViaComposerForm(page, composer);
+    if (await waitForAccepted(page, composer, baselineUserCount, promptStart, 4000)) return true;
+  }
+
   composer = await this.locateComposer(page);
   if ((await composerText(composer)).includes(promptStart)) {
     await composer.click().catch(() => {});
@@ -137,21 +215,37 @@ MetadataController.prototype.submitPrompt = async function submitPromptCurrentCh
   }
 
   const state = await page.evaluate(() => {
-    const button = document.querySelector('#composer-submit-button, button[data-testid="send-button"], button[aria-label="Send prompt"]');
-    if (!button) return { found: false };
-    const rect = button.getBoundingClientRect();
+    const semantic = document.querySelector('#composer-submit-button, button[data-testid="send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"]');
+    const visibleButtons = [...document.querySelectorAll('button')]
+      .map((button) => {
+        const rect = button.getBoundingClientRect();
+        const style = getComputedStyle(button);
+        return {
+          id: button.id || '',
+          testid: button.getAttribute('data-testid') || '',
+          aria: button.getAttribute('aria-label') || '',
+          disabled: Boolean(button.disabled || button.getAttribute('aria-disabled') === 'true'),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          visible: rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+        };
+      })
+      .filter((item) => item.visible)
+      .slice(-20);
     return {
-      found: true,
-      id: button.id || '',
-      testid: button.getAttribute('data-testid') || '',
-      aria: button.getAttribute('aria-label') || '',
-      disabled: Boolean(button.disabled || button.getAttribute('aria-disabled') === 'true'),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height)
+      semantic: semantic ? {
+        id: semantic.id || '',
+        testid: semantic.getAttribute('data-testid') || '',
+        aria: semantic.getAttribute('aria-label') || '',
+        disabled: Boolean(semantic.disabled || semantic.getAttribute('aria-disabled') === 'true')
+      } : null,
+      visibleButtons
     };
-  }).catch(() => ({ found: false }));
+  }).catch(() => ({ semantic: null, visibleButtons: [] }));
 
-  throw new Error(`ChatGPT kept the metadata prompt in the composer instead of sending it. Send control: ${JSON.stringify(state)}`);
+  throw new Error(`ChatGPT kept the metadata prompt in the composer instead of sending it. Send diagnostics: ${JSON.stringify(state)}`);
 };
 
 module.exports = {};
