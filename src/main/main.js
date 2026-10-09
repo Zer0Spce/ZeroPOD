@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const sharp = require('sharp');
 const { SessionManager } = require('./sessionManager');
 const { ProjectStore } = require('./projectStore');
 const { ChatGPTController } = require('./chatgptController');
@@ -106,14 +107,18 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('generation:start', (_event, payload) => chatgpt.start(payload));
+  ipcMain.handle('generation:new-chat', () => chatgpt.newChat());
   ipcMain.handle('review:reject', async (_event, { projectId, notes }) => {
     const project = projects.read(projectId); workflow.assertReviewable(project);
     projects.write({ ...project, status: 'regenerating', review: { decision: 'rejected', notes: notes || '' } });
     return chatgpt.start({ referencePath: project.referencePath, sourceUrl: project.sourceUrl, reviewNotes: notes || '', existingProjectId: projectId });
   });
-  ipcMain.handle('review:pass', (_event, { projectId }) => {
+  ipcMain.handle('review:pass', async (_event, { projectId }) => {
     const project = projects.read(projectId); workflow.assertReviewable(project);
-    return projects.write({ ...project, status: 'approved-image', review: { ...project.review, decision: 'passed' } });
+    if (!project.generatedImagePath || !fs.existsSync(project.generatedImagePath)) throw new Error('Generated image is missing.');
+    const approvedImagePath = path.join(projects.getProjectDir(projectId), 'approved.png');
+    await sharp(project.generatedImagePath).png().toFile(approvedImagePath);
+    return projects.write({ ...project, status: 'approved-image', approvedImagePath, review: { ...project.review, decision: 'passed' } });
   });
   ipcMain.handle('metadata:generate', (_event, projectId) => { const project = projects.read(projectId); workflow.assertMetadata(project); return metadata.generate(projectId); });
   ipcMain.handle('metadata:save', (_event, { projectId, metadata: nextMetadata }) => {
