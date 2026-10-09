@@ -4,43 +4,25 @@ const path = require('path');
 const crypto = require('crypto');
 
 class ProjectStore {
-  getRoot() {
-    return path.join(app.getPath('userData'), 'projects');
-  }
-
-  getProjectDir(projectId) {
-    return path.join(this.getRoot(), projectId);
-  }
-
-  getProjectFile(projectId) {
-    return path.join(this.getProjectDir(projectId), 'project.json');
-  }
+  getRoot() { return path.join(app.getPath('userData'), 'projects'); }
+  getProjectDir(projectId) { return path.join(this.getRoot(), projectId); }
+  getProjectFile(projectId) { return path.join(this.getProjectDir(projectId), 'project.json'); }
 
   create({ referencePath, sourceUrl = '' }) {
     const projectId = `${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
     const dir = this.getProjectDir(projectId);
     fs.mkdirSync(dir, { recursive: true });
-
     const ext = path.extname(referencePath) || '.png';
     const referenceCopy = path.join(dir, `reference${ext.toLowerCase()}`);
     fs.copyFileSync(referencePath, referenceCopy);
-
     const now = new Date().toISOString();
     const project = {
-      id: projectId,
-      createdAt: now,
-      updatedAt: now,
-      status: 'created',
-      sourceUrl,
-      referencePath: referenceCopy,
-      generatedImagePath: null,
-      review: { decision: null, notes: '' },
-      metadata: null,
-      vectorPath: null,
-      finalPngPath: null,
+      id: projectId, createdAt: now, updatedAt: now, status: 'created', sourceUrl,
+      referencePath: referenceCopy, generatedImagePath: null,
+      review: { decision: null, notes: '' }, metadata: null, vectorPath: null, finalPngPath: null,
+      archivedAt: null,
       activity: [{ at: now, type: 'status', from: null, to: 'created', label: 'Project created' }]
     };
-
     this.write(project);
     return project;
   }
@@ -56,60 +38,71 @@ class ProjectStore {
     fs.mkdirSync(dir, { recursive: true });
     const file = this.getProjectFile(project.id);
     let previous = null;
-    try {
-      if (fs.existsSync(file)) previous = JSON.parse(fs.readFileSync(file, 'utf8'));
-    } catch {}
-
+    try { if (fs.existsSync(file)) previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
     const now = new Date().toISOString();
-    const activity = Array.isArray(project.activity)
-      ? [...project.activity]
-      : Array.isArray(previous?.activity) ? [...previous.activity] : [];
-
+    const activity = Array.isArray(project.activity) ? [...project.activity] : Array.isArray(previous?.activity) ? [...previous.activity] : [];
     if (previous && previous.status !== project.status) {
-      activity.push({
-        at: now,
-        type: 'status',
-        from: previous.status || null,
-        to: project.status,
-        label: `${previous.status || 'unknown'} → ${project.status}`
-      });
+      activity.push({ at: now, type: 'status', from: previous.status || null, to: project.status, label: `${previous.status || 'unknown'} → ${project.status}` });
     }
-
     project.activity = activity.slice(-250);
     project.updatedAt = now;
     fs.writeFileSync(file, JSON.stringify(project, null, 2), 'utf8');
     return project;
   }
 
-  update(projectId, patch) {
-    const project = this.read(projectId);
-    const next = { ...project, ...patch };
-    return this.write(next);
-  }
+  update(projectId, patch) { return this.write({ ...this.read(projectId), ...patch }); }
 
   addActivity(projectId, entry) {
     const project = this.read(projectId);
     const activity = Array.isArray(project.activity) ? [...project.activity] : [];
-    activity.push({
-      at: entry.at || new Date().toISOString(),
-      type: entry.type || 'event',
-      label: entry.label || entry.message || 'Project event',
-      details: entry.details || null
-    });
+    activity.push({ at: entry.at || new Date().toISOString(), type: entry.type || 'event', label: entry.label || entry.message || 'Project event', details: entry.details || null });
     project.activity = activity.slice(-250);
     return this.write(project);
   }
 
-  list() {
+  list(options = {}) {
+    const includeArchived = Boolean(options.includeArchived);
+    const archivedOnly = Boolean(options.archivedOnly);
     const root = this.getRoot();
     if (!fs.existsSync(root)) return [];
     return fs.readdirSync(root, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
-      .map((entry) => {
-        try { return this.read(entry.name); } catch { return null; }
-      })
+      .map((entry) => { try { return this.read(entry.name); } catch { return null; } })
       .filter(Boolean)
+      .filter((project) => archivedOnly ? Boolean(project.archivedAt) : includeArchived ? true : !project.archivedAt)
       .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  }
+
+  archive(projectId) {
+    const project = this.read(projectId);
+    if (project.archivedAt) return project;
+    const archivedAt = new Date().toISOString();
+    project.archivedAt = archivedAt;
+    this.write(project);
+    return this.addActivity(projectId, { type: 'workspace', label: 'Project archived', at: archivedAt });
+  }
+
+  restore(projectId) {
+    const project = this.read(projectId);
+    project.archivedAt = null;
+    this.write(project);
+    return this.addActivity(projectId, { type: 'workspace', label: 'Project restored from archive' });
+  }
+
+  delete(projectId) {
+    const dir = this.getProjectDir(projectId);
+    if (!fs.existsSync(dir)) throw new Error(`Project not found: ${projectId}`);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { ok: true, projectId };
+  }
+
+  findBySourceUrl(sourceUrl, excludeProjectId = null) {
+    const normalized = String(sourceUrl || '').trim().replace(/\/$/, '').toLowerCase();
+    if (!normalized) return [];
+    return this.list({ includeArchived: true }).filter((project) => {
+      if (excludeProjectId && project.id === excludeProjectId) return false;
+      return String(project.sourceUrl || '').trim().replace(/\/$/, '').toLowerCase() === normalized;
+    });
   }
 }
 

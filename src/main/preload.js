@@ -11,8 +11,14 @@ contextBridge.exposeInMainWorld('zeroPOD', {
   pod: { rules: () => ipcRenderer.invoke('pod:rules') },
   projects: {
     list: () => ipcRenderer.invoke('projects:list'),
-    get: (projectId) => ipcRenderer.invoke('projects:get', projectId)
+    archived: () => ipcRenderer.invoke('projects:archived'),
+    get: (projectId) => ipcRenderer.invoke('projects:get', projectId),
+    duplicates: (sourceUrl) => ipcRenderer.invoke('projects:duplicates', sourceUrl),
+    archive: (projectId) => ipcRenderer.invoke('projects:archive', projectId),
+    restore: (projectId) => ipcRenderer.invoke('projects:restore', projectId),
+    delete: (projectId) => ipcRenderer.invoke('projects:delete', projectId)
   },
+  workspace: { backup: () => ipcRenderer.invoke('workspace:backup') },
   generation: { start: (payload) => ipcRenderer.invoke('generation:start', payload) },
   review: {
     reject: (payload) => ipcRenderer.invoke('review:reject', payload),
