@@ -143,6 +143,23 @@ async function dockNativeLoginChrome(manager, serviceId) {
 
 SessionManager.prototype.setHostWindow = function setHostWindow(window) {
   this.__zeroPodHostWindow = window;
+
+  // Beta-only convenience: if ChatGPT was already verified in ZeroPOD, reopen
+  // that exact saved Chrome profile shortly after the app starts so the browser
+  // is already attached and docked on the right. Do nothing for unverified/login
+  // profiles so this cannot interfere with the normal native-login handoff.
+  if (!this.__zeroPodBetaChatGPTScheduled) {
+    this.__zeroPodBetaChatGPTScheduled = true;
+    setTimeout(async () => {
+      try {
+        const status = this.getStatuses()?.chatgpt;
+        if (!status?.connected) return;
+        const { page } = await this.ensureService('chatgpt');
+        await page.bringToFront().catch(() => {});
+      } catch {}
+    }, 900);
+  }
+
   return this;
 };
 
