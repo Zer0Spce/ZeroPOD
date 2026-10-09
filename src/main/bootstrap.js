@@ -38,7 +38,6 @@ SessionManager.prototype.rememberThreadUrl = function rememberThreadUrl(serviceI
   return value;
 };
 
-require('./chatgptChromePatch');
 require('./chatgptUploadReadyPatch');
 require('./chatgptNetworkCapturePatch');
 require('./main');
