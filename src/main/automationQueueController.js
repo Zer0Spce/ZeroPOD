@@ -57,6 +57,20 @@ class AutomationQueueController {
     return this.store.updateRow(rowId, patch);
   }
 
+  retry(rowId) {
+    const row = this.store.read().rows.find((item) => item.id === rowId);
+    if (!row) throw new Error(`Automation row not found: ${rowId}`);
+    if (!row.projectId) {
+      const complete = row.referenceImage && row.amazonLink;
+      return this.store.updateRow(rowId, {
+        status: complete ? 'pending' : 'draft',
+        step: complete ? 'Waiting' : 'Complete image + Amazon link',
+        lastError: null
+      });
+    }
+    return this.store.updateRow(rowId, { status: 'ready', step: 'Retry queued', lastError: null });
+  }
+
   removeRow(rowId) {
     return this.store.removeRow(rowId);
   }
@@ -122,7 +136,7 @@ class AutomationQueueController {
       let project;
       try { project = this.projects.read(row.projectId); } catch { continue; }
       const patch = this.mapProjectToRow(project);
-      if (patch) this.store.updateRow(row.id, patch);
+      if (patch && row.status !== 'ready') this.store.updateRow(row.id, patch);
     }
   }
 
@@ -181,13 +195,24 @@ class AutomationQueueController {
 
     const project = this.projects.read(row.projectId);
 
-    if (project.status === 'approved-image') {
+    if (project.status === 'chatgpt-recovery-needed') {
+      this.store.updateRow(row.id, { status: 'running', step: 'Retrying ChatGPT generation/download', lastError: null });
+      await this.chatgpt.start({
+        referencePath: project.referencePath,
+        sourceUrl: project.sourceUrl,
+        reviewNotes: row.notes || '',
+        existingProjectId: project.id
+      });
+      return;
+    }
+
+    if (['approved-image', 'metadata-recovery-needed'].includes(project.status)) {
       this.store.updateRow(row.id, { status: 'running', step: 'Generating POD WINNER metadata', lastError: null });
       await this.metadata.generate(project.id);
       return;
     }
 
-    if (project.status === 'metadata-ready') {
+    if (['metadata-ready', 'vectorizer-recovery-needed'].includes(project.status)) {
       this.store.updateRow(row.id, { status: 'running', step: 'Vectorizing approved design', lastError: null });
       await this.vectorizer.start(project.id);
       return;
@@ -199,7 +224,7 @@ class AutomationQueueController {
       return;
     }
 
-    if (project.status === 'export-ready') {
+    if (['export-ready', 'redbubble-recovery-needed'].includes(project.status)) {
       this.store.updateRow(row.id, { status: 'running', step: 'Running quality check', lastError: null });
       const validation = await validateProject(project, this.projects.list());
       this.projects.update(project.id, { qualityCheck: { ...validation, checkedAt: new Date().toISOString() } });
