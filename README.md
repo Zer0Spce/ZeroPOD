@@ -1,22 +1,65 @@
 # ZeroPOD
 
-ZeroPOD is a Windows-first Print-on-Demand workflow app that organizes reference-driven design generation, human review, metadata creation, vectorization, high-resolution export, and marketplace upload into one local desktop workspace.
+ZeroPOD is a Windows-first Print-on-Demand workflow app that organizes reference-driven design generation, human review, POD WINNER metadata, vectorization, high-resolution export, quality control, and Redbubble preparation into one local desktop workspace.
 
-## Current v0.1 foundation
+## Current feature set
 
-- Windows-only Electron desktop shell
-- Connections panel for ChatGPT, Vectorizer.ai, and Redbubble
-- Local browser profile storage under the ZeroPOD Windows app-data directory
-- No usernames or passwords stored in the repository
-- Windows-backed encrypted connection metadata via Electron `safeStorage`
-- Reference-image + source-URL input
+- Windows-only Electron desktop app
+- Local-only Connections for ChatGPT, Vectorizer.ai, and Redbubble
+- Persistent browser sessions under ZeroPOD Windows app data
+- Reference image + Amazon/source URL workflow
 - Permanent POD guideline injection
-- Mandatory Pass / Reject review gate before later workflow stages
-- Placeholder stages for metadata, vectorization, 4500×5400 export, and Redbubble queue
+- Mandatory Pass / Reject / Regenerate image review
+- Amazon-driven POD WINNER SEO metadata
+- Editable Title + 1 Main Tag + exactly 14 Supporting Tags + Short Description
+- Vectorizer.ai handoff and SVG capture
+- Transparent 4500×5400 final PNG export
+- Final artwork + metadata quality checks
+- Redbubble Copy Existing Work workflow using the first existing work as the baseline
+- Mandatory final Redbubble review before publish
+- Project dashboard, progress tracking, recovery states, and guarded workflow ordering
+
+## Automation List (Beta)
+
+ZeroPOD v0.4 introduces an in-app batch queue so multiple reference images and Amazon/source links can be loaded once instead of submitted individually.
+
+### Ways to fill the queue
+
+- Add Row and edit image/link/notes in the table
+- Add Images to select multiple local reference images at once
+- Paste tab-separated `image path + Amazon link + optional notes`
+- Paste only Amazon URLs to fill existing image rows that have blank links
+- Import a CSV file
+- Export the current queue to CSV
+
+A starter CSV is included at:
+
+`templates/automation-list-template.csv`
+
+Required input columns are:
+
+```csv
+enabled,reference_image,amazon_link,notes
+true,C:\ZeroPOD\inputs\design1.png,https://www.amazon.com/example1,optional instruction
+```
+
+### Queue behavior
+
+ZeroPOD intentionally keeps human review gates in batch mode:
+
+1. Process one browser automation stage at a time.
+2. Generate each queued design with its reference image + Amazon/source link.
+3. Stop that design at **Awaiting Review**.
+4. Continue working through other runnable rows.
+5. After you press **Pass**, that row automatically resumes through POD WINNER metadata, Vectorizer.ai, 4500×5400 export, and final quality checks.
+6. Prepare Redbubble using **Copy Existing Work** and the first existing work as the baseline.
+7. Stop again at **Final Review** before publish.
+
+Rows can be paused, disabled, removed, retried after recoverable failures, or cleared after completion.
 
 ## Permanent POD guidelines
 
-ZeroPOD currently injects these rules into the generation workflow:
+ZeroPOD injects these rules into generation:
 
 - Copy slogan and create a new style.
 - Make it clean and Print On Demand friendly.
@@ -34,9 +77,9 @@ ZeroPOD currently injects these rules into the generation workflow:
 
 ## Local security model
 
-ZeroPOD does not collect or hardcode website passwords. Clicking Login opens the selected service in a normal local Microsoft Edge session controlled by Playwright. The browser profile is stored locally inside ZeroPOD's user-data directory and is excluded from Git.
+ZeroPOD does not collect or hardcode website passwords. Login opens the selected service in a normal local Microsoft Edge session controlled by Playwright. Browser profiles remain local inside ZeroPOD's user-data directory and are excluded from Git.
 
-Sensitive connection metadata is encrypted with Electron `safeStorage`, which uses the operating system's protected storage where available.
+Sensitive connection metadata is encrypted with Electron `safeStorage`, which uses operating-system protected storage where available.
 
 ## Development
 
@@ -58,14 +101,4 @@ npm start
 npm run package:win
 ```
 
-## Planned next stages
-
-1. ChatGPT generation controller with reference-image upload and permanent prompt rules.
-2. Generated-image capture/download and local project persistence.
-3. Mandatory image review with Pass / Reject / Regenerate-with-notes.
-4. Title + 1 main tag + 14 supporting tags + short description extraction.
-5. Vectorizer.ai workflow handoff.
-6. Local SVG/EPS to transparent 4500×5400 PNG export.
-7. Redbubble upload queue and listing form population.
-
-> ZeroPOD should respect the terms and automation policies of every connected service. Authentication challenges, CAPTCHA, and two-factor authentication stay user-controlled.
+> ZeroPOD should respect the terms and automation policies of every connected service. Authentication challenges, CAPTCHA, and two-factor authentication stay user-controlled. ZeroPOD does not implement stealth, CAPTCHA bypass, or anti-bot evasion.
