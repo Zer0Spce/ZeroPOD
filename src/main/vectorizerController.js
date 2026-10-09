@@ -10,7 +10,8 @@ class VectorizerController {
 
   async start(projectId) {
     const project = this.projects.read(projectId);
-    if (!project.generatedImagePath || !fs.existsSync(project.generatedImagePath)) {
+    const approvedImagePath = project.approvedImagePath || project.generatedImagePath;
+    if (!approvedImagePath || !fs.existsSync(approvedImagePath)) {
       throw new Error('Approved generated image is missing.');
     }
     if (!project.metadata) throw new Error('Generate metadata before vectorization.');
@@ -33,7 +34,7 @@ class VectorizerController {
           fileInput = page.locator('input[type="file"]').first();
         }
         if (!(await fileInput.count())) throw new Error('Upload control not found.');
-        await fileInput.setInputFiles(project.generatedImagePath);
+        await fileInput.setInputFiles(approvedImagePath);
       }, { attempts: 2, delayMs: 900 });
 
       this.projects.update(projectId, { status: 'vectorizing', lastAutomationError: null });
@@ -43,7 +44,7 @@ class VectorizerController {
         try {
           const suggested = download.suggestedFilename() || 'vector.svg';
           const ext = path.extname(suggested).toLowerCase() || '.svg';
-          const savePath = path.join(projectDir, `vector${ext}`);
+          const savePath = path.join(projectDir, ext === '.svg' ? 'vector.svg' : `vector${ext}`);
           await download.saveAs(savePath);
           page.off('download', handler);
           this.projects.update(projectId, {
@@ -92,7 +93,7 @@ class VectorizerController {
         ok: true,
         projectId,
         status: 'vectorizing',
-        message: 'Vectorizer.ai is processing the approved image. ZeroPOD will capture the SVG download; if needed, click the normal SVG download button manually.'
+        message: 'Vectorizer.ai is processing approved.png. ZeroPOD will capture the SVG download; if needed, click the normal SVG download button manually.'
       };
     } catch (error) {
       this.projects.update(projectId, {
