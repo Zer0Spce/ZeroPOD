@@ -12,7 +12,7 @@ class ChatGPTController {
 
   async assertNoHumanGate(page) {
     if (await this.sessions.detectHumanVerification(page)) {
-      const error = new Error('ChatGPT requires human verification. Complete the Cloudflare “Verify you are human” challenge manually in the open browser, then retry this job. ZeroPOD will not automate or bypass the challenge.');
+      const error = new Error('ChatGPT requires human verification. Complete the Cloudflare “Verify you are human” challenge manually in normal Edge, then retry this job. ZeroPOD will not automate or bypass the challenge.');
       error.code = 'HUMAN_VERIFICATION_REQUIRED';
       throw error;
     }
@@ -82,7 +82,7 @@ class ChatGPTController {
       setTimeout(() => { if (!settled) { this.projects.update(projectId, { status: 'chatgpt-recovery-needed', chatgptError: { step: 'download', message: 'ZeroPOD could not detect the generated image download automatically.', recovery: 'Keep ChatGPT open, click the generated image Download button manually, then return to ZeroPOD.' } }); finish({ ok: false, error: 'Automatic ChatGPT image download timed out.' }); } }, 360000);
     });
     this.projects.update(project.id, { status: 'generating', chatgptError: null });
-    (async () => { try { await retryStep('Find ChatGPT generated image download', async () => { await this.assertNoHumanGate(page); const clicked = await clickFirstVisible([page.getByRole('button', { name: /download/i }).last(),page.getByRole('link', { name: /download/i }).last(),page.locator('button[aria-label*="download" i]').last(),page.locator('[data-testid*="download" i]').last()], { timeout: 90000 }); if (!clicked) throw new Error('Generated image download control is not visible yet.'); return true; }, { attempts: 3, delayMs: 2500 }); } catch (error) { const human = error.code === 'HUMAN_VERIFICATION_REQUIRED'; this.projects.update(projectId, { status: 'chatgpt-recovery-needed', automationStep: human ? 'Human verification required' : 'Download needs attention', chatgptError: human ? { service: 'chatgpt', step: 'human-verification', message: error.message, recovery: 'Complete the challenge manually in the open browser, then Retry the queue row.' } : automationError('chatgpt','download',error,'The generated image may still be ready in ChatGPT. Click its Download control manually; ZeroPOD will capture the browser download if the session is still open.') }); } })();
+    (async () => { try { await retryStep('Find ChatGPT generated image download', async () => { await this.assertNoHumanGate(page); const clicked = await clickFirstVisible([page.getByRole('button', { name: /download/i }).last(),page.getByRole('link', { name: /download/i }).last(),page.locator('button[aria-label*="download" i]').last(),page.locator('[data-testid*="download" i]').last()], { timeout: 90000 }); if (!clicked) throw new Error('Generated image download control is not visible yet.'); return true; }, { attempts: 3, delayMs: 2500 }); } catch (error) { const human = error.code === 'HUMAN_VERIFICATION_REQUIRED'; if (human) await this.sessions.login('chatgpt').catch(() => {}); this.projects.update(projectId, { status: 'chatgpt-recovery-needed', automationStep: human ? 'Human verification required' : 'Download needs attention', chatgptError: human ? { service: 'chatgpt', step: 'human-verification', message: error.message, recovery: 'Complete the challenge manually in the normal Edge window that ZeroPOD opened, close it if it remains open, then Retry the queue row.' } : automationError('chatgpt','download',error,'The generated image may still be ready in ChatGPT. Click its Download control manually; ZeroPOD will capture the browser download if the session is still open.') }); } })();
     return downloadPromise;
   }
 
@@ -100,7 +100,8 @@ class ChatGPTController {
       return { ok: true, projectId: project.id, status: 'generating', message: 'Generation submitted.' };
     } catch (error) {
       const human = error.code === 'HUMAN_VERIFICATION_REQUIRED';
-      const recovery = human ? { service: 'chatgpt', step: 'human-verification', message: error.message, recovery: 'Complete the human-verification challenge manually in the open ChatGPT browser, then retry. ZeroPOD does not automate or bypass verification.' } : automationError('chatgpt','generation',error,'Open ChatGPT from Connections, confirm you are signed in and the composer is usable, then retry the project.');
+      if (human) await this.sessions.login('chatgpt').catch(() => {});
+      const recovery = human ? { service: 'chatgpt', step: 'human-verification', message: error.message, recovery: 'Complete the human-verification challenge manually in the normal Edge window ZeroPOD opened, close it if it remains open, then retry. ZeroPOD does not automate or bypass verification.' } : automationError('chatgpt','generation',error,'Open ChatGPT from Connections, confirm you are signed in and the composer is usable, then retry the project.');
       this.projects.update(project.id, { status: 'chatgpt-recovery-needed', chatgptError: recovery, automationStep: human ? 'Human verification required' : 'Generation failed' });
       throw new Error(recovery.message);
     }
