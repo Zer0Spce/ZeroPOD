@@ -202,10 +202,10 @@ app.whenReady().then(async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Import ZeroPOD Automation List Excel File',
       properties: ['openFile'],
-      filters: [{ name: 'Excel workbooks', extensions: ['xlsx', 'xls'] }]
+      filters: [{ name: 'Excel workbooks', extensions: ['xlsx'] }]
     });
     if (result.canceled) return { canceled: true };
-    const rows = readAutomationWorkbook(result.filePaths[0]);
+    const rows = await readAutomationWorkbook(result.filePaths[0]);
     if (!rows.length) throw new Error('Excel workbook did not contain any automation rows.');
     automation.addRows(rows);
     return { canceled: false, imported: rows.length, snapshot: automation.snapshot() };
@@ -218,7 +218,7 @@ app.whenReady().then(async () => {
       filters: [{ name: 'Excel workbook', extensions: ['xlsx'] }]
     });
     if (result.canceled || !result.filePath) return { canceled: true };
-    writeAutomationWorkbook(result.filePath, automation.snapshot().rows);
+    await writeAutomationWorkbook(result.filePath, automation.snapshot().rows);
     return { canceled: false, path: result.filePath };
   });
 
