@@ -8,16 +8,9 @@ const { SessionManager, SERVICES } = require('./sessionManager');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const originalGetProfilePath = SessionManager.prototype.getProfilePath;
 const originalGetStatuses = SessionManager.prototype.getStatuses;
-const originalKillProfileEdgeProcesses = SessionManager.prototype.killProfileEdgeProcesses;
-const originalCloseAutomationContext = SessionManager.prototype.closeAutomationContext;
-const originalCloseLoginBrowser = SessionManager.prototype.closeLoginBrowser;
-const originalLaunchNormalLoginBrowser = SessionManager.prototype.launchNormalLoginBrowser;
-const originalEnsureService = SessionManager.prototype.ensureService;
 const originalDetectAuthState = SessionManager.prototype.detectAuthState;
 const originalTest = SessionManager.prototype.test;
-const originalLogin = SessionManager.prototype.login;
 
 const automationRuntimes = new WeakMap();
 
@@ -38,6 +31,12 @@ function findChromeExecutable() {
     process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe')
   ].filter(Boolean);
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+function requireChromeExecutable() {
+  const chromePath = findChromeExecutable();
+  if (!chromePath) throw new Error('Google Chrome was not found. Install Chrome or set CHROME_PATH to chrome.exe. ZeroPOD is configured to use Chrome for ChatGPT, Vectorizer.ai, and Redbubble.');
+  return chromePath;
 }
 
 async function getFreePort() {
@@ -66,7 +65,7 @@ async function waitForCdp(port, timeoutMs = 20000) {
     } catch (error) {
       lastError = error;
     }
-    await wait(250);
+    await wait(200);
   }
   throw new Error(`Chrome did not expose its local automation endpoint.${lastError?.message ? ` ${lastError.message}` : ''}`);
 }
@@ -78,8 +77,8 @@ async function gracefullyCloseProcess(child) {
   if (process.platform === 'win32') {
     const script = [
       `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue`,
-      `if ($p) { $null = $p.CloseMainWindow() }`,
-      `Start-Sleep -Milliseconds 1400`,
+      'if ($p) { $null = $p.CloseMainWindow() }',
+      'Start-Sleep -Milliseconds 1200',
       `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue`,
       `if ($p) { Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue }`
     ].join('; ');
@@ -96,30 +95,23 @@ async function gracefullyCloseProcess(child) {
   await wait(500);
 }
 
-SessionManager.prototype.getProfilePath = function getProfilePathBrowserAware(serviceId) {
-  // Use a fresh profile that has never been launched by Playwright. The previous
-  // chatgpt-chrome profile may contain state from launchPersistentContext tests,
-  // which can make Google classify the browser as automated during OAuth.
-  if (serviceId === 'chatgpt' && findChromeExecutable()) {
-    return path.join(app.getPath('userData'), 'profiles', 'chatgpt-chrome-native');
-  }
-  return originalGetProfilePath.call(this, serviceId);
+SessionManager.prototype.getProfilePath = function getProfilePathChrome(serviceId) {
+  if (!SERVICES[serviceId]) throw new Error(`Unknown service: ${serviceId}`);
+  return path.join(app.getPath('userData'), 'profiles', `${serviceId}-chrome-native`);
 };
 
-SessionManager.prototype.getStatuses = function getStatusesBrowserAware() {
+SessionManager.prototype.getStatuses = function getStatusesChrome() {
   const statuses = originalGetStatuses.call(this);
-  if (statuses.chatgpt && findChromeExecutable()) {
-    statuses.chatgpt.browser = 'chrome';
-    statuses.chatgpt.loginMode = 'normal-chrome-handoff';
+  for (const service of Object.values(statuses)) {
+    service.browser = 'chrome';
+    service.loginMode = 'normal-chrome-handoff';
   }
   return statuses;
 };
 
-SessionManager.prototype.killProfileEdgeProcesses = async function killProfileBrowserProcesses(serviceId) {
-  if (serviceId !== 'chatgpt' || !findChromeExecutable()) {
-    return originalKillProfileEdgeProcesses.call(this, serviceId);
-  }
-
+// Keep the legacy method name because SessionManager.logout() calls it, but make it
+// terminate only Chrome processes that belong to the requested dedicated profile.
+SessionManager.prototype.killProfileEdgeProcesses = async function killProfileChromeProcesses(serviceId) {
   if (process.platform !== 'win32') return;
   const profile = this.getProfilePath(serviceId).replace(/'/g, "''");
   const script = `$p='${profile}'; Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($p) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
@@ -129,26 +121,18 @@ SessionManager.prototype.killProfileEdgeProcesses = async function killProfileBr
     { windowsHide: true },
     () => resolve()
   ));
-  await wait(500);
+  await wait(350);
 };
 
-SessionManager.prototype.closeLoginBrowser = async function closeLoginBrowserBrowserAware(serviceId) {
-  if (serviceId !== 'chatgpt' || !findChromeExecutable()) {
-    return originalCloseLoginBrowser.call(this, serviceId);
-  }
-
+SessionManager.prototype.closeLoginBrowser = async function closeLoginBrowserChrome(serviceId) {
   const runtime = this.loginBrowsers.get(serviceId);
-  if (runtime?.process) await gracefullyCloseProcess(runtime.process);
+  if (runtime?.process) await gracefullyCloseProcess(runtime.process).catch(() => {});
   this.loginBrowsers.delete(serviceId);
-  await this.killProfileEdgeProcesses(serviceId);
-  await wait(500);
+  await this.killProfileEdgeProcesses(serviceId).catch(() => {});
+  await wait(300);
 };
 
-SessionManager.prototype.closeAutomationContext = async function closeAutomationContextBrowserAware(serviceId) {
-  if (serviceId !== 'chatgpt' || !findChromeExecutable()) {
-    return originalCloseAutomationContext.call(this, serviceId);
-  }
-
+SessionManager.prototype.closeAutomationContext = async function closeAutomationContextChrome(serviceId) {
   const map = runtimeMap(this);
   const runtime = map.get(serviceId);
   if (runtime) {
@@ -160,22 +144,20 @@ SessionManager.prototype.closeAutomationContext = async function closeAutomation
   await this.killProfileEdgeProcesses(serviceId).catch(() => {});
 };
 
-SessionManager.prototype.launchNormalLoginBrowser = async function launchNormalLoginBrowserChromeNative(serviceId) {
-  if (serviceId !== 'chatgpt' || !findChromeExecutable()) {
-    return originalLaunchNormalLoginBrowser.call(this, serviceId);
-  }
-
+SessionManager.prototype.launchNormalLoginBrowser = async function launchNormalLoginBrowserChrome(serviceId) {
   const service = SERVICES[serviceId];
+  if (!service) throw new Error(`Unknown service: ${serviceId}`);
+
   await this.closeAutomationContext(serviceId);
   await this.closeLoginBrowser(serviceId);
 
-  const chromePath = findChromeExecutable();
+  const chromePath = requireChromeExecutable();
   const profilePath = this.getProfilePath(serviceId);
   fs.mkdirSync(profilePath, { recursive: true });
 
-  // This is deliberately a plain, installed Chrome process. Do not add remote
-  // debugging, --enable-automation, Playwright launch arguments, custom UA, or
-  // webdriver attachment while Google/email/password/2FA is being completed.
+  // Authentication always happens in an ordinary installed-Chrome process. There
+  // is no Playwright attachment or remote-debugging flag during Google/password/
+  // CAPTCHA/2FA login. Automation attaches only after the user finishes login.
   const child = spawn(
     chromePath,
     [`--user-data-dir=${profilePath}`, service.url],
@@ -188,24 +170,19 @@ SessionManager.prototype.launchNormalLoginBrowser = async function launchNormalL
     if (current?.process === child) this.loginBrowsers.delete(serviceId);
   });
 
-  this.markProfile(serviceId, {
-    loginMode: 'normal-chrome-handoff',
-    browser: 'chrome'
-  });
-
+  this.markProfile(serviceId, { loginMode: 'normal-chrome-handoff', browser: 'chrome' });
   return { ok: true, browser: 'chrome', mode: 'normal-chrome-handoff' };
 };
 
 async function launchAndAttachChrome(manager, serviceId) {
   const service = SERVICES[serviceId];
-  const chromePath = findChromeExecutable();
+  if (!service) throw new Error(`Unknown service: ${serviceId}`);
+  const chromePath = requireChromeExecutable();
   const profilePath = manager.getProfilePath(serviceId);
 
-  // Test Session / automation begins only after manual login. Close the normal
-  // login Chrome gracefully first so its cookies and profile state are flushed.
   await manager.closeLoginBrowser(serviceId);
   await manager.killProfileEdgeProcesses(serviceId);
-  await wait(700);
+  await wait(450);
 
   fs.mkdirSync(profilePath, { recursive: true });
   fs.rmSync(path.join(profilePath, 'DevToolsActivePort'), { force: true });
@@ -236,7 +213,7 @@ async function launchAndAttachChrome(manager, serviceId) {
     await waitForCdp(port);
     runtime.browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
     runtime.context = runtime.browser.contexts()[0] || null;
-    if (!runtime.context) throw new Error('Chrome opened, but ZeroPOD could not attach to its signed-in profile.');
+    if (!runtime.context) throw new Error(`${service.name} opened in Chrome, but ZeroPOD could not attach to its saved profile.`);
 
     manager.contexts.set(serviceId, runtime.context);
     runtime.browser.on('disconnected', () => {
@@ -246,10 +223,7 @@ async function launchAndAttachChrome(manager, serviceId) {
       if (current === runtime) map.delete(serviceId);
     });
 
-    manager.markProfile(serviceId, {
-      loginMode: 'normal-chrome-handoff',
-      browser: 'chrome'
-    });
+    manager.markProfile(serviceId, { loginMode: 'normal-chrome-handoff', browser: 'chrome' });
     return runtime;
   } catch (error) {
     await gracefullyCloseProcess(child).catch(() => {});
@@ -259,15 +233,12 @@ async function launchAndAttachChrome(manager, serviceId) {
   }
 }
 
-SessionManager.prototype.ensureService = async function ensureServiceChromeNative(serviceId) {
-  if (serviceId !== 'chatgpt' || !findChromeExecutable()) {
-    return originalEnsureService.call(this, serviceId);
-  }
-
+SessionManager.prototype.ensureService = async function ensureServiceChrome(serviceId) {
   const service = SERVICES[serviceId];
+  if (!service) throw new Error(`Unknown service: ${serviceId}`);
+
   const map = runtimeMap(this);
   let runtime = map.get(serviceId);
-
   if (!runtime?.browser?.isConnected?.() || !runtime.context) {
     runtime = await launchAndAttachChrome(this, serviceId);
   }
@@ -275,46 +246,43 @@ SessionManager.prototype.ensureService = async function ensureServiceChromeNativ
   let page = runtime.context.pages().find((candidate) => candidate.url().startsWith(service.url));
   if (!page) page = runtime.context.pages()[0] || await runtime.context.newPage();
   if (!page.url().startsWith(service.url)) {
-    await page.goto(service.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.goto(service.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   }
 
   return { context: runtime.context, page, service, browser: 'chrome' };
 };
 
-SessionManager.prototype.detectAuthState = async function detectAuthStateBrowserAware(serviceId, page) {
-  if (serviceId === 'chatgpt' && findChromeExecutable()) {
-    const url = page.url();
-    if (/accounts\.google\.com/i.test(url)) {
-      return {
-        status: 'needs-login',
-        message: 'Google sign-in is required. Use Open Login Browser so authentication happens in normal Chrome without automation attached, then click Test Session.'
-      };
-    }
+SessionManager.prototype.detectAuthState = async function detectAuthStateChrome(serviceId, page) {
+  const url = page.url();
+  if (/accounts\.google\.com/i.test(url)) {
+    return {
+      status: 'needs-login',
+      message: 'Google sign-in is required. Use Open Login Browser so authentication happens in normal Chrome without automation attached, then click Test Session.'
+    };
   }
 
   const result = await originalDetectAuthState.call(this, serviceId, page);
-  if (serviceId === 'chatgpt' && findChromeExecutable()) {
-    result.message = String(result.message || '').replace(/Microsoft Edge/g, 'Google Chrome').replace(/Edge/g, 'Chrome');
-  }
+  result.message = String(result.message || '')
+    .replace(/Microsoft Edge/g, 'Google Chrome')
+    .replace(/Edge/g, 'Chrome');
   return result;
 };
 
-SessionManager.prototype.test = async function testBrowserAware(serviceId) {
+SessionManager.prototype.test = async function testChrome(serviceId) {
   const result = await originalTest.call(this, serviceId);
-  if (serviceId === 'chatgpt' && findChromeExecutable()) {
-    this.updateState(serviceId, {
-      loginMode: 'normal-chrome-handoff',
-      browser: 'chrome',
-      verificationMessage: String(result.message || '').replace(/Microsoft Edge/g, 'Google Chrome').replace(/Edge/g, 'Chrome')
-    });
-  }
-  return result;
+  this.updateState(serviceId, {
+    loginMode: 'normal-chrome-handoff',
+    browser: 'chrome',
+    verificationMessage: String(result.message || '')
+      .replace(/Microsoft Edge/g, 'Google Chrome')
+      .replace(/Edge/g, 'Chrome')
+  });
+  return { ...result, browser: 'chrome' };
 };
 
-SessionManager.prototype.login = async function loginBrowserAware(serviceId) {
-  if (serviceId !== 'chatgpt' || !findChromeExecutable()) {
-    return originalLogin.call(this, serviceId);
-  }
+SessionManager.prototype.login = async function loginChrome(serviceId) {
+  const service = SERVICES[serviceId];
+  if (!service) throw new Error(`Unknown service: ${serviceId}`);
 
   await this.launchNormalLoginBrowser(serviceId);
   this.updateState(serviceId, {
@@ -322,14 +290,14 @@ SessionManager.prototype.login = async function loginBrowserAware(serviceId) {
     loginMode: 'normal-chrome-handoff',
     browser: 'chrome',
     authStatus: 'unknown',
-    verificationMessage: 'Normal Google Chrome opened with ZeroPOD’s clean ChatGPT profile. Finish Google/email/password/2FA manually. When login is complete, return to ZeroPOD and click Test Session; ZeroPOD will then restart that signed-in profile for automation.'
+    verificationMessage: `Normal Google Chrome opened with ZeroPOD’s dedicated ${service.name} profile. Finish login and any Google/password/2FA/CAPTCHA challenge manually. When login is complete, return to ZeroPOD and click Test Session.`
   });
 
   return {
     ok: true,
     mode: 'normal-chrome-handoff',
     browser: 'chrome',
-    message: 'Sign in in the normal Chrome window, then click Test Session.'
+    message: `Sign in to ${service.name} in the normal Chrome window, then click Test Session.`
   };
 };
 
