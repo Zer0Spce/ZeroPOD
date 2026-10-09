@@ -1,6 +1,6 @@
 {
   "name": "zeropod",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "ZeroPOD Windows desktop automation workspace for POD generation, review, vectorization, export, and upload workflows.",
   "main": "src/main/main.js",
   "author": "Zer0Spce",
