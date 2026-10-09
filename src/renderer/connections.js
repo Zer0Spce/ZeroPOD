@@ -2,6 +2,7 @@ function connectionStatusText(service) {
   const labels = {
     verified: 'Verified',
     'needs-login': 'Needs Login',
+    'human-verification': 'Human Verification Required',
     unknown: service.saved ? 'Saved / Unverified' : 'Not configured',
     'not-configured': 'Not configured'
   };
@@ -20,8 +21,8 @@ async function decorateConnections() {
     const service = statuses[serviceId];
     if (!service) return;
 
-    loginButton.textContent = service.saved ? 'Open Login Browser' : 'Open Login Browser';
-    loginButton.title = 'Opens a normal Microsoft Edge window. Finish Google/email/password/2FA there, then click Test Session.';
+    loginButton.textContent = 'Open Login Browser';
+    loginButton.title = 'Opens ZeroPOD’s dedicated normal Microsoft Edge profile for manual login and verification.';
 
     const logoutButton = card.querySelector('.logout[data-id]');
     if (logoutButton) logoutButton.disabled = !service.saved;
@@ -61,7 +62,9 @@ async function testOneConnection(serviceId, button) {
   try {
     const result = await window.zeroPOD.connections.test(serviceId);
     if (result.status === 'needs-login') {
-      alert(`${serviceId}: login is still required. Click Open Login Browser, finish signing in in normal Microsoft Edge, then click Test Session again.`);
+      alert(`${serviceId}: login is still required. Click Open Login Browser, finish signing in, close that dedicated Edge window if it remains open, then click Test Session again.`);
+    } else if (result.status === 'human-verification') {
+      alert(`${serviceId}: human verification is required. Complete the challenge manually in the open browser, then click Test Session again. ZeroPOD will not automate or bypass verification.`);
     }
   } catch (error) {
     alert(`Could not test ${serviceId}: ${error.message || error}`);
@@ -88,7 +91,7 @@ const connectionSection = document.getElementById('connections');
 if (connectionSection && !document.getElementById('testAllConnections')) {
   const note = document.createElement('div');
   note.className = 'panel connection-login-note';
-  note.innerHTML = '<strong>Google sign-in compatibility</strong><p class="muted">ZeroPOD opens a normal Microsoft Edge window for login and does not attach automation until you press Test Session. Complete Google, email/password, CAPTCHA, or 2FA normally in Edge.</p>';
+  note.innerHTML = '<strong>Login & verification</strong><p class="muted">ZeroPOD uses a dedicated normal Microsoft Edge profile for login. Complete Google/email/password, CAPTCHA, Cloudflare, or 2FA manually. When you press Test Session, ZeroPOD closes only that dedicated profile window before handing the saved session to automation.</p>';
   const paragraph = connectionSection.querySelector('p.muted');
   paragraph?.insertAdjacentElement('afterend', note);
 
@@ -103,8 +106,8 @@ if (connectionSection && !document.getElementById('testAllConnections')) {
     button.textContent = 'Testing all…';
     try {
       const result = await window.zeroPOD.connections.preflight();
-      const failed = result.needsLogin || [];
-      if (failed.length) alert(`Login required: ${failed.join(', ')}. Open each Login Browser and finish sign-in in normal Edge first.`);
+      const blocked = result.blocked || result.needsLogin || [];
+      if (blocked.length) alert(`Sessions needing attention: ${blocked.join(', ')}. Complete login/verification manually before retrying.`);
     } catch (error) {
       alert(`Connection preflight failed: ${error.message || error}`);
     } finally {
@@ -116,9 +119,7 @@ if (connectionSection && !document.getElementById('testAllConnections')) {
 }
 
 setInterval(() => {
-  if (document.getElementById('connections')?.classList.contains('active-view')) {
-    decorateConnections().catch(() => {});
-  }
+  if (document.getElementById('connections')?.classList.contains('active-view')) decorateConnections().catch(() => {});
 }, 3000);
 
 decorateConnections().catch(() => {});
