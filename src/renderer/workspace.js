@@ -205,9 +205,28 @@ function observeProjectRendering() {
   projectEnhanceObserver.observe(root, { childList: true });
 }
 
+function loadV09Polish() {
+  if (!document.getElementById('v09ThemeCss')) {
+    const link = document.createElement('link');
+    link.id = 'v09ThemeCss';
+    link.rel = 'stylesheet';
+    link.href = 'theme.css';
+    document.head.appendChild(link);
+  }
+  ['appearance.js', 'readiness.js'].forEach((src) => {
+    if (document.querySelector(`script[src="${src}"]`)) return;
+    const script = document.createElement('script');
+    script.src = src;
+    document.body.appendChild(script);
+  });
+  const footer = document.querySelector('.footer-note');
+  if (footer) footer.textContent = 'Windows only · v0.9-beta';
+}
+
 injectWorkspaceStyles();
 ensureWorkspaceControls();
 ensureMaintenancePanel();
 ensureDuplicateWarning();
 observeProjectRendering();
 enhanceActiveProjectCards().catch(() => {});
+loadV09Polish();
