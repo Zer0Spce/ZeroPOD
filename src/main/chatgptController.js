@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { retryStep, clickFirstVisible, automationError } = require('./automationUtils');
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 class ChatGPTController {
   constructor({ sessions, projects, podRules }) { this.sessions = sessions; this.projects = projects; this.podRules = podRules; }
 
@@ -72,18 +74,149 @@ class ChatGPTController {
     }, { attempts: 2, delayMs: 900 });
   }
 
-  async waitForGeneratedDownload(page, projectId) {
-    const project = this.projects.read(projectId); const projectDir = this.projects.getProjectDir(projectId);
-    const downloadPromise = new Promise((resolve) => {
-      let settled = false;
-      const finish = (result) => { if (settled) return; settled = true; page.off('download', handler); resolve(result); };
-      const handler = async (download) => { try { const suggested = download.suggestedFilename() || 'generated-image.png'; const ext = path.extname(suggested) || '.png'; const savePath = path.join(projectDir, `generated${ext.toLowerCase()}`); await download.saveAs(savePath); this.projects.update(projectId, { status: 'awaiting-review', generatedImagePath: savePath, chatgptError: null }); finish({ ok: true, path: savePath }); } catch (error) { finish({ ok: false, error: error.message }); } };
-      page.on('download', handler);
-      setTimeout(() => { if (!settled) { this.projects.update(projectId, { status: 'chatgpt-recovery-needed', chatgptError: { step: 'download', message: 'ZeroPOD could not detect the generated image download automatically.', recovery: 'Keep ChatGPT open, click the generated image Download button manually, then return to ZeroPOD.' } }); finish({ ok: false, error: 'Automatic ChatGPT image download timed out.' }); } }, 360000);
+  async snapshotImageSources(page) {
+    return new Set(await page.locator('img').evaluateAll((images) => images.map((img) => img.currentSrc || img.src).filter(Boolean)).catch(() => []));
+  }
+
+  async findNewGeneratedImage(page, baselineSources) {
+    const candidates = await page.locator('img').evaluateAll((images) => images.map((img) => {
+      const rect = img.getBoundingClientRect();
+      return {
+        src: img.currentSrc || img.src || '',
+        alt: img.alt || '',
+        width: img.naturalWidth || rect.width || 0,
+        height: img.naturalHeight || rect.height || 0,
+        visible: rect.width > 180 && rect.height > 180 && getComputedStyle(img).visibility !== 'hidden'
+      };
+    }).filter((item) => item.visible && item.src && item.width >= 384 && item.height >= 384)).catch(() => []);
+
+    const fresh = candidates.filter((item) => !baselineSources.has(item.src));
+    if (!fresh.length) return null;
+    fresh.sort((a, b) => {
+      const aGenerated = /generated|imagegen|dall|create/i.test(a.alt) ? 1 : 0;
+      const bGenerated = /generated|imagegen|dall|create/i.test(b.alt) ? 1 : 0;
+      if (aGenerated !== bGenerated) return bGenerated - aGenerated;
+      return (b.width * b.height) - (a.width * a.height);
     });
-    this.projects.update(project.id, { status: 'generating', chatgptError: null });
-    (async () => { try { await retryStep('Find ChatGPT generated image download', async () => { await this.assertNoHumanGate(page); const clicked = await clickFirstVisible([page.getByRole('button', { name: /download/i }).last(),page.getByRole('link', { name: /download/i }).last(),page.locator('button[aria-label*="download" i]').last(),page.locator('[data-testid*="download" i]').last()], { timeout: 90000 }); if (!clicked) throw new Error('Generated image download control is not visible yet.'); return true; }, { attempts: 3, delayMs: 2500 }); } catch (error) { const human = error.code === 'HUMAN_VERIFICATION_REQUIRED'; if (human) await this.sessions.login('chatgpt').catch(() => {}); this.projects.update(projectId, { status: 'chatgpt-recovery-needed', automationStep: human ? 'Human verification required' : 'Download needs attention', chatgptError: human ? { service: 'chatgpt', step: 'human-verification', message: error.message, recovery: 'Complete the challenge manually in the normal Edge window that ZeroPOD opened, close it if it remains open, then Retry the queue row.' } : automationError('chatgpt','download',error,'The generated image may still be ready in ChatGPT. Click its Download control manually; ZeroPOD will capture the browser download if the session is still open.') }); } })();
-    return downloadPromise;
+    return fresh[0];
+  }
+
+  async saveImageSource(page, source, projectDir) {
+    if (!source) throw new Error('Generated image source is empty.');
+    let body;
+    let contentType = '';
+
+    if (/^(blob:|data:)/i.test(source)) {
+      const encoded = await page.evaluate(async (src) => {
+        const response = await fetch(src);
+        if (!response.ok) throw new Error(`Image fetch failed with ${response.status}`);
+        const type = response.headers.get('content-type') || '';
+        const buffer = await response.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        return { base64: btoa(binary), type };
+      }, source);
+      body = Buffer.from(encoded.base64, 'base64');
+      contentType = encoded.type;
+    } else {
+      const response = await page.context().request.get(source, { timeout: 45000 });
+      if (!response.ok()) throw new Error(`Generated image request failed with ${response.status()}.`);
+      contentType = response.headers()['content-type'] || '';
+      body = await response.body();
+    }
+
+    if (!body || body.length < 10000) throw new Error('Captured generated image was unexpectedly small.');
+    const ext = /webp/i.test(contentType) ? '.webp' : /jpe?g/i.test(contentType) ? '.jpg' : '.png';
+    const savePath = path.join(projectDir, `generated${ext}`);
+    fs.writeFileSync(savePath, body);
+    return savePath;
+  }
+
+  async waitForGeneratedImage(page, projectId, baselineSources = new Set()) {
+    const projectDir = this.projects.getProjectDir(projectId);
+    const started = Date.now();
+    const timeoutMs = 360000;
+
+    while (Date.now() - started < timeoutMs) {
+      await this.assertNoHumanGate(page);
+      const image = await this.findNewGeneratedImage(page, baselineSources);
+      if (image) {
+        try {
+          await wait(1800);
+          const latest = await this.findNewGeneratedImage(page, baselineSources);
+          const source = latest?.src || image.src;
+          const savePath = await this.saveImageSource(page, source, projectDir);
+          this.projects.update(projectId, {
+            status: 'awaiting-review',
+            generatedImagePath: savePath,
+            automationStep: 'Ready for image review',
+            chatgptError: null
+          });
+          return { ok: true, path: savePath, method: 'image-source' };
+        } catch {
+          // The image may still be transitioning from a preview URL. Keep polling,
+          // then fall back to ChatGPT's download UI if source capture never succeeds.
+        }
+      }
+      await wait(1800);
+    }
+    throw new Error('Timed out waiting for the completed ChatGPT image.');
+  }
+
+  async clickDownloadFallback(page, projectId) {
+    const projectDir = this.projects.getProjectDir(projectId);
+    return new Promise(async (resolve, reject) => {
+      const timeout = setTimeout(() => { page.off('download', handler); reject(new Error('ChatGPT download fallback timed out.')); }, 90000);
+      const handler = async (download) => {
+        try {
+          clearTimeout(timeout);
+          page.off('download', handler);
+          const suggested = download.suggestedFilename() || 'generated-image.png';
+          const ext = path.extname(suggested) || '.png';
+          const savePath = path.join(projectDir, `generated${ext.toLowerCase()}`);
+          await download.saveAs(savePath);
+          resolve(savePath);
+        } catch (error) { reject(error); }
+      };
+      page.on('download', handler);
+      try {
+        const clicked = await clickFirstVisible([
+          page.getByRole('button', { name: /download|save image/i }).last(),
+          page.getByRole('link', { name: /download|save image/i }).last(),
+          page.locator('button[aria-label*="download" i]').last(),
+          page.locator('button[title*="download" i]').last(),
+          page.locator('[data-testid*="download" i]').last()
+        ], { timeout: 8000 });
+        if (!clicked) throw new Error('No ChatGPT download control was detected.');
+      } catch (error) {
+        clearTimeout(timeout);
+        page.off('download', handler);
+        reject(error);
+      }
+    });
+  }
+
+  async captureGeneratedImage(page, projectId, baselineSources) {
+    this.projects.update(projectId, { status: 'generating', chatgptError: null, automationStep: 'Waiting for generated image' });
+    try {
+      return await this.waitForGeneratedImage(page, projectId, baselineSources);
+    } catch (sourceError) {
+      try {
+        const savePath = await this.clickDownloadFallback(page, projectId);
+        this.projects.update(projectId, { status: 'awaiting-review', generatedImagePath: savePath, automationStep: 'Ready for image review', chatgptError: null });
+        return { ok: true, path: savePath, method: 'download-fallback' };
+      } catch (downloadError) {
+        const error = new Error(`ZeroPOD saw the ChatGPT generation finish but could not capture the image automatically. Source capture: ${sourceError.message} Download fallback: ${downloadError.message}`);
+        this.projects.update(projectId, {
+          status: 'chatgpt-recovery-needed',
+          automationStep: 'Generated image capture needs attention',
+          chatgptError: automationError('chatgpt', 'capture-generated-image', error, 'The generated image is already visible in ChatGPT. Use its normal Download/Save Image control once, then Retry if ZeroPOD still does not capture it.')
+        });
+        throw error;
+      }
+    }
   }
 
   async start({ referencePath, sourceUrl = '', reviewNotes = '', existingProjectId = null, onStep = null }) {
@@ -95,9 +228,13 @@ class ChatGPTController {
       step('Checking ChatGPT'); await this.assertNoHumanGate(page);
       step('Waiting for ChatGPT composer'); await this.ensureReady(page);
       step('Uploading reference image'); await this.attachReference(page, project.referencePath);
+      const baselineSources = await this.snapshotImageSources(page);
       step('Sending generation prompt'); await this.submitPrompt(page, this.buildPrompt(sourceUrl || project.sourceUrl, reviewNotes));
-      step('Waiting for generated image'); this.waitForGeneratedDownload(page, project.id).catch(() => {});
-      return { ok: true, projectId: project.id, status: 'generating', message: 'Generation submitted.' };
+      step('Waiting for generated image');
+      this.captureGeneratedImage(page, project.id, baselineSources).catch(async (error) => {
+        if (error.code === 'HUMAN_VERIFICATION_REQUIRED') await this.sessions.login('chatgpt').catch(() => {});
+      });
+      return { ok: true, projectId: project.id, status: 'generating', message: 'Generation submitted. ZeroPOD will capture the completed image directly from ChatGPT and move it to Review Queue.' };
     } catch (error) {
       const human = error.code === 'HUMAN_VERIFICATION_REQUIRED';
       if (human) await this.sessions.login('chatgpt').catch(() => {});
