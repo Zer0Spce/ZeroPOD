@@ -1,3 +1,5 @@
+const { retryStep, clickFirstVisible, automationError } = require('./automationUtils');
+
 class MetadataController {
   constructor({ sessions, projects }) {
     this.sessions = sessions;
@@ -5,9 +7,7 @@ class MetadataController {
   }
 
   buildPrompt(project) {
-    if (!project.sourceUrl) {
-      throw new Error('POD WINNER metadata requires the pasted Amazon/source link.');
-    }
+    if (!project.sourceUrl) throw new Error('POD WINNER metadata requires the pasted Amazon/source link.');
 
     return [
       'POD WINNER MODE',
@@ -57,12 +57,17 @@ class MetadataController {
   }
 
   async locateComposer(page) {
-    const selectors = ['#prompt-textarea', 'textarea[placeholder*="Message"]', 'textarea', '[contenteditable="true"]'];
-    for (const selector of selectors) {
-      const locator = page.locator(selector).first();
-      if (await locator.count()) return locator;
-    }
-    throw new Error('Could not find the ChatGPT composer.');
+    const selectors = ['#prompt-textarea', 'textarea[placeholder*="Message"]', 'textarea', '[contenteditable="true"][data-placeholder]', '[contenteditable="true"]'];
+    return retryStep('Locate ChatGPT metadata composer', async () => {
+      for (const selector of selectors) {
+        const locator = page.locator(selector).first();
+        try {
+          await locator.waitFor({ state: 'visible', timeout: 3000 });
+          return locator;
+        } catch {}
+      }
+      throw new Error('Could not find the ChatGPT composer.');
+    }, { attempts: 3, delayMs: 900 });
   }
 
   normalizeTag(value) {
@@ -100,54 +105,98 @@ class MetadataController {
     }
 
     parsed.supportingTags = uniqueTags.slice(0, 14);
-    if (parsed.supportingTags.length !== 14) {
-      throw new Error('POD WINNER metadata must contain exactly 14 unique supporting tags.');
-    }
-
+    if (parsed.supportingTags.length !== 14) throw new Error('POD WINNER metadata must contain exactly 14 unique supporting tags.');
     return parsed;
   }
 
-  async generate(projectId) {
-    const project = this.projects.read(projectId);
-    if (project.status !== 'approved-image' && project.status !== 'metadata-ready') {
-      throw new Error('Image must pass review before generating metadata.');
-    }
-    if (!project.sourceUrl) {
-      throw new Error('Paste the Amazon link before generating POD WINNER metadata.');
-    }
-
-    const { page } = await this.sessions.ensureService('chatgpt');
-    await page.bringToFront();
+  async submitPrompt(page, prompt) {
     const composer = await this.locateComposer(page);
-    const prompt = this.buildPrompt(project);
     await composer.click();
-    await composer.fill(prompt).catch(async () => {
-      await composer.pressSequentially(prompt, { delay: 1 });
-    });
+    await composer.fill(prompt).catch(async () => composer.pressSequentially(prompt, { delay: 1 }));
+    const sent = await clickFirstVisible([
+      page.locator('button[data-testid="send-button"]').first(),
+      page.getByRole('button', { name: /send/i }).first(),
+      page.locator('button[aria-label*="send" i]').first()
+    ], { timeout: 4000 });
+    if (!sent) await composer.press('Enter');
+  }
 
+  async waitForAssistantResponse(page, previousCount) {
     const assistants = page.locator('[data-message-author-role="assistant"]');
-    const previousCount = await assistants.count();
-    const sendButton = page.locator('button[data-testid="send-button"]').first();
-    if (await sendButton.count()) await sendButton.click();
-    else await composer.press('Enter');
-
     await page.waitForFunction(
       (count) => document.querySelectorAll('[data-message-author-role="assistant"]').length > count,
       previousCount,
       { timeout: 180000 }
-    ).catch(() => {});
-
+    );
     const response = assistants.last();
-    await response.waitFor({ state: 'visible', timeout: 180000 });
-    const raw = await response.innerText();
-    const metadata = this.parseMetadata(raw);
-    const updated = this.projects.update(projectId, {
-      status: 'metadata-ready',
-      metadata,
-      metadataMode: 'POD WINNER',
-      metadataSourceUrl: project.sourceUrl
-    });
-    return { ok: true, metadata, project: updated };
+    await response.waitFor({ state: 'visible', timeout: 30000 });
+
+    let lastText = '';
+    let stableChecks = 0;
+    for (let i = 0; i < 60; i += 1) {
+      const text = (await response.innerText()).trim();
+      if (text && text === lastText) stableChecks += 1;
+      else stableChecks = 0;
+      lastText = text;
+      if (stableChecks >= 2) break;
+      await page.waitForTimeout(900);
+    }
+    return lastText;
+  }
+
+  async generate(projectId) {
+    const project = this.projects.read(projectId);
+    if (project.status !== 'approved-image' && project.status !== 'metadata-ready' && project.status !== 'metadata-recovery-needed') {
+      throw new Error('Image must pass review before generating metadata.');
+    }
+    if (!project.sourceUrl) throw new Error('Paste the Amazon link before generating POD WINNER metadata.');
+
+    try {
+      const { page } = await this.sessions.ensureService('chatgpt');
+      await page.bringToFront();
+      if (!page.url().startsWith('https://chatgpt.com')) {
+        await retryStep('Open ChatGPT for metadata', () => page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 45000 }), { attempts: 2 });
+      }
+
+      this.projects.update(projectId, { status: 'metadata-generating', metadataError: null });
+      const assistants = page.locator('[data-message-author-role="assistant"]');
+      const previousCount = await assistants.count();
+      await this.submitPrompt(page, this.buildPrompt(project));
+      let raw = await this.waitForAssistantResponse(page, previousCount);
+      let metadata;
+
+      try {
+        metadata = this.parseMetadata(raw);
+      } catch (firstError) {
+        const correctionCount = await assistants.count();
+        await this.submitPrompt(page, [
+          'Correct your previous response.',
+          'Return ONLY valid JSON matching the requested POD WINNER schema.',
+          'Use exactly 1 mainTag and exactly 14 unique supportingTags.',
+          'Do not add markdown, prose, or code fences.'
+        ].join('\n'));
+        raw = await this.waitForAssistantResponse(page, correctionCount);
+        metadata = this.parseMetadata(raw);
+      }
+
+      const updated = this.projects.update(projectId, {
+        status: 'metadata-ready',
+        metadata,
+        metadataMode: 'POD WINNER',
+        metadataSourceUrl: project.sourceUrl,
+        metadataError: null
+      });
+      return { ok: true, metadata, project: updated };
+    } catch (error) {
+      const recovery = automationError(
+        'chatgpt',
+        'metadata',
+        error,
+        'Open ChatGPT from Connections, confirm the conversation is responsive, then retry Generate Metadata. ZeroPOD will reuse the approved project and Amazon source URL.'
+      );
+      this.projects.update(projectId, { status: 'metadata-recovery-needed', metadataError: recovery });
+      throw new Error(recovery.message);
+    }
   }
 }
 

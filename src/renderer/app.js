@@ -71,13 +71,14 @@ async function renderProjects() {
 async function refreshReview() {
   if (!currentProjectId) {
     const projects = await window.zeroPOD.projects.list();
-    const candidate = projects.find((item) => ['awaiting-review', 'generating', 'regenerating'].includes(item.status));
+    const candidate = projects.find((item) => ['awaiting-review', 'generating', 'regenerating', 'chatgpt-recovery-needed'].includes(item.status));
     if (candidate) currentProjectId = candidate.id;
   }
   if (!currentProjectId) return;
   const project = await window.zeroPOD.projects.get(currentProjectId);
   document.getElementById('reviewProjectLabel').textContent = project.id;
-  document.getElementById('reviewStatus').textContent = `Status: ${project.status}`;
+  const recoveryText = project.chatgptError?.recovery ? ` · Recovery: ${project.chatgptError.recovery}` : '';
+  document.getElementById('reviewStatus').textContent = `Status: ${project.status}${recoveryText}`;
   document.getElementById('reviewNotes').value = project.review?.notes || '';
   const img = document.getElementById('reviewImage');
   const message = document.getElementById('previewMessage');
@@ -86,7 +87,9 @@ async function refreshReview() {
     img.hidden = false; message.hidden = true;
   } else {
     img.hidden = true; message.hidden = false;
-    message.textContent = project.status === 'generating' ? 'ChatGPT is generating. Return here after the image has downloaded.' : 'Generated image is not available yet.';
+    if (project.status === 'generating') message.textContent = 'ChatGPT is generating. ZeroPOD is waiting for the image download.';
+    else if (project.status === 'chatgpt-recovery-needed') message.textContent = project.chatgptError?.recovery || 'ChatGPT needs attention. Open the saved session and retry.';
+    else message.textContent = 'Generated image is not available yet.';
   }
 }
 
@@ -99,12 +102,14 @@ async function refreshWorkflow() {
   if (!currentProjectId) return;
   const project = await window.zeroPOD.projects.get(currentProjectId);
   document.getElementById('workflowProjectLabel').textContent = project.id;
-  document.getElementById('workflowStatus').textContent = `Status: ${project.status}`;
+  const metaRecovery = project.metadataError?.recovery ? ` · Recovery: ${project.metadataError.recovery}` : '';
+  document.getElementById('workflowStatus').textContent = `Status: ${project.status}${metaRecovery}`;
   const meta = project.metadata || {};
   document.getElementById('metaTitle').value = meta.title || '';
   document.getElementById('metaMainTag').value = meta.mainTag || '';
   document.getElementById('metaSupportingTags').value = (meta.supportingTags || []).join(', ');
   document.getElementById('metaDescription').value = meta.description || '';
+  document.getElementById('generateMetadata').textContent = project.status === 'metadata-recovery-needed' ? 'Retry Metadata' : 'Generate Metadata';
 }
 
 async function refreshUpload() {
@@ -160,9 +165,12 @@ document.getElementById('passDesign').addEventListener('click', async () => {
 
 document.getElementById('generateMetadata').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No approved project selected.');
+  const button = document.getElementById('generateMetadata');
+  button.disabled = true;
   document.getElementById('workflowStatus').textContent = 'Generating POD WINNER metadata in ChatGPT…';
-  try { await window.zeroPOD.metadata.generate(currentProjectId); await refreshWorkflow(); }
-  catch (error) { alert(`Metadata generation failed: ${error.message || error}`); }
+  try { await window.zeroPOD.metadata.generate(currentProjectId); }
+  catch (error) { document.getElementById('workflowStatus').textContent = `Metadata needs attention: ${error.message || error}`; }
+  finally { button.disabled = false; await refreshWorkflow(); }
 });
 
 document.getElementById('startVectorizer').addEventListener('click', async () => {
