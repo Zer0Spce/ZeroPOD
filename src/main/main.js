@@ -3,6 +3,9 @@ const path = require('path');
 const { SessionManager } = require('./sessionManager');
 const { ProjectStore } = require('./projectStore');
 const { ChatGPTController } = require('./chatgptController');
+const { MetadataController } = require('./metadataController');
+const { VectorizerController } = require('./vectorizerController');
+const { ExportController } = require('./exportController');
 
 const POD_RULES = [
   'Copy slogan and create a new style.',
@@ -24,6 +27,9 @@ let mainWindow;
 const sessions = new SessionManager();
 const projects = new ProjectStore();
 const chatgpt = new ChatGPTController({ sessions, projects, podRules: POD_RULES });
+const metadata = new MetadataController({ sessions, projects });
+const vectorizer = new VectorizerController({ sessions, projects });
+const exporter = new ExportController({ projects });
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -40,7 +46,6 @@ function createWindow() {
       sandbox: true
     }
   });
-
   mainWindow.removeMenu();
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
@@ -56,17 +61,15 @@ app.whenReady().then(() => {
   ipcMain.handle('review:reject', async (_event, { projectId, notes }) => {
     const project = projects.read(projectId);
     projects.write({ ...project, status: 'regenerating', review: { decision: 'rejected', notes: notes || '' } });
-    return chatgpt.start({
-      referencePath: project.referencePath,
-      sourceUrl: project.sourceUrl,
-      reviewNotes: notes || '',
-      existingProjectId: projectId
-    });
+    return chatgpt.start({ referencePath: project.referencePath, sourceUrl: project.sourceUrl, reviewNotes: notes || '', existingProjectId: projectId });
   });
   ipcMain.handle('review:pass', (_event, { projectId }) => {
     const project = projects.read(projectId);
     return projects.write({ ...project, status: 'approved-image', review: { ...project.review, decision: 'passed' } });
   });
+  ipcMain.handle('metadata:generate', (_event, projectId) => metadata.generate(projectId));
+  ipcMain.handle('vectorizer:start', (_event, projectId) => vectorizer.start(projectId));
+  ipcMain.handle('export:png', (_event, projectId) => exporter.exportPng(projectId));
   ipcMain.handle('file:choose-reference', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Choose reference image',
@@ -75,7 +78,6 @@ app.whenReady().then(() => {
     });
     return result.canceled ? null : result.filePaths[0];
   });
-
   createWindow();
 });
 

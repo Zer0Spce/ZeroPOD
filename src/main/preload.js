@@ -20,6 +20,15 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     reject: (payload) => ipcRenderer.invoke('review:reject', payload),
     pass: (payload) => ipcRenderer.invoke('review:pass', payload)
   },
+  metadata: {
+    generate: (projectId) => ipcRenderer.invoke('metadata:generate', projectId)
+  },
+  vectorizer: {
+    start: (projectId) => ipcRenderer.invoke('vectorizer:start', projectId)
+  },
+  export: {
+    png: (projectId) => ipcRenderer.invoke('export:png', projectId)
+  },
   files: {
     chooseReference: () => ipcRenderer.invoke('file:choose-reference')
   }

@@ -14,10 +14,11 @@
       <button class="nav" data-view="connections">Connections</button>
       <button class="nav" data-view="create">Create</button>
       <button class="nav" data-view="review">Review Queue</button>
+      <button class="nav" data-view="workflow">Metadata & Export</button>
       <button class="nav" data-view="projects">Projects</button>
       <button class="nav" data-view="upload">Upload Queue</button>
       <button class="nav" data-view="settings">Settings</button>
-      <div class="footer-note">Windows only · v0.1.0</div>
+      <div class="footer-note">Windows only · v0.2.0</div>
     </aside>
 
     <main class="content">
@@ -25,7 +26,7 @@
         <div class="eyebrow">POD AUTOMATION WORKSPACE</div>
         <h1>ZeroPOD</h1>
         <p class="lead">Reference → generation → review → metadata → vectorize → 4500×5400 export → Redbubble queue.</p>
-        <div class="pipeline"><div>1. Reference</div><span>→</span><div>2. Generate</div><span>→</span><div>3. Review</div><span>→</span><div>4. Metadata</div><span>→</span><div>5. Vectorize</div><span>→</span><div>6. Upload</div></div>
+        <div class="pipeline"><div>1. Reference</div><span>→</span><div>2. Generate</div><span>→</span><div>3. Review</div><span>→</span><div>4. Metadata</div><span>→</span><div>5. Vectorize</div><span>→</span><div>6. Export</div><span>→</span><div>7. Upload</div></div>
       </section>
 
       <section id="connections" class="view">
@@ -58,8 +59,25 @@
         </div>
       </section>
 
+      <section id="workflow" class="view">
+        <div class="eyebrow">POST-APPROVAL PIPELINE</div><h2>Metadata & Export</h2>
+        <div class="panel"><strong id="workflowProjectLabel">No approved project selected.</strong><div id="workflowStatus" class="muted"></div></div>
+        <div class="cards">
+          <article class="connection-card"><div><div class="service-name">1. Generate Redbubble metadata</div><div class="last-seen">Title + 1 Main Tag + 14 Supporting Tags + Short Description</div></div><button id="generateMetadata">Generate Metadata</button></article>
+          <article class="connection-card"><div><div class="service-name">2. Vectorizer.ai</div><div class="last-seen">Upload the approved image and capture SVG into the local project.</div></div><button id="startVectorizer">Vectorize</button></article>
+          <article class="connection-card"><div><div class="service-name">3. Export PNG</div><div class="last-seen">Render SVG to a transparent 4500×5400 PNG without stretching the artwork.</div></div><button id="exportPng">Export 4500×5400</button></article>
+        </div>
+        <div class="panel">
+          <h3>Listing metadata</h3>
+          <label>Title<input id="metaTitle" readonly /></label>
+          <label>Main Tag<input id="metaMainTag" readonly /></label>
+          <label>Supporting Tags<textarea id="metaSupportingTags" readonly></textarea></label>
+          <label>Short Description<textarea id="metaDescription" readonly></textarea></label>
+        </div>
+      </section>
+
       <section id="projects" class="view"><div class="eyebrow">LOCAL LIBRARY</div><h2>Projects</h2><div id="projectList" class="cards"></div></section>
-      <section id="upload" class="view"><div class="eyebrow">PUBLISHING</div><h2>Upload Queue</h2><div class="empty">Redbubble workflow: copy the first existing work as the baseline, replace the main artwork and listing details, then upload/publish.</div></section>
+      <section id="upload" class="view"><div class="eyebrow">PUBLISHING</div><h2>Upload Queue</h2><div class="empty">Redbubble workflow: Copy Existing Work → select the first existing work → replace the main artwork and listing details → review → publish/save.</div></section>
       <section id="settings" class="view"><div class="eyebrow">CONFIGURATION</div><h2>Settings</h2><div class="empty">ZeroPOD stores operational data locally under its Windows app-data directory.</div></section>
     </main>
   </div>
