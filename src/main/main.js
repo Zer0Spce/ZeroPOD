@@ -55,10 +55,11 @@ function linkedLiveRows(projectId) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1420, height: 900, minWidth: 1100, minHeight: 720,
+    width: 1420, height: 900, minWidth: 760, minHeight: 640,
     backgroundColor: '#101114', title: 'ZeroPOD',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
+  sessions.setHostWindow?.(mainWindow);
   mainWindow.removeMenu();
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
@@ -95,7 +96,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('workspace:restore', async () => {
     if (automationStore.read().state === 'running') throw new Error('Pause the Automation List before restoring a workspace backup.');
-    const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose ZeroPOD workspace backup folder', properties: ['openDirectory'] });
+    const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose ZeroPOD workspace backup folder', properties: ['openDirectory', 'createDirectory'] });
     if (result.canceled || !result.filePaths[0]) return { canceled: true };
     return { canceled: false, ...workspace.restoreFrom(result.filePaths[0]) };
   });
