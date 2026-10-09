@@ -74,8 +74,34 @@ class MetadataController {
     }, { attempts: 3, delayMs: 350 });
   }
 
+  async openRememberedThread(page) {
+    const current = page.url();
+    const isRealThread = (value) => /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9-]{20,}$/i.test(String(value || ''));
+
+    if (isRealThread(current)) {
+      this.sessions.rememberThreadUrl('chatgpt', current);
+      return;
+    }
+
+    const saved = this.sessions.getLastThreadUrl('chatgpt');
+    if (isRealThread(saved)) {
+      try {
+        await page.goto(saved, { waitUntil: 'domcontentloaded', timeout: 12000 });
+        await this.locateComposer(page);
+        return;
+      } catch {
+        this.sessions.clearLastThreadUrl?.('chatgpt');
+      }
+    }
+
+    if (!page.url().startsWith('https://chatgpt.com')) {
+      await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    }
+    await this.locateComposer(page);
+  }
+
   async attachApprovedDesign(page, project) {
-    const approvedPath = project.generatedImagePath;
+    const approvedPath = project.approvedImagePath || project.generatedImagePath;
     if (!approvedPath || !fs.existsSync(approvedPath)) throw new Error('Approved design image is missing. Re-open the project review and restore the generated image before metadata generation.');
 
     return retryStep('Attach approved design for metadata', async () => {
@@ -111,17 +137,15 @@ class MetadataController {
     return this.normalizeTag(value).toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\b(s|es)\b/g, '').trim();
   }
 
-  extractJSONObject(raw) {
-    let text = String(raw || '').trim();
-    text = text.replace(/^\uFEFF/, '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-
-    const first = text.indexOf('{');
-    if (first < 0) throw new Error('ChatGPT did not return JSON metadata.');
-
+  extractJSONObjects(raw) {
+    const text = String(raw || '').replace(/^\uFEFF/, '');
+    const objects = [];
     let depth = 0;
+    let start = -1;
     let inString = false;
     let escaped = false;
-    for (let i = first; i < text.length; i += 1) {
+
+    for (let i = 0; i < text.length; i += 1) {
       const ch = text[i];
       if (inString) {
         if (escaped) escaped = false;
@@ -133,41 +157,65 @@ class MetadataController {
         inString = true;
         continue;
       }
-      if (ch === '{') depth += 1;
-      if (ch === '}') {
+      if (ch === '{') {
+        if (depth === 0) start = i;
+        depth += 1;
+      } else if (ch === '}' && depth > 0) {
         depth -= 1;
-        if (depth === 0) return text.slice(first, i + 1);
+        if (depth === 0 && start >= 0) {
+          objects.push(text.slice(start, i + 1));
+          start = -1;
+        }
       }
     }
-
-    throw new Error('ChatGPT metadata JSON is incomplete.');
+    return objects;
   }
 
-  parseMetadata(raw) {
-    const jsonText = this.extractJSONObject(raw);
-    const parsed = JSON.parse(jsonText);
-    if (!parsed.title || !parsed.mainTag || !parsed.description || !Array.isArray(parsed.supportingTags)) {
+  normalizeMetadataObject(parsed) {
+    if (!parsed || typeof parsed !== 'object' || !parsed.title || !parsed.mainTag || !parsed.description || !Array.isArray(parsed.supportingTags)) {
       throw new Error('Metadata response is missing required fields.');
     }
 
-    parsed.title = String(parsed.title).trim();
-    parsed.mainTag = this.normalizeTag(parsed.mainTag);
-    parsed.description = String(parsed.description).trim();
-    parsed.optimizationMode = 'POD WINNER';
-    parsed.supportingTags = parsed.supportingTags.map((tag) => this.normalizeTag(tag)).filter(Boolean);
+    const metadata = {
+      title: String(parsed.title).trim(),
+      mainTag: this.normalizeTag(parsed.mainTag),
+      description: String(parsed.description).trim(),
+      optimizationMode: 'POD WINNER',
+      supportingTags: parsed.supportingTags.map((tag) => this.normalizeTag(tag)).filter(Boolean)
+    };
 
     const seen = new Set();
     const uniqueTags = [];
-    for (const tag of parsed.supportingTags) {
+    const mainKey = this.canonicalTag(metadata.mainTag);
+    for (const tag of metadata.supportingTags) {
       const key = this.canonicalTag(tag);
-      if (!key || seen.has(key) || key === this.canonicalTag(parsed.mainTag)) continue;
+      if (!key || seen.has(key) || key === mainKey) continue;
       seen.add(key);
       uniqueTags.push(tag);
     }
 
-    parsed.supportingTags = uniqueTags.slice(0, 14);
-    if (parsed.supportingTags.length !== 14) throw new Error('POD WINNER metadata must contain exactly 14 unique supporting tags.');
-    return parsed;
+    metadata.supportingTags = uniqueTags.slice(0, 14);
+    if (!metadata.title || !metadata.mainTag || !metadata.description) throw new Error('Metadata response contains blank required fields.');
+    if (metadata.supportingTags.length !== 14) throw new Error(`POD WINNER metadata must contain exactly 14 unique supporting tags; found ${metadata.supportingTags.length}.`);
+    return metadata;
+  }
+
+  parseMetadata(raw) {
+    let text = String(raw || '').trim();
+    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const objects = this.extractJSONObjects(text);
+    if (!objects.length) throw new Error('ChatGPT did not return JSON metadata.');
+
+    let lastError = null;
+    for (let i = objects.length - 1; i >= 0; i -= 1) {
+      try {
+        const parsed = JSON.parse(objects[i]);
+        return this.normalizeMetadataObject(parsed);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('ChatGPT metadata JSON could not be parsed.');
   }
 
   async composerText(composer) {
@@ -193,9 +241,20 @@ class MetadataController {
       page.locator('button[data-testid="send-button"]:visible').first(),
       page.locator('button[data-testid*="send" i]:visible').first(),
       page.getByRole('button', { name: /send/i }).first(),
-      page.locator('button[aria-label*="send" i]:visible').first()
-    ], { timeout: 2500 });
+      page.locator('button[aria-label*="send" i]:visible').first(),
+      page.locator('button[type="submit"]:visible').first()
+    ], { timeout: 5000 });
     if (!sent) await composer.press('Enter');
+
+    const promptStart = prompt.slice(0, Math.min(60, prompt.length));
+    const started = Date.now();
+    while (Date.now() - started < 8000) {
+      const text = await this.composerText(composer);
+      const stopVisible = await page.locator('button[data-testid="stop-button"], button[aria-label*="stop" i]').first().isVisible().catch(() => false);
+      if (!text.includes(promptStart) || stopVisible) return true;
+      await wait(150);
+    }
+    throw new Error('ChatGPT kept the metadata prompt in the composer instead of sending it.');
   }
 
   async snapshotAssistant(page) {
@@ -205,14 +264,29 @@ class MetadataController {
     return { count, lastText };
   }
 
-  async parseLatestVisibleAssistant(page, maxMessages = 3) {
+  async parseLatestVisibleAssistant(page, maxMessages = 6) {
     const assistants = page.locator('[data-message-author-role="assistant"]');
     const count = await assistants.count();
     for (let offset = 0; offset < Math.min(maxMessages, count); offset += 1) {
-      const text = (await assistants.nth(count - 1 - offset).innerText().catch(() => '')).trim();
-      if (!text) continue;
+      const message = assistants.nth(count - 1 - offset);
+      const texts = [
+        (await message.innerText().catch(() => '')).trim(),
+        (await message.locator('pre, code').allInnerTexts().catch(() => [])).join('\n').trim()
+      ].filter(Boolean);
+      for (const text of texts) {
+        try {
+          return { metadata: this.parseMetadata(text), raw: text };
+        } catch {}
+      }
+    }
+
+    // ChatGPT occasionally changes message wrappers. As a final recovery path,
+    // scan the visible conversation text and accept only a fully valid metadata
+    // object (the schema in the user's prompt cannot pass the 14-tag validation).
+    const conversationText = await page.locator('main').innerText().catch(() => '');
+    if (conversationText) {
       try {
-        return { metadata: this.parseMetadata(text), raw: text };
+        return { metadata: this.parseMetadata(conversationText), raw: conversationText };
       } catch {}
     }
     return null;
@@ -236,42 +310,54 @@ class MetadataController {
             latestText = text;
             lastChangeAt = Date.now();
           }
-          if (text) {
-            try {
-              return { metadata: this.parseMetadata(text), raw: text };
-            } catch (error) {
-              // While ChatGPT is streaming, incomplete JSON is expected. Once the
-              // visible response has stopped changing for a few seconds, surface
-              // the real parse error so the correction prompt can run promptly.
-              if (Date.now() - lastChangeAt > 3500 && /\}/.test(text)) {
-                const parseError = new Error(error.message || 'Visible ChatGPT metadata could not be parsed.');
-                parseError.raw = text;
-                throw parseError;
-              }
-            }
+
+          const visible = await this.parseLatestVisibleAssistant(page, 3);
+          if (visible?.metadata) return visible;
+
+          const stopVisible = await page.locator('button[data-testid="stop-button"], button[aria-label*="stop" i], button[data-testid*="stop" i]').first().isVisible().catch(() => false);
+          if (!stopVisible && latestText && Date.now() - lastChangeAt > 2500) {
+            const finalVisible = await this.parseLatestVisibleAssistant(page, 6);
+            if (finalVisible?.metadata) return finalVisible;
           }
         }
       }
       await wait(250);
     }
 
+    const finalVisible = await this.parseLatestVisibleAssistant(page, 8);
+    if (finalVisible?.metadata) return finalVisible;
+
     const error = new Error(sawNewResponse
-      ? 'ChatGPT returned metadata text, but ZeroPOD could not parse it before the timeout.'
+      ? 'ChatGPT returned metadata, but ZeroPOD could not find a valid Title + Main Tag + 14 Supporting Tags + Description object in the visible response.'
       : 'Timed out waiting for ChatGPT metadata response.');
     error.raw = latestText;
     throw error;
   }
 
   saveMetadata(projectId, project, metadata) {
+    const approvedPath = project.approvedImagePath || project.generatedImagePath;
     const updated = this.projects.update(projectId, {
       status: 'metadata-ready',
       metadata,
       metadataMode: 'POD WINNER',
       metadataSourceUrl: project.sourceUrl,
-      metadataGroundedImagePath: project.generatedImagePath,
+      metadataGroundedImagePath: approvedPath,
       metadataError: null
     });
     return { ok: true, metadata, project: updated };
+  }
+
+  async rememberCurrentThread(page) {
+    const started = Date.now();
+    while (Date.now() - started < 6000) {
+      const current = page.url();
+      if (/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9-]{20,}$/i.test(current)) {
+        this.sessions.rememberThreadUrl('chatgpt', current);
+        return current;
+      }
+      await wait(150);
+    }
+    return null;
   }
 
   async generate(projectId) {
@@ -280,21 +366,19 @@ class MetadataController {
       throw new Error('Image must pass review before generating metadata.');
     }
     if (!project.sourceUrl) throw new Error('Paste the Amazon link before generating POD WINNER metadata.');
-    if (!project.generatedImagePath || !fs.existsSync(project.generatedImagePath)) throw new Error('Approved design image is missing.');
+    const approvedPath = project.approvedImagePath || project.generatedImagePath;
+    if (!approvedPath || !fs.existsSync(approvedPath)) throw new Error('Approved design image is missing.');
 
     try {
       const { page } = await this.sessions.ensureService('chatgpt');
       await page.bringToFront();
-      if (!page.url().startsWith('https://chatgpt.com')) {
-        await retryStep('Open ChatGPT for metadata', () => page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 25000 }), { attempts: 2 });
-      }
+      await this.openRememberedThread(page);
 
-      // Recovery path for exactly the live failure the user reported: if ChatGPT
-      // already visibly returned valid inline JSON but the previous ZeroPOD build
-      // failed to consume it, Retry Metadata should harvest that response instead
-      // of needlessly asking ChatGPT to generate it again.
+      // If an older build already got the response onto the screen, consume it
+      // first. This is the failure shown in the beta screenshots: the JSON existed
+      // in ChatGPT but ZeroPOD treated the step as failed.
       if (project.status === 'metadata-recovery-needed') {
-        const existing = await this.parseLatestVisibleAssistant(page, 2);
+        const existing = await this.parseLatestVisibleAssistant(page, 8);
         if (existing?.metadata) return this.saveMetadata(projectId, project, existing.metadata);
       }
 
@@ -302,28 +386,16 @@ class MetadataController {
       const baseline = await this.snapshotAssistant(page);
       await this.attachApprovedDesign(page, project);
       await this.submitPrompt(page, this.buildPrompt(project));
+      await this.rememberCurrentThread(page);
 
-      let result;
-      try {
-        result = await this.waitForAssistantMetadata(page, baseline);
-      } catch (firstError) {
-        const correctionBaseline = await this.snapshotAssistant(page);
-        await this.submitPrompt(page, [
-          'Correct your previous response.',
-          'Return ONLY valid JSON matching the requested POD WINNER schema.',
-          'Use exactly 1 mainTag and exactly 14 unique supportingTags.',
-          'Do not add markdown, prose, or code fences.'
-        ].join('\n'));
-        result = await this.waitForAssistantMetadata(page, correctionBaseline);
-      }
-
+      const result = await this.waitForAssistantMetadata(page, baseline);
       return this.saveMetadata(projectId, project, result.metadata);
     } catch (error) {
       const recovery = automationError(
         'chatgpt',
         'metadata',
         error,
-        'Open ChatGPT from Connections, confirm the conversation is responsive, then retry Generate Metadata. ZeroPOD will first try to consume any valid inline JSON already visible before sending another request.'
+        'Keep the current ChatGPT thread open and retry Generate Metadata. ZeroPOD will first consume any valid inline JSON already visible before sending another request.'
       );
       this.projects.update(projectId, { status: 'metadata-recovery-needed', metadataError: recovery });
       throw new Error(recovery.message);
