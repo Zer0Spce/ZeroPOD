@@ -3,6 +3,7 @@ const views = document.querySelectorAll('.view');
 const serviceOrder = ['chatgpt', 'vectorizer', 'redbubble'];
 let currentProjectId = null;
 let projectFilter = 'all';
+let lastQualityResult = null;
 
 function setView(id) {
   navButtons.forEach((button) => button.classList.toggle('active', button.dataset.view === id));
@@ -63,8 +64,7 @@ async function routeProject(project) {
 function wireContinueButtons(root) {
   root.querySelectorAll('.continue-project').forEach((button) => button.addEventListener('click', async () => {
     currentProjectId = button.dataset.id;
-    const project = await window.zeroPOD.projects.get(currentProjectId);
-    await routeProject(project);
+    await routeProject(await window.zeroPOD.projects.get(currentProjectId));
   }));
 }
 
@@ -76,15 +76,10 @@ async function renderDashboard() {
     return acc;
   }, {});
   const stats = [
-    ['Total Projects', projects.length],
-    ['Active', counts.active || 0],
-    ['Needs Attention', counts.attention || 0],
-    ['Ready for Review', counts.review || 0],
-    ['Upload Queue', counts.upload || 0],
-    ['Published', counts.completed || 0]
+    ['Total Projects', projects.length], ['Active', counts.active || 0], ['Needs Attention', counts.attention || 0],
+    ['Ready for Review', counts.review || 0], ['Upload Queue', counts.upload || 0], ['Published', counts.completed || 0]
   ];
   document.getElementById('dashboardStats').innerHTML = stats.map(([label, value]) => `<article class="stat-card"><strong>${value}</strong><span>${label}</span></article>`).join('');
-
   const attention = projects.filter((project) => ['attention', 'review'].includes(project.workflow?.queue)).slice(0, 5);
   const recent = projects.filter((project) => project.workflow?.queue !== 'completed').slice(0, 5);
   const attentionRoot = document.getElementById('attentionQueue');
@@ -176,9 +171,28 @@ async function refreshWorkflow() {
   document.getElementById('metaMainTag').value = meta.mainTag || '';
   document.getElementById('metaSupportingTags').value = (meta.supportingTags || []).join(', ');
   document.getElementById('metaDescription').value = meta.description || '';
+  document.getElementById('metadataValidation').textContent = project.metadataEditedAt ? `Saved ${formatDate(project.metadataEditedAt)}.` : 'Generated metadata can be edited here before continuing.';
   setButton('generateMetadata', ['approved-image', 'metadata-recovery-needed', 'metadata-ready'].includes(project.status), project.status === 'metadata-recovery-needed' ? 'Retry Metadata' : 'Generate Metadata');
+  setButton('saveMetadata', Boolean(project.metadata));
   setButton('startVectorizer', ['metadata-ready', 'vectorizer-recovery-needed'].includes(project.status), project.status === 'vectorizer-recovery-needed' ? 'Retry Vectorizer' : 'Vectorize');
   setButton('exportPng', project.status === 'vector-ready');
+}
+
+function renderQuality(result) {
+  const root = document.getElementById('qualityResults');
+  if (!result) { root.textContent = 'Quality check has not been run yet.'; return; }
+  const errors = result.errors || [];
+  const warnings = result.warnings || [];
+  const artwork = result.artwork || {};
+  root.innerHTML = `${result.ok ? '<strong>Automated checks passed.</strong>' : '<strong>Automated checks failed.</strong>'}
+    <div>${artwork.width && artwork.height ? `Artwork: ${artwork.width}×${artwork.height} · ${artwork.format || '?'} · alpha ${artwork.hasAlpha ? 'yes' : 'no'}` : ''}</div>
+    ${errors.length ? `<div class="validation-errors">${errors.map((item) => `• ${item}`).join('<br>')}</div>` : ''}
+    ${warnings.length ? `<div class="validation-warnings">${warnings.map((item) => `• ${item}`).join('<br>')}</div>` : ''}`;
+}
+
+function updatePublishGate(project) {
+  const manualOk = ['checkSlogan', 'checkTrademark', 'checkProducts'].every((id) => document.getElementById(id).checked);
+  setButton('publishRedbubble', project?.status === 'redbubble-review' && Boolean(lastQualityResult?.ok) && manualOk);
 }
 
 async function refreshUpload() {
@@ -191,10 +205,11 @@ async function refreshUpload() {
   const project = await window.zeroPOD.projects.get(currentProjectId);
   document.getElementById('uploadProjectLabel').textContent = project.id;
   document.getElementById('uploadStatus').textContent = `Status: ${project.workflow?.label || project.status}${nextText(project)}${project.redbubble?.publishedAt ? ` · Published ${formatDate(project.redbubble.publishedAt)}` : ''}`;
-  const recovery = document.getElementById('uploadRecovery');
-  recovery.textContent = project.lastAutomationError ? `Recovery: ${project.lastAutomationError.recovery} Last error: ${project.lastAutomationError.message}` : '';
+  document.getElementById('uploadRecovery').textContent = project.lastAutomationError ? `Recovery: ${project.lastAutomationError.recovery} Last error: ${project.lastAutomationError.message}` : '';
+  lastQualityResult = project.qualityCheck || null;
+  renderQuality(lastQualityResult);
   setButton('prepareRedbubble', ['export-ready', 'redbubble-recovery-needed'].includes(project.status), project.status === 'redbubble-recovery-needed' ? 'Retry Redbubble' : 'Prepare Redbubble');
-  setButton('publishRedbubble', project.status === 'redbubble-review');
+  updatePublishGate(project);
 }
 
 document.getElementById('dashboardNewDesign').addEventListener('click', () => setView('create'));
@@ -248,6 +263,28 @@ document.getElementById('generateMetadata').addEventListener('click', async () =
   finally { button.disabled = false; await refreshWorkflow(); }
 });
 
+document.getElementById('saveMetadata').addEventListener('click', async () => {
+  if (!currentProjectId) return;
+  const supportingTags = document.getElementById('metaSupportingTags').value.split(',').map((tag) => tag.trim()).filter(Boolean);
+  const payload = {
+    projectId: currentProjectId,
+    metadata: {
+      title: document.getElementById('metaTitle').value,
+      mainTag: document.getElementById('metaMainTag').value,
+      supportingTags,
+      description: document.getElementById('metaDescription').value
+    }
+  };
+  try {
+    const result = await window.zeroPOD.metadata.save(payload);
+    const warnings = result.validation.warnings || [];
+    document.getElementById('metadataValidation').textContent = `Saved. ${warnings.length ? `Warnings: ${warnings.join(' ')}` : 'Validation passed.'}`;
+    await refreshWorkflow();
+  } catch (error) {
+    document.getElementById('metadataValidation').textContent = `Cannot save: ${error.message || error}`;
+  }
+});
+
 document.getElementById('startVectorizer').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No project selected.');
   document.getElementById('workflowStatus').textContent = 'Opening Vectorizer.ai and uploading the approved image…';
@@ -262,10 +299,23 @@ document.getElementById('exportPng').addEventListener('click', async () => {
   catch (error) { alert(`Export failed: ${error.message || error}`); }
 });
 
+document.getElementById('runQualityCheck').addEventListener('click', async () => {
+  if (!currentProjectId) return;
+  const button = document.getElementById('runQualityCheck');
+  button.disabled = true;
+  try { lastQualityResult = await window.zeroPOD.quality.check(currentProjectId); renderQuality(lastQualityResult); }
+  catch (error) { document.getElementById('qualityResults').textContent = `Quality check failed: ${error.message || error}`; }
+  finally { button.disabled = false; updatePublishGate(await window.zeroPOD.projects.get(currentProjectId)); }
+});
+
+['checkSlogan', 'checkTrademark', 'checkProducts'].forEach((id) => document.getElementById(id).addEventListener('change', async () => {
+  if (currentProjectId) updatePublishGate(await window.zeroPOD.projects.get(currentProjectId));
+}));
+
 document.getElementById('prepareRedbubble').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No export-ready project selected.');
   const status = document.getElementById('uploadStatus'); const button = document.getElementById('prepareRedbubble');
-  button.disabled = true; status.textContent = 'Opening Redbubble, copying the first existing work, and replacing artwork + metadata…';
+  button.disabled = true; status.textContent = 'Running quality checks, then preparing Redbubble Copy Existing Work…';
   try { const result = await window.zeroPOD.redbubble.prepare(currentProjectId); status.textContent = result.message; }
   catch (error) { status.textContent = `Redbubble needs attention: ${error.message || error}`; }
   finally { button.disabled = false; await refreshUpload(); }
@@ -273,7 +323,7 @@ document.getElementById('prepareRedbubble').addEventListener('click', async () =
 
 document.getElementById('publishRedbubble').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No Redbubble project selected.');
-  if (!confirm('Publish/save this copied Redbubble work now? Confirm that the artwork, inherited product settings, title, tags, description, and product configuration look correct.')) return;
+  if (!confirm('Publish/save this copied Redbubble work now? Confirm the automated quality check and manual checklist are complete.')) return;
   try { await window.zeroPOD.redbubble.publish(currentProjectId); await refreshUpload(); await renderDashboard(); }
   catch (error) { alert(`Redbubble publish failed: ${error.message || error}`); }
 });
