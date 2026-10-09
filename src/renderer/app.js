@@ -13,6 +13,7 @@ navButtons.forEach((button) => button.addEventListener('click', async () => {
   if (button.dataset.view === 'projects') await renderProjects();
   if (button.dataset.view === 'review') await refreshReview();
   if (button.dataset.view === 'workflow') await refreshWorkflow();
+  if (button.dataset.view === 'upload') await refreshUpload();
 }));
 
 function formatDate(value) {
@@ -57,8 +58,13 @@ async function renderProjects() {
   root.querySelectorAll('.open-project').forEach((button) => button.addEventListener('click', async () => {
     currentProjectId = button.dataset.id;
     const project = await window.zeroPOD.projects.get(currentProjectId);
-    setView(project.review?.decision === 'passed' ? 'workflow' : 'review');
-    if (project.review?.decision === 'passed') await refreshWorkflow(); else await refreshReview();
+    if (['export-ready', 'redbubble-preparing', 'redbubble-review', 'published'].includes(project.status)) {
+      setView('upload'); await refreshUpload();
+    } else if (project.review?.decision === 'passed') {
+      setView('workflow'); await refreshWorkflow();
+    } else {
+      setView('review'); await refreshReview();
+    }
   }));
 }
 
@@ -101,6 +107,19 @@ async function refreshWorkflow() {
   document.getElementById('metaDescription').value = meta.description || '';
 }
 
+async function refreshUpload() {
+  if (!currentProjectId) {
+    const projects = await window.zeroPOD.projects.list();
+    const candidate = projects.find((item) => ['export-ready', 'redbubble-preparing', 'redbubble-review', 'published'].includes(item.status));
+    if (candidate) currentProjectId = candidate.id;
+  }
+  if (!currentProjectId) return;
+  const project = await window.zeroPOD.projects.get(currentProjectId);
+  document.getElementById('uploadProjectLabel').textContent = project.id;
+  document.getElementById('uploadStatus').textContent = `Status: ${project.status}${project.redbubble?.publishedAt ? ` · Published ${formatDate(project.redbubble.publishedAt)}` : ''}`;
+  document.getElementById('publishRedbubble').disabled = project.status !== 'redbubble-review';
+}
+
 document.getElementById('chooseReference').addEventListener('click', async () => {
   const file = await window.zeroPOD.files.chooseReference();
   if (file) document.getElementById('referencePath').value = file;
@@ -117,8 +136,7 @@ document.getElementById('startGeneration').addEventListener('click', async () =>
     const result = await window.zeroPOD.generation.start({ referencePath: reference, sourceUrl });
     currentProjectId = result.projectId;
     status.textContent = result.message;
-    setView('review');
-    await refreshReview();
+    setView('review'); await refreshReview();
   } catch (error) { status.textContent = `Generation could not start: ${error.message || error}`; }
   finally { button.disabled = false; }
 });
@@ -134,13 +152,12 @@ document.getElementById('rejectDesign').addEventListener('click', async () => {
 document.getElementById('passDesign').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No project selected.');
   await window.zeroPOD.review.pass({ projectId: currentProjectId });
-  setView('workflow');
-  await refreshWorkflow();
+  setView('workflow'); await refreshWorkflow();
 });
 
 document.getElementById('generateMetadata').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No approved project selected.');
-  document.getElementById('workflowStatus').textContent = 'Generating Redbubble metadata in ChatGPT…';
+  document.getElementById('workflowStatus').textContent = 'Generating POD WINNER metadata in ChatGPT…';
   try { await window.zeroPOD.metadata.generate(currentProjectId); await refreshWorkflow(); }
   catch (error) { alert(`Metadata generation failed: ${error.message || error}`); }
 });
@@ -155,8 +172,31 @@ document.getElementById('startVectorizer').addEventListener('click', async () =>
 document.getElementById('exportPng').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No project selected.');
   document.getElementById('workflowStatus').textContent = 'Exporting transparent 4500×5400 PNG…';
-  try { const result = await window.zeroPOD.export.png(currentProjectId); document.getElementById('workflowStatus').textContent = `Export ready: ${result.path}`; }
-  catch (error) { alert(`Export failed: ${error.message || error}`); }
+  try {
+    const result = await window.zeroPOD.export.png(currentProjectId);
+    document.getElementById('workflowStatus').textContent = `Export ready: ${result.path}`;
+    setView('upload'); await refreshUpload();
+  } catch (error) { alert(`Export failed: ${error.message || error}`); }
+});
+
+document.getElementById('prepareRedbubble').addEventListener('click', async () => {
+  if (!currentProjectId) return alert('No export-ready project selected.');
+  const status = document.getElementById('uploadStatus');
+  status.textContent = 'Opening Redbubble, copying the first existing work, and replacing artwork + metadata…';
+  try {
+    const result = await window.zeroPOD.redbubble.prepare(currentProjectId);
+    status.textContent = result.message;
+    await refreshUpload();
+  } catch (error) { alert(`Redbubble preparation failed: ${error.message || error}`); }
+});
+
+document.getElementById('publishRedbubble').addEventListener('click', async () => {
+  if (!currentProjectId) return alert('No Redbubble project selected.');
+  if (!confirm('Publish/save this copied Redbubble work now? Confirm that the artwork, inherited product settings, title, tags, and description look correct.')) return;
+  try {
+    await window.zeroPOD.redbubble.publish(currentProjectId);
+    await refreshUpload();
+  } catch (error) { alert(`Redbubble publish failed: ${error.message || error}`); }
 });
 
 renderConnections();
