@@ -38,3 +38,10 @@ jobs:
           name: ZeroPOD-Windows-Portable
           path: dist/*.exe
           if-no-files-found: error
+
+      - name: Upload unpacked fast-start artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZeroPOD-Windows-Unpacked
+          path: dist/win-unpacked/**
+          if-no-files-found: error
