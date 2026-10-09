@@ -5,28 +5,55 @@ class MetadataController {
   }
 
   buildPrompt(project) {
+    if (!project.sourceUrl) {
+      throw new Error('POD WINNER metadata requires the pasted Amazon/source link.');
+    }
+
     return [
-      'Create Redbubble listing metadata for the approved POD design in this project.',
-      'Return ONLY valid JSON. No markdown, no code fences.',
+      'POD WINNER MODE',
+      'Create SEO-ready Redbubble listing metadata for the approved POD design in this project.',
+      '',
+      'PRIMARY RESEARCH SOURCE:',
+      `Amazon reference URL: ${project.sourceUrl}`,
+      '',
+      'Use the pasted Amazon link as the PRIMARY niche and buyer-intent reference.',
+      'Analyze the niche, target audience, likely search language, gift intent, emotional angle, product theme, and commercially useful generic keywords from that reference.',
+      'Do NOT copy the Amazon listing title or description verbatim.',
+      'Do NOT include Amazon brand names, seller names, copyrighted character names, protected brand names, or trademarked phrases simply because they appear on the source page.',
+      'Use the Amazon listing for market/niche context, then write original metadata for this approved ZeroPOD design.',
+      '',
+      'Return ONLY valid JSON. No markdown, no code fences, no commentary.',
       'Schema:',
       '{',
       '  "title": "...",',
       '  "mainTag": "...",',
       '  "supportingTags": ["..."],',
-      '  "description": "..."',
+      '  "description": "...",',
+      '  "optimizationMode": "POD WINNER"',
       '}',
       '',
-      'Requirements:',
-      '- Exactly 1 main tag.',
-      '- Exactly 14 supporting tags.',
-      '- Keep tags relevant, natural, and search-friendly.',
-      '- Avoid keyword stuffing.',
-      '- Do not use brand or trademark names unless clearly generic and appropriate.',
-      '- Keep the short description concise and natural.',
-      project.sourceUrl ? `Reference/source URL for niche context only: ${project.sourceUrl}` : '',
+      'SEO REQUIREMENTS:',
+      '- Title: original, descriptive, natural, buyer-friendly, and centered on the strongest niche/search phrase.',
+      '- Put the strongest relevant keyword naturally near the beginning of the title when it reads well.',
+      '- Main Tag: exactly 1 high-intent primary keyword phrase that best describes the design and likely buyer search.',
+      '- Supporting Tags: exactly 14 unique supporting keyword phrases.',
+      '- Supporting tags should cover closely related niche terms, audience terms, gift/buyer intent, theme, humor/style/occasion terms when genuinely relevant, and useful long-tail variations.',
+      '- Avoid duplicate tags, near-duplicate tags, keyword stuffing, vague one-word filler, and irrelevant traffic-bait terms.',
+      '- Description: short, natural, persuasive, and readable; explain what the design is and who it is for while naturally using the main niche language.',
+      '- Metadata must describe the APPROVED DESIGN, not merely the Amazon product.',
+      '- Keep everything search-friendly but human-readable.',
+      '- Never promise rankings, sales, bestseller status, or guaranteed performance.',
+      '- Avoid brand/trademark names unless they are clearly generic and safe to use.',
       '',
-      'Use the approved design context from this conversation/project and produce the listing metadata now.'
-    ].filter(Boolean).join('\n');
+      'QUALITY CHECK BEFORE RESPONDING:',
+      '- Exactly 1 mainTag.',
+      '- Exactly 14 supportingTags.',
+      '- No duplicates ignoring capitalization/plurals.',
+      '- Title, tags, and description all match the approved design and the Amazon-derived niche.',
+      '- optimizationMode must equal exactly "POD WINNER".',
+      '',
+      'Use the approved design context from this conversation/project and produce the final metadata now.'
+    ].join('\n');
   }
 
   async locateComposer(page) {
@@ -38,17 +65,45 @@ class MetadataController {
     throw new Error('Could not find the ChatGPT composer.');
   }
 
+  normalizeTag(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ');
+  }
+
+  canonicalTag(value) {
+    return this.normalizeTag(value).toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\b(s|es)\b/g, '').trim();
+  }
+
   parseMetadata(raw) {
     const trimmed = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
     const start = trimmed.indexOf('{');
     const end = trimmed.lastIndexOf('}');
     if (start < 0 || end < 0) throw new Error('ChatGPT did not return JSON metadata.');
+
     const parsed = JSON.parse(trimmed.slice(start, end + 1));
     if (!parsed.title || !parsed.mainTag || !parsed.description || !Array.isArray(parsed.supportingTags)) {
       throw new Error('Metadata response is missing required fields.');
     }
-    parsed.supportingTags = parsed.supportingTags.map((tag) => String(tag).trim()).filter(Boolean).slice(0, 14);
-    if (parsed.supportingTags.length !== 14) throw new Error('Metadata must contain exactly 14 supporting tags.');
+
+    parsed.title = String(parsed.title).trim();
+    parsed.mainTag = this.normalizeTag(parsed.mainTag);
+    parsed.description = String(parsed.description).trim();
+    parsed.optimizationMode = 'POD WINNER';
+    parsed.supportingTags = parsed.supportingTags.map((tag) => this.normalizeTag(tag)).filter(Boolean);
+
+    const seen = new Set();
+    const uniqueTags = [];
+    for (const tag of parsed.supportingTags) {
+      const key = this.canonicalTag(tag);
+      if (!key || seen.has(key) || key === this.canonicalTag(parsed.mainTag)) continue;
+      seen.add(key);
+      uniqueTags.push(tag);
+    }
+
+    parsed.supportingTags = uniqueTags.slice(0, 14);
+    if (parsed.supportingTags.length !== 14) {
+      throw new Error('POD WINNER metadata must contain exactly 14 unique supporting tags.');
+    }
+
     return parsed;
   }
 
@@ -57,21 +112,25 @@ class MetadataController {
     if (project.status !== 'approved-image' && project.status !== 'metadata-ready') {
       throw new Error('Image must pass review before generating metadata.');
     }
+    if (!project.sourceUrl) {
+      throw new Error('Paste the Amazon link before generating POD WINNER metadata.');
+    }
 
     const { page } = await this.sessions.ensureService('chatgpt');
     await page.bringToFront();
     const composer = await this.locateComposer(page);
+    const prompt = this.buildPrompt(project);
     await composer.click();
-    await composer.fill(this.buildPrompt(project)).catch(async () => {
-      await composer.pressSequentially(this.buildPrompt(project), { delay: 1 });
+    await composer.fill(prompt).catch(async () => {
+      await composer.pressSequentially(prompt, { delay: 1 });
     });
 
+    const assistants = page.locator('[data-message-author-role="assistant"]');
+    const previousCount = await assistants.count();
     const sendButton = page.locator('button[data-testid="send-button"]').first();
     if (await sendButton.count()) await sendButton.click();
     else await composer.press('Enter');
 
-    const assistants = page.locator('[data-message-author-role="assistant"]');
-    const previousCount = await assistants.count();
     await page.waitForFunction(
       (count) => document.querySelectorAll('[data-message-author-role="assistant"]').length > count,
       previousCount,
@@ -82,7 +141,12 @@ class MetadataController {
     await response.waitFor({ state: 'visible', timeout: 180000 });
     const raw = await response.innerText();
     const metadata = this.parseMetadata(raw);
-    const updated = this.projects.update(projectId, { status: 'metadata-ready', metadata });
+    const updated = this.projects.update(projectId, {
+      status: 'metadata-ready',
+      metadata,
+      metadataMode: 'POD WINNER',
+      metadataSourceUrl: project.sourceUrl
+    });
     return { ok: true, metadata, project: updated };
   }
 }
