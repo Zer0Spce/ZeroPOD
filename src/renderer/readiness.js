@@ -72,4 +72,52 @@ function ensureReadinessCenter() {
   renderReadinessCenter();
 }
 
+function ensureThreadPreferenceControl() {
+  const startButton = document.getElementById('startGeneration');
+  if (!startButton) return;
+
+  // Replace the old NEW CHAT push button with a persistent per-generation choice.
+  document.getElementById('newChatButton')?.remove();
+  if (document.getElementById('startNewChatCheck')) return;
+
+  const wrapper = document.createElement('label');
+  wrapper.id = 'newChatPreference';
+  wrapper.style.display = 'inline-flex';
+  wrapper.style.alignItems = 'center';
+  wrapper.style.gap = '8px';
+  wrapper.style.marginLeft = '12px';
+  wrapper.style.fontWeight = '500';
+  wrapper.style.color = '#aeb6c2';
+  wrapper.style.cursor = 'pointer';
+  wrapper.innerHTML = '<input id="startNewChatCheck" type="checkbox" style="width:auto" /> New Chat for this generation';
+  startButton.insertAdjacentElement('afterend', wrapper);
+
+  // app.js already owns the normal Start Generation workflow. When checked, this
+  // capture-phase hook prepares a fresh ChatGPT composer first, then replays the
+  // same click so the existing generation path remains untouched.
+  startButton.addEventListener('click', async (event) => {
+    const checkbox = document.getElementById('startNewChatCheck');
+    if (!checkbox?.checked || startButton.dataset.newChatPrimed === '1') return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const status = document.getElementById('generationStatus');
+    startButton.disabled = true;
+    if (status) status.textContent = 'Opening a fresh ChatGPT chat for this generation…';
+
+    try {
+      await window.zeroPOD.generation.newChat();
+      startButton.dataset.newChatPrimed = '1';
+      startButton.disabled = false;
+      startButton.click();
+    } catch (error) {
+      startButton.disabled = false;
+      if (status) status.textContent = `Could not open a new ChatGPT chat: ${error.message || error}`;
+    } finally {
+      delete startButton.dataset.newChatPrimed;
+    }
+  }, true);
+}
+
 ensureReadinessCenter();
+ensureThreadPreferenceControl();
