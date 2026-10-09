@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZeroPOD</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">ZeroPOD</div>
+      <button class="nav active" data-view="dashboard">Dashboard</button>
+      <button class="nav" data-view="connections">Connections</button>
+      <button class="nav" data-view="create">Create</button>
+      <button class="nav" data-view="review">Review Queue</button>
+      <button class="nav" data-view="projects">Projects</button>
+      <button class="nav" data-view="upload">Upload Queue</button>
+      <button class="nav" data-view="settings">Settings</button>
+      <div class="footer-note">Windows only · v0.1.0</div>
+    </aside>
+
+    <main class="content">
+      <section id="dashboard" class="view active-view">
+        <div class="eyebrow">POD AUTOMATION WORKSPACE</div>
+        <h1>ZeroPOD</h1>
+        <p class="lead">Reference → generation → review → metadata → vectorize → 4500×5400 export → Redbubble queue.</p>
+        <div class="pipeline">
+          <div>1. Reference</div><span>→</span><div>2. Generate</div><span>→</span><div>3. Review</div><span>→</span><div>4. Metadata</div><span>→</span><div>5. Vectorize</div><span>→</span><div>6. Upload</div>
+        </div>
+      </section>
+
+      <section id="connections" class="view">
+        <div class="eyebrow">LOCAL-ONLY SESSIONS</div>
+        <h2>Connections</h2>
+        <p class="muted">ZeroPOD never asks for or stores your passwords. Login happens in a normal browser window and the session profile remains on this Windows PC.</p>
+        <div id="connectionCards" class="cards"></div>
+      </section>
+
+      <section id="create" class="view">
+        <div class="eyebrow">NEW DESIGN</div>
+        <h2>Create</h2>
+        <div class="form-grid">
+          <label>Reference image
+            <div class="file-row"><input id="referencePath" readonly placeholder="Choose an image" /><button id="chooseReference">Browse</button></div>
+          </label>
+          <label>Amazon / source URL
+            <input id="sourceUrl" type="url" placeholder="https://..." />
+          </label>
+        </div>
+        <div class="panel">
+          <h3>Permanent POD guidelines</h3>
+          <ul id="podRules"></ul>
+        </div>
+        <button class="primary" id="startGeneration">Start Generation</button>
+        <p id="generationStatus" class="muted"></p>
+      </section>
+
+      <section id="review" class="view">
+        <div class="eyebrow">MANDATORY QUALITY GATE</div>
+        <h2>Review Queue</h2>
+        <div class="review-layout">
+          <div class="preview-placeholder">Generated design preview will appear here.</div>
+          <div class="review-controls">
+            <label>Regeneration notes<textarea id="reviewNotes" placeholder="Example: make the text larger, remove extra elements, use a different font..."></textarea></label>
+            <div class="button-row"><button class="danger" id="rejectDesign">Reject / Regenerate</button><button class="primary" id="passDesign">Pass & Continue</button></div>
+            <p class="muted">Nothing proceeds to metadata/vectorization until you press Pass.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="projects" class="view"><div class="eyebrow">LOCAL LIBRARY</div><h2>Projects</h2><div class="empty">Project persistence is the next implementation stage.</div></section>
+      <section id="upload" class="view"><div class="eyebrow">PUBLISHING</div><h2>Upload Queue</h2><div class="empty">Approved exports will queue here for Redbubble.</div></section>
+      <section id="settings" class="view"><div class="eyebrow">CONFIGURATION</div><h2>Settings</h2><div class="empty">ZeroPOD stores operational data locally under its Windows app-data directory.</div></section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
