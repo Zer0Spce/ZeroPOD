@@ -1,7 +1,9 @@
 const { app, safeStorage } = require('electron');
 const { chromium } = require('playwright');
+const { spawn, execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
 
 const SERVICES = {
   chatgpt: {
@@ -41,9 +43,12 @@ const SERVICES = {
   }
 };
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 class SessionManager {
   constructor() {
     this.contexts = new Map();
+    this.externalBrowsers = new Map();
   }
 
   getRoot() {
@@ -84,11 +89,12 @@ class SessionManager {
     return state[serviceId];
   }
 
-  markProfile(serviceId) {
+  markProfile(serviceId, extra = {}) {
     this.updateState(serviceId, {
       profileCreated: true,
       authStatus: this.readState()[serviceId]?.authStatus || 'unknown',
-      lastConnectedAt: new Date().toISOString()
+      lastConnectedAt: new Date().toISOString(),
+      ...extra
     });
   }
 
@@ -104,6 +110,7 @@ class SessionManager {
           saved,
           connected: authStatus === 'verified',
           authStatus,
+          loginMode: state[id]?.loginMode || 'edge-compatibility',
           lastConnectedAt: state[id]?.lastConnectedAt || null,
           lastVerifiedAt: state[id]?.lastVerifiedAt || null,
           verificationMessage: state[id]?.verificationMessage || null
@@ -112,28 +119,123 @@ class SessionManager {
     );
   }
 
+  findEdgeExecutable() {
+    const candidates = [
+      process.env.EDGE_PATH,
+      process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'Application', 'msedge.exe')
+    ].filter(Boolean);
+    const found = candidates.find((candidate) => fs.existsSync(candidate));
+    if (!found) throw new Error('Microsoft Edge was not found. Install Edge or set EDGE_PATH to msedge.exe.');
+    return found;
+  }
+
+  async getFreePort() {
+    return new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.unref();
+      server.on('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        const port = address.port;
+        server.close(() => resolve(port));
+      });
+    });
+  }
+
+  async waitForCdp(port, timeoutMs = 20000) {
+    const started = Date.now();
+    let lastError;
+    while (Date.now() - started < timeoutMs) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/json/version`);
+        if (response.ok) return true;
+      } catch (error) {
+        lastError = error;
+      }
+      await wait(300);
+    }
+    throw new Error(`Edge compatibility browser did not expose its local automation endpoint.${lastError ? ` ${lastError.message}` : ''}`);
+  }
+
+  async launchExternalEdge(serviceId, { focusUrl = true } = {}) {
+    const service = SERVICES[serviceId];
+    if (!service) throw new Error(`Unknown service: ${serviceId}`);
+
+    const existing = this.externalBrowsers.get(serviceId);
+    if (existing?.port) {
+      try {
+        await this.waitForCdp(existing.port, 1200);
+        return existing;
+      } catch {
+        this.externalBrowsers.delete(serviceId);
+      }
+    }
+
+    const edgePath = this.findEdgeExecutable();
+    const profilePath = this.getProfilePath(serviceId);
+    fs.mkdirSync(profilePath, { recursive: true });
+    const port = await this.getFreePort();
+    const args = [
+      `--user-data-dir=${profilePath}`,
+      `--remote-debugging-port=${port}`,
+      '--remote-debugging-address=127.0.0.1',
+      '--no-first-run',
+      '--no-default-browser-check',
+      focusUrl ? service.url : 'about:blank'
+    ];
+
+    const child = spawn(edgePath, args, {
+      detached: false,
+      stdio: 'ignore',
+      windowsHide: false
+    });
+
+    const runtime = { process: child, port, browser: null, context: null };
+    this.externalBrowsers.set(serviceId, runtime);
+    child.once('exit', () => {
+      const current = this.externalBrowsers.get(serviceId);
+      if (current?.process === child) this.externalBrowsers.delete(serviceId);
+      this.contexts.delete(serviceId);
+    });
+
+    await this.waitForCdp(port);
+    this.markProfile(serviceId, { loginMode: 'edge-compatibility' });
+    return runtime;
+  }
+
+  async connectExternalEdge(serviceId) {
+    const runtime = await this.launchExternalEdge(serviceId, { focusUrl: true });
+    if (!runtime.browser) {
+      runtime.browser = await chromium.connectOverCDP(`http://127.0.0.1:${runtime.port}`);
+      const contexts = runtime.browser.contexts();
+      runtime.context = contexts[0] || null;
+      if (!runtime.context) throw new Error('Could not attach ZeroPOD to the Edge login profile.');
+      this.contexts.set(serviceId, runtime.context);
+      runtime.browser.on('disconnected', () => {
+        this.contexts.delete(serviceId);
+        const current = this.externalBrowsers.get(serviceId);
+        if (current) {
+          current.browser = null;
+          current.context = null;
+        }
+      });
+    }
+    return runtime;
+  }
+
   async ensureService(serviceId) {
     const service = SERVICES[serviceId];
     if (!service) throw new Error(`Unknown service: ${serviceId}`);
 
-    fs.mkdirSync(this.getProfilePath(serviceId), { recursive: true });
-
-    let context = this.contexts.get(serviceId);
-    if (!context) {
-      context = await chromium.launchPersistentContext(this.getProfilePath(serviceId), {
-        channel: 'msedge',
-        headless: false,
-        acceptDownloads: true,
-        viewport: { width: 1280, height: 860 }
-      });
-      this.contexts.set(serviceId, context);
-      this.markProfile(serviceId);
-      context.on('close', () => this.contexts.delete(serviceId));
+    const runtime = await this.connectExternalEdge(serviceId);
+    let page = runtime.context.pages().find((candidate) => candidate.url().startsWith(service.url));
+    if (!page) page = runtime.context.pages()[0] || await runtime.context.newPage();
+    if (!page.url().startsWith(service.url)) {
+      await page.goto(service.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
     }
-
-    let page = context.pages()[0];
-    if (!page) page = await context.newPage();
-    return { context, page, service };
+    return { context: runtime.context, page, service };
   }
 
   async isVisible(locator, timeout = 1200) {
@@ -150,7 +252,7 @@ class SessionManager {
     const url = page.url();
 
     if (service.loginUrlPatterns.some((pattern) => pattern.test(url))) {
-      return { status: 'needs-login', message: 'The service redirected to a login page.' };
+      return { status: 'needs-login', message: 'The service is still on a login page.' };
     }
 
     for (const pattern of service.loggedOutText) {
@@ -162,13 +264,13 @@ class SessionManager {
 
     for (const selector of service.authenticatedSelectors) {
       if (await this.isVisible(page.locator(selector), 900)) {
-        return { status: 'verified', message: 'Authenticated account UI was detected.' };
+        return { status: 'verified', message: 'Authenticated account UI was detected in the normal Edge profile.' };
       }
     }
 
     return {
       status: 'unknown',
-      message: 'A saved browser session exists, but ZeroPOD could not confidently verify whether it is still authenticated.'
+      message: 'The Edge profile is saved, but ZeroPOD could not confidently verify whether it is authenticated.'
     };
   }
 
@@ -186,6 +288,7 @@ class SessionManager {
     const result = await this.detectAuthState(serviceId, page);
     this.updateState(serviceId, {
       profileCreated: true,
+      loginMode: 'edge-compatibility',
       authStatus: result.status,
       lastVerifiedAt: new Date().toISOString(),
       verificationMessage: result.message
@@ -222,25 +325,48 @@ class SessionManager {
   }
 
   async login(serviceId) {
-    const { page, service } = await this.ensureService(serviceId);
-    await page.bringToFront();
-    if (!page.url().startsWith(service.url)) {
-      await page.goto(service.url, { waitUntil: 'domcontentloaded' });
-    }
+    const service = SERVICES[serviceId];
+    if (!service) throw new Error(`Unknown service: ${serviceId}`);
+
+    // Important: launch normal Edge and deliberately do NOT attach Playwright yet.
+    // This lets Google/email/password/2FA/CAPTCHA run in the normal browser environment.
+    await this.launchExternalEdge(serviceId, { focusUrl: true });
     this.updateState(serviceId, {
       profileCreated: true,
+      loginMode: 'edge-compatibility',
       authStatus: 'unknown',
-      verificationMessage: 'Login window opened. Sign in normally, then click Test Session in ZeroPOD.'
+      verificationMessage: 'Normal Microsoft Edge opened. Finish signing in there, including Google/2FA if needed, then return to ZeroPOD and click Test Session.'
     });
-    return { ok: true, alreadyOpen: true };
+    return {
+      ok: true,
+      mode: 'edge-compatibility',
+      message: 'Sign in in the normal Edge window, then click Test Session.'
+    };
+  }
+
+  async terminateExternal(serviceId) {
+    const runtime = this.externalBrowsers.get(serviceId);
+    if (!runtime) return;
+
+    if (runtime.browser) {
+      await runtime.browser.close().catch(() => {});
+    }
+
+    const pid = runtime.process?.pid;
+    if (pid && process.platform === 'win32') {
+      await new Promise((resolve) => {
+        execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve());
+      });
+    } else if (runtime.process && !runtime.process.killed) {
+      runtime.process.kill();
+    }
+
+    this.externalBrowsers.delete(serviceId);
+    this.contexts.delete(serviceId);
   }
 
   async logout(serviceId) {
-    const context = this.contexts.get(serviceId);
-    if (context) {
-      await context.close().catch(() => {});
-      this.contexts.delete(serviceId);
-    }
+    await this.terminateExternal(serviceId);
 
     const profilePath = this.getProfilePath(serviceId);
     fs.rmSync(profilePath, { recursive: true, force: true });
@@ -252,12 +378,14 @@ class SessionManager {
   }
 
   async openService(serviceId) {
-    return this.login(serviceId);
+    const { page } = await this.ensureService(serviceId);
+    await page.bringToFront();
+    return { ok: true };
   }
 
   async closeAll() {
-    for (const context of this.contexts.values()) {
-      await context.close().catch(() => {});
+    for (const serviceId of [...this.externalBrowsers.keys()]) {
+      await this.terminateExternal(serviceId).catch(() => {});
     }
     this.contexts.clear();
   }
