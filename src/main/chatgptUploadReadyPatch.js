@@ -7,8 +7,87 @@ const originalSendPrompt = ChatGPTController.prototype.sendPrompt;
 // Keep the upload state separate from prompt entry. The reference file is injected
 // first, the prompt is pasted as soon as ChatGPT accepts the file locally, and only
 // the final Send action waits for the attachment preview/upload to become ready.
-// This prevents a slow upload from leaving the composer blank for up to a minute.
 const pendingAttachments = new WeakMap();
+
+function isUsableChatGPTUrl(controller, value) {
+  if (typeof controller.sessions.isValidChatGPTThreadUrl === 'function') {
+    return controller.sessions.isValidChatGPTThreadUrl(value);
+  }
+  try {
+    const url = new URL(String(value || ''));
+    if (url.protocol !== 'https:' || url.hostname !== 'chatgpt.com') return false;
+    if (url.pathname === '/' || url.pathname === '') return true;
+    const match = url.pathname.match(/^\/c\/([A-Za-z0-9-]+)$/);
+    return Boolean(match && match[1].length >= 20 && !/^local-chatgpt/i.test(match[1]));
+  } catch {
+    return false;
+  }
+}
+
+async function safeGoHome(controller, page) {
+  controller.sessions.clearLastThreadUrl?.('chatgpt');
+  if (/^https:\/\/chatgpt\.com\/?(?:[?#].*)?$/i.test(page.url())) return;
+  try {
+    await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+  } catch (error) {
+    // If navigation itself reports a timeout but the browser reached ChatGPT and
+    // the composer is already usable, continue instead of failing the workflow.
+    if (!page.url().startsWith('https://chatgpt.com')) throw error;
+  }
+}
+
+ChatGPTController.prototype.openPreferredThread = async function openPreferredThreadSafe(page) {
+  const currentUrl = page.url();
+  if (isUsableChatGPTUrl(this, currentUrl) && /^https:\/\/chatgpt\.com\/c\//i.test(currentUrl)) {
+    this.sessions.rememberThreadUrl('chatgpt', currentUrl);
+    return;
+  }
+
+  const saved = this.sessions.getLastThreadUrl('chatgpt');
+  if (!saved || !isUsableChatGPTUrl(this, saved) || !/^https:\/\/chatgpt\.com\/c\//i.test(saved)) {
+    if (saved) this.sessions.clearLastThreadUrl?.('chatgpt');
+    if (!page.url().startsWith('https://chatgpt.com')) await safeGoHome(this, page);
+    return;
+  }
+
+  if (page.url() === saved) return;
+
+  try {
+    await page.goto(saved, { waitUntil: 'domcontentloaded', timeout: 12000 });
+    if (!isUsableChatGPTUrl(this, page.url()) || /\/c\/local-chatgpt/i.test(page.url())) {
+      throw new Error('Saved ChatGPT thread resolved to an invalid local URL.');
+    }
+  } catch {
+    await safeGoHome(this, page);
+  }
+};
+
+ChatGPTController.prototype.ensureReady = async function ensureReadyBeforePaste(page) {
+  await page.bringToFront();
+
+  if (!page.url().startsWith('https://chatgpt.com')) {
+    await safeGoHome(this, page);
+  }
+
+  await this.assertNoHumanGate(page);
+  const auth = await this.sessions.detectAuthState('chatgpt', page);
+  if (auth.status === 'needs-login') {
+    throw new Error('ChatGPT is not signed in. Open Connections → ChatGPT → Open Login Browser, finish login in Chrome, then Test Session.');
+  }
+
+  try {
+    return await this.locateComposer(page);
+  } catch (error) {
+    if (error.code === 'HUMAN_VERIFICATION_REQUIRED') throw error;
+
+    // A remembered conversation can disappear, be renamed internally, or fail to
+    // hydrate. Fall back to the ChatGPT home composer rather than failing before
+    // image/text paste.
+    await safeGoHome(this, page);
+    await this.assertNoHumanGate(page);
+    return this.locateComposer(page);
+  }
+};
 
 async function composerAttachmentState(page, referencePath, baselineSources = []) {
   const fileName = path.basename(referencePath || '');
@@ -35,9 +114,6 @@ async function composerAttachmentState(page, referencePath, baselineSources = []
         && rect.left <= composerRect.right + sidePadding;
     };
 
-    // Do not depend on a fragile form/ancestor relationship. ChatGPT has moved the
-    // attachment preview outside the editor wrapper in several UI revisions. Detect
-    // visible attachment-like UI by geometry around the composer instead.
     const previews = [...document.querySelectorAll('img')].filter((image) => {
       if (!nearComposer(image)) return false;
       const rect = image.getBoundingClientRect();
@@ -143,16 +219,12 @@ async function clickFirstFast(candidates, timeout = 450) {
 }
 
 async function injectReferenceFile(page, referencePath) {
-  // Fast path: ChatGPT often keeps a hidden file input mounted even though the +
-  // menu is closed. setInputFiles works on hidden inputs and avoids opening menus.
   let input = await findUploadInput(page);
   if (input) {
     await setFilesOnInput(input, referencePath);
     return { method: 'existing-file-input' };
   }
 
-  // Current ChatGPT uses composer-plus-btn. Keep several short fallbacks, but do
-  // not wait five seconds per selector like the previous implementation did.
   const addControl = await clickFirstFast([
     page.locator('button[data-testid="composer-plus-btn"]:visible').first(),
     page.locator('button[data-testid*="composer" i][aria-label*="add" i]:visible').first(),
@@ -164,7 +236,6 @@ async function injectReferenceFile(page, referencePath) {
 
   if (!addControl) throw new Error('Could not find ChatGPT’s add-file control.');
 
-  // In some UI versions clicking + mounts the file input immediately.
   const inputAfterPlus = page.locator('input[type="file"]').first();
   await inputAfterPlus.waitFor({ state: 'attached', timeout: 1200 }).catch(() => {});
   input = await findUploadInput(page);
@@ -173,8 +244,6 @@ async function injectReferenceFile(page, referencePath) {
     return { method: 'plus-menu-file-input' };
   }
 
-  // Other versions show an "Upload from computer / Add photos & files" menu item.
-  // Capture the native chooser when present; otherwise use the input it mounts.
   const menuCandidates = [
     page.getByRole('menuitem', { name: /upload|photo|file/i }).first(),
     page.getByRole('button', { name: /upload from computer|add photos|add files|photos.*files/i }).first(),
@@ -210,9 +279,6 @@ async function waitForAttachmentAccepted(page, pending, timeoutMs = 1800) {
     if (attachmentVisible(state, pending.before) || state.busy) return state;
     await wait(100);
   }
-  // setInputFiles / fileChooser.setFiles already succeeded. Do not hold the prompt
-  // hostage while ChatGPT finishes rendering its preview; Send will perform the
-  // stricter readiness check below.
   return null;
 }
 
@@ -247,20 +313,18 @@ async function waitForAttachmentReady(page, pending, timeoutMs = 25000) {
 
 ChatGPTController.prototype.attachReference = async function attachReferenceFast(page, referencePath) {
   await this.assertNoHumanGate(page);
-  const before = await composerAttachmentState(page, referencePath, []);
 
+  // Final pre-paste guard: do not touch file inputs until the current composer is
+  // definitely visible and interactive on the page we intend to use.
+  const composer = await this.locateComposer(page);
+  await composer.waitFor({ state: 'visible', timeout: 5000 });
+
+  const before = await composerAttachmentState(page, referencePath, []);
   const injectedAt = Date.now();
   const injection = await injectReferenceFile(page, referencePath);
-  const pending = {
-    referencePath,
-    before,
-    injection,
-    injectedAt
-  };
+  const pending = { referencePath, before, injection, injectedAt };
   pendingAttachments.set(page, pending);
 
-  // Only a short acceptance wait happens here. This allows fillPrompt() to run
-  // immediately instead of waiting up to 60 seconds before any text appears.
   await waitForAttachmentAccepted(page, pending, 1800);
   return true;
 };
@@ -272,9 +336,6 @@ ChatGPTController.prototype.sendPrompt = async function sendPromptAfterUpload(pa
   try {
     if (pending) await waitForAttachmentReady(page, pending, 25000);
 
-    // The readiness check above already found an enabled Send button. Use a short
-    // click path instead of another 12-second wait. Enter remains the compatibility
-    // fallback for future markup changes.
     const sendButton = page.locator([
       'button[data-testid="send-button"]:visible',
       'button[data-testid*="send" i]:visible',
