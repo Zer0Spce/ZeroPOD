@@ -88,6 +88,7 @@ require('./vectorizerFirstStageRestorePatch');
 require('./redbubbleEditorFieldsPatch');
 require('./redbubbleUploadCompletionPatch');
 require('./redbubbleCurrentFieldsPatch');
+// Current Redbubble tag controls are chip editors, not normal visible inputs.
 require('./redbubbleTagChipPatch');
 require('./redbubbleWideEditorPatch');
 require('./main');
