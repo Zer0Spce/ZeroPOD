@@ -45,6 +45,15 @@ class SessionManager {
     fs.writeFileSync(this.getStatePath(), encrypted);
   }
 
+  markProfile(serviceId) {
+    const state = this.readState();
+    state[serviceId] = {
+      profileCreated: true,
+      lastConnectedAt: new Date().toISOString()
+    };
+    this.writeState(state);
+  }
+
   getStatuses() {
     const state = this.readState();
     return Object.fromEntries(
@@ -57,40 +66,37 @@ class SessionManager {
     );
   }
 
-  async login(serviceId) {
+  async ensureService(serviceId) {
     const service = SERVICES[serviceId];
     if (!service) throw new Error(`Unknown service: ${serviceId}`);
 
     fs.mkdirSync(this.getProfilePath(serviceId), { recursive: true });
 
-    if (this.contexts.has(serviceId)) {
-      const existing = this.contexts.get(serviceId);
-      const pages = existing.pages();
-      if (pages[0]) await pages[0].bringToFront();
-      return { ok: true, alreadyOpen: true };
+    let context = this.contexts.get(serviceId);
+    if (!context) {
+      context = await chromium.launchPersistentContext(this.getProfilePath(serviceId), {
+        channel: 'msedge',
+        headless: false,
+        acceptDownloads: true,
+        viewport: { width: 1280, height: 860 }
+      });
+      this.contexts.set(serviceId, context);
+      this.markProfile(serviceId);
+      context.on('close', () => this.contexts.delete(serviceId));
     }
 
-    const context = await chromium.launchPersistentContext(this.getProfilePath(serviceId), {
-      channel: 'msedge',
-      headless: false,
-      viewport: { width: 1280, height: 860 }
-    });
+    let page = context.pages()[0];
+    if (!page) page = await context.newPage();
+    return { context, page, service };
+  }
 
-    this.contexts.set(serviceId, context);
-    const page = context.pages()[0] || await context.newPage();
-    await page.goto(service.url, { waitUntil: 'domcontentloaded' });
-
-    context.on('close', () => {
-      this.contexts.delete(serviceId);
-      const state = this.readState();
-      state[serviceId] = {
-        profileCreated: true,
-        lastConnectedAt: new Date().toISOString()
-      };
-      this.writeState(state);
-    });
-
-    return { ok: true, alreadyOpen: false };
+  async login(serviceId) {
+    const { page, service } = await this.ensureService(serviceId);
+    await page.bringToFront();
+    if (!page.url().startsWith(service.url)) {
+      await page.goto(service.url, { waitUntil: 'domcontentloaded' });
+    }
+    return { ok: true, alreadyOpen: true };
   }
 
   async logout(serviceId) {
