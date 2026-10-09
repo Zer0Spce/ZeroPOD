@@ -12,9 +12,9 @@
     "package:win": "electron-builder --win portable"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "playwright": "^1.64.0",
-    "sharp": "^0.34.3",
-    "xlsx": "^0.18.5"
+    "sharp": "^0.34.3"
   },
   "devDependencies": {
     "electron": "^44.6.0",
