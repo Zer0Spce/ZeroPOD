@@ -14,6 +14,7 @@ const STAGES = {
   'redbubble-preparing': { order: 8, label: 'Preparing Redbubble', next: 'Wait for Redbubble preparation', view: 'upload', queue: 'upload' },
   'redbubble-recovery-needed': { order: 8, label: 'Redbubble Needs Attention', next: 'Retry Redbubble preparation', view: 'upload', queue: 'attention' },
   'redbubble-review': { order: 9, label: 'Final Review', next: 'Final review then Publish / Save Work', view: 'upload', queue: 'review' },
+  'redbubble-publish-pending': { order: 9, label: 'Publish Pending Verification', next: 'Verify Redbubble publish result', view: 'upload', queue: 'attention' },
   published: { order: 10, label: 'Published', next: 'Complete', view: 'upload', queue: 'completed' }
 };
 
@@ -59,15 +60,7 @@ function assertRedbubblePrepare(project) {
 }
 
 function assertPublish(project) {
-  assertStatus(project, ['redbubble-review'], 'Publish / Save Work');
+  assertStatus(project, ['redbubble-review', 'redbubble-publish-pending'], 'Publish / Verify Redbubble Work');
 }
 
-module.exports = {
-  describe,
-  assertReviewable,
-  assertMetadata,
-  assertVectorize,
-  assertExport,
-  assertRedbubblePrepare,
-  assertPublish
-};
+module.exports = { describe, assertReviewable, assertMetadata, assertVectorize, assertExport, assertRedbubblePrepare, assertPublish };
