@@ -6,6 +6,7 @@ const { ChatGPTController } = require('./chatgptController');
 const { MetadataController } = require('./metadataController');
 const { VectorizerController } = require('./vectorizerController');
 const { ExportController } = require('./exportController');
+const { RedbubbleController } = require('./redbubbleController');
 
 const POD_RULES = [
   'Copy slogan and create a new style.',
@@ -30,6 +31,7 @@ const chatgpt = new ChatGPTController({ sessions, projects, podRules: POD_RULES 
 const metadata = new MetadataController({ sessions, projects });
 const vectorizer = new VectorizerController({ sessions, projects });
 const exporter = new ExportController({ projects });
+const redbubble = new RedbubbleController({ sessions, projects });
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -70,6 +72,8 @@ app.whenReady().then(() => {
   ipcMain.handle('metadata:generate', (_event, projectId) => metadata.generate(projectId));
   ipcMain.handle('vectorizer:start', (_event, projectId) => vectorizer.start(projectId));
   ipcMain.handle('export:png', (_event, projectId) => exporter.exportPng(projectId));
+  ipcMain.handle('redbubble:prepare', (_event, projectId) => redbubble.prepare(projectId));
+  ipcMain.handle('redbubble:publish', (_event, projectId) => redbubble.publish(projectId));
   ipcMain.handle('file:choose-reference', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Choose reference image',
