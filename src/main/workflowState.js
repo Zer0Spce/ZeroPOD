@@ -1,26 +1,29 @@
 const STAGES = {
-  created: { order: 0, next: 'Generate design', view: 'review' },
-  generating: { order: 1, next: 'Wait for ChatGPT image', view: 'review' },
-  regenerating: { order: 1, next: 'Wait for regenerated image', view: 'review' },
-  'chatgpt-recovery-needed': { order: 1, next: 'Retry ChatGPT generation/download', view: 'review' },
-  'awaiting-review': { order: 2, next: 'Review image and Pass or Reject', view: 'review' },
-  'approved-image': { order: 3, next: 'Generate POD WINNER metadata', view: 'workflow' },
-  'metadata-recovery-needed': { order: 3, next: 'Retry POD WINNER metadata', view: 'workflow' },
-  'metadata-ready': { order: 4, next: 'Vectorize approved design', view: 'workflow' },
-  vectorizing: { order: 5, next: 'Wait for Vectorizer.ai', view: 'workflow' },
-  'vectorizer-recovery-needed': { order: 5, next: 'Retry Vectorizer.ai', view: 'workflow' },
-  'vector-ready': { order: 6, next: 'Export 4500×5400 PNG', view: 'workflow' },
-  'export-ready': { order: 7, next: 'Prepare Redbubble copy', view: 'upload' },
-  'redbubble-preparing': { order: 8, next: 'Wait for Redbubble preparation', view: 'upload' },
-  'redbubble-recovery-needed': { order: 8, next: 'Retry Redbubble preparation', view: 'upload' },
-  'redbubble-review': { order: 9, next: 'Final review then Publish / Save Work', view: 'upload' },
-  published: { order: 10, next: 'Complete', view: 'upload' }
+  created: { order: 0, label: 'Created', next: 'Generate design', view: 'review', queue: 'active' },
+  generating: { order: 1, label: 'Generating', next: 'Wait for ChatGPT image', view: 'review', queue: 'active' },
+  regenerating: { order: 1, label: 'Regenerating', next: 'Wait for regenerated image', view: 'review', queue: 'active' },
+  'chatgpt-recovery-needed': { order: 1, label: 'ChatGPT Needs Attention', next: 'Retry ChatGPT generation/download', view: 'review', queue: 'attention' },
+  'awaiting-review': { order: 2, label: 'Image Review', next: 'Review image and Pass or Reject', view: 'review', queue: 'review' },
+  'approved-image': { order: 3, label: 'Image Approved', next: 'Generate POD WINNER metadata', view: 'workflow', queue: 'active' },
+  'metadata-recovery-needed': { order: 3, label: 'Metadata Needs Attention', next: 'Retry POD WINNER metadata', view: 'workflow', queue: 'attention' },
+  'metadata-ready': { order: 4, label: 'Metadata Ready', next: 'Vectorize approved design', view: 'workflow', queue: 'active' },
+  vectorizing: { order: 5, label: 'Vectorizing', next: 'Wait for Vectorizer.ai', view: 'workflow', queue: 'active' },
+  'vectorizer-recovery-needed': { order: 5, label: 'Vectorizer Needs Attention', next: 'Retry Vectorizer.ai', view: 'workflow', queue: 'attention' },
+  'vector-ready': { order: 6, label: 'Vector Ready', next: 'Export 4500×5400 PNG', view: 'workflow', queue: 'active' },
+  'export-ready': { order: 7, label: 'Export Ready', next: 'Prepare Redbubble copy', view: 'upload', queue: 'upload' },
+  'redbubble-preparing': { order: 8, label: 'Preparing Redbubble', next: 'Wait for Redbubble preparation', view: 'upload', queue: 'upload' },
+  'redbubble-recovery-needed': { order: 8, label: 'Redbubble Needs Attention', next: 'Retry Redbubble preparation', view: 'upload', queue: 'attention' },
+  'redbubble-review': { order: 9, label: 'Final Review', next: 'Final review then Publish / Save Work', view: 'upload', queue: 'review' },
+  published: { order: 10, label: 'Published', next: 'Complete', view: 'upload', queue: 'completed' }
 };
+
+const MAX_ORDER = 10;
 
 function describe(project) {
   const status = project?.status || 'created';
-  const stage = STAGES[status] || { order: -1, next: 'Open project and review status', view: 'projects' };
-  return { status, ...stage };
+  const stage = STAGES[status] || { order: -1, label: 'Unknown', next: 'Open project and review status', view: 'projects', queue: 'attention' };
+  const progress = stage.order < 0 ? 0 : Math.max(0, Math.min(100, Math.round((stage.order / MAX_ORDER) * 100)));
+  return { status, ...stage, progress };
 }
 
 function assertStatus(project, allowed, actionLabel) {
