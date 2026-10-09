@@ -18,7 +18,12 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     restore: (projectId) => ipcRenderer.invoke('projects:restore', projectId),
     delete: (projectId) => ipcRenderer.invoke('projects:delete', projectId)
   },
-  workspace: { backup: () => ipcRenderer.invoke('workspace:backup') },
+  workspace: {
+    backup: () => ipcRenderer.invoke('workspace:backup'),
+    restore: () => ipcRenderer.invoke('workspace:restore'),
+    health: () => ipcRenderer.invoke('workspace:health'),
+    diagnostics: () => ipcRenderer.invoke('workspace:diagnostics')
+  },
   generation: { start: (payload) => ipcRenderer.invoke('generation:start', payload) },
   review: {
     reject: (payload) => ipcRenderer.invoke('review:reject', payload),

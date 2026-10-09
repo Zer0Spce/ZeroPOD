@@ -86,10 +86,23 @@ app.whenReady().then(async () => {
     if (live.length) throw new Error('This project is still linked to an active Automation List row. Remove or complete that row before deleting the project.');
     return projects.delete(projectId);
   });
+
   ipcMain.handle('workspace:backup', async () => {
     const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose ZeroPOD backup destination', properties: ['openDirectory', 'createDirectory'] });
     if (result.canceled || !result.filePaths[0]) return { canceled: true };
     return { canceled: false, ...workspace.exportTo(result.filePaths[0]) };
+  });
+  ipcMain.handle('workspace:restore', async () => {
+    if (automationStore.read().state === 'running') throw new Error('Pause the Automation List before restoring a workspace backup.');
+    const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose ZeroPOD workspace backup folder', properties: ['openDirectory'] });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true };
+    return { canceled: false, ...workspace.restoreFrom(result.filePaths[0]) };
+  });
+  ipcMain.handle('workspace:health', () => workspace.healthCheck());
+  ipcMain.handle('workspace:diagnostics', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose diagnostics export destination', properties: ['openDirectory', 'createDirectory'] });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true };
+    return { canceled: false, ...workspace.exportDiagnostics(result.filePaths[0]) };
   });
 
   ipcMain.handle('generation:start', (_event, payload) => chatgpt.start(payload));
