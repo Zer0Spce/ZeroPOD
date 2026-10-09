@@ -13,9 +13,10 @@ function fail(message) {
 
 const html = fs.readFileSync(indexPath, 'utf8');
 const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+const visibleVersion = `Windows only · v${pkg.version}`;
 
-if (pkg.version !== '1.0.0') fail(`package.json version is ${pkg.version}; expected 1.0.0.`);
-if (!html.includes('Windows only · v1.0')) fail('visible sidebar version is not v1.0.');
+if (!/^\d+\.\d+\.\d+(?:[-+].+)?$/.test(pkg.version)) fail(`package.json version is not a valid release version: ${pkg.version}`);
+if (!html.includes(visibleVersion)) fail(`visible sidebar version does not match package.json (${visibleVersion}).`);
 
 const required = ['styles.css', 'theme.css', 'app.js', 'connections.js', 'automation.js', 'reviewQueue.js', 'automationBatch.js', 'publishQueue.js', 'workspace.js', 'appearance.js', 'readiness.js'];
 for (const asset of required) {
@@ -30,6 +31,6 @@ for (const ref of srcRefs) {
 }
 
 if (!html.includes('appearance.js') || !html.includes('theme.css')) fail('Appearance mode assets are not fully wired.');
-if (!html.includes('readiness.js')) fail('1.0 Readiness Center is not wired.');
+if (!html.includes('readiness.js')) fail('Readiness Center is not wired.');
 
 if (!process.exitCode) console.log(`Release smoke check passed for ZeroPOD v${pkg.version}.`);
