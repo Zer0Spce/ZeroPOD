@@ -16,7 +16,11 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     reject: (payload) => ipcRenderer.invoke('review:reject', payload),
     pass: (payload) => ipcRenderer.invoke('review:pass', payload)
   },
-  metadata: { generate: (projectId) => ipcRenderer.invoke('metadata:generate', projectId) },
+  metadata: {
+    generate: (projectId) => ipcRenderer.invoke('metadata:generate', projectId),
+    save: (payload) => ipcRenderer.invoke('metadata:save', payload)
+  },
+  quality: { check: (projectId) => ipcRenderer.invoke('quality:check', projectId) },
   vectorizer: { start: (projectId) => ipcRenderer.invoke('vectorizer:start', projectId) },
   export: { png: (projectId) => ipcRenderer.invoke('export:png', projectId) },
   redbubble: {
