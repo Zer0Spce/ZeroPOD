@@ -9,8 +9,8 @@ function connectionStatusText(service) {
   return labels[service.authStatus] || 'Unknown';
 }
 
-function browserLabel(service) {
-  return service?.browser === 'chrome' ? 'Google Chrome' : 'Microsoft Edge';
+function browserLabel() {
+  return 'Google Chrome';
 }
 
 async function decorateConnections() {
@@ -67,9 +67,9 @@ async function testOneConnection(serviceId, button) {
   try {
     const result = await window.zeroPOD.connections.test(serviceId);
     if (result.status === 'needs-login') {
-      alert(`${serviceId}: login is still required. Click Open Login Browser, finish signing in in the dedicated normal browser window, then click Test Session again.`);
+      alert(`${serviceId}: login is still required. Click Open Login Browser, finish signing in in the dedicated normal Chrome window, then click Test Session again.`);
     } else if (result.status === 'human-verification') {
-      alert(`${serviceId}: human verification is required. Complete the challenge manually in the open browser, then click Test Session again. ZeroPOD will not automate or bypass verification.`);
+      alert(`${serviceId}: human verification is required. Complete the challenge manually in Chrome, then click Test Session again. ZeroPOD will not automate or bypass verification.`);
     }
   } catch (error) {
     alert(`Could not test ${serviceId}: ${error.message || error}`);
@@ -96,7 +96,7 @@ const connectionSection = document.getElementById('connections');
 if (connectionSection && !document.getElementById('testAllConnections')) {
   const note = document.createElement('div');
   note.className = 'panel connection-login-note';
-  note.innerHTML = '<strong>Login & verification</strong><p class="muted">ZeroPOD opens a dedicated normal browser profile for login. ChatGPT uses Google Chrome when installed; other services keep their existing browser flow. Complete Google/email/password, CAPTCHA, Cloudflare, or 2FA manually. Automation attaches only after login when you press Test Session.</p>';
+  note.innerHTML = '<strong>Login & verification</strong><p class="muted">ZeroPOD now uses dedicated Google Chrome profiles for ChatGPT, Vectorizer.ai, and Redbubble. Complete Google/email/password, CAPTCHA, Cloudflare, or 2FA manually in normal Chrome. Automation attaches only after login when you press Test Session.</p>';
   const paragraph = connectionSection.querySelector('p.muted');
   paragraph?.insertAdjacentElement('afterend', note);
 
@@ -112,7 +112,7 @@ if (connectionSection && !document.getElementById('testAllConnections')) {
     try {
       const result = await window.zeroPOD.connections.preflight();
       const blocked = result.blocked || result.needsLogin || [];
-      if (blocked.length) alert(`Sessions needing attention: ${blocked.join(', ')}. Complete login/verification manually before retrying.`);
+      if (blocked.length) alert(`Sessions needing attention: ${blocked.join(', ')}. Complete login/verification manually in Chrome before retrying.`);
     } catch (error) {
       alert(`Connection preflight failed: ${error.message || error}`);
     } finally {
