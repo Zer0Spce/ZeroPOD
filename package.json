@@ -12,11 +12,11 @@
     "package:win": "electron-builder --win portable"
   },
   "dependencies": {
-    "electron": "^44.6.0",
     "playwright": "^1.64.0",
     "sharp": "^0.34.3"
   },
   "devDependencies": {
+    "electron": "^44.6.0",
     "electron-builder": "^26.0.12"
   },
   "build": {
