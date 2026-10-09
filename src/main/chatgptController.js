@@ -28,7 +28,8 @@ class ChatGPTController {
   async locateComposer(page) {
     const selectors = [
       '#prompt-textarea',
-      'textarea[placeholder*="Message"]',
+      '[data-testid="composer-text-input"]',
+      'textarea[placeholder*="Message" i]',
       'textarea',
       '[contenteditable="true"][data-placeholder]',
       '[contenteditable="true"]'
@@ -38,12 +39,33 @@ class ChatGPTController {
       for (const selector of selectors) {
         const locator = page.locator(selector).first();
         try {
-          await locator.waitFor({ state: 'visible', timeout: 3000 });
+          await locator.waitFor({ state: 'visible', timeout: 2500 });
           return locator;
         } catch {}
       }
       throw new Error('Could not find the ChatGPT message composer.');
-    }, { attempts: 3, delayMs: 1000 });
+    }, { attempts: 4, delayMs: 900 });
+  }
+
+  async ensureReady(page) {
+    await page.bringToFront();
+    if (!page.url().startsWith('https://chatgpt.com')) {
+      await retryStep('Open ChatGPT', () => page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 45000 }), { attempts: 2 });
+    }
+
+    await page.waitForTimeout(1200);
+    const auth = await this.sessions.detectAuthState('chatgpt', page);
+    if (auth.status === 'needs-login') {
+      throw new Error('ChatGPT is not signed in. Open Connections → ChatGPT → Open Login Browser, finish login, then Test Session.');
+    }
+
+    try {
+      return await this.locateComposer(page);
+    } catch {
+      await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await page.waitForTimeout(1000);
+      return this.locateComposer(page);
+    }
   }
 
   async attachReference(page, referencePath) {
@@ -51,19 +73,22 @@ class ChatGPTController {
       let input = page.locator('input[type="file"]').first();
       if (!(await input.count())) {
         await clickFirstVisible([
-          page.getByRole('button', { name: /attach|upload|add photos|add files|add/i }).first(),
+          page.locator('button[data-testid*="composer" i][aria-label*="add" i]').first(),
+          page.locator('button[data-testid*="attach" i]').first(),
+          page.getByRole('button', { name: /add files|attach|upload|photos|files|add/i }).first(),
+          page.locator('button[aria-label*="add files" i]').first(),
           page.locator('button[aria-label*="attach" i]').first(),
           page.locator('button[aria-label*="upload" i]').first()
         ], { timeout: 5000 });
-        await page.waitForTimeout(600);
+        await page.waitForTimeout(700);
         input = page.locator('input[type="file"]').first();
       }
 
       if (!(await input.count())) throw new Error('Could not find ChatGPT image upload input.');
       await input.setInputFiles(referencePath);
-      await page.waitForTimeout(1200);
+      await page.waitForTimeout(1500);
       return true;
-    }, { attempts: 3, delayMs: 1000 });
+    }, { attempts: 3, delayMs: 900 });
   }
 
   async submitPrompt(page, prompt) {
@@ -80,11 +105,13 @@ class ChatGPTController {
         });
       }
 
+      await page.waitForTimeout(300);
       const sent = await clickFirstVisible([
         page.locator('button[data-testid="send-button"]').first(),
-        page.getByRole('button', { name: /send/i }).first(),
+        page.locator('button[data-testid*="send" i]').first(),
+        page.getByRole('button', { name: /^send$/i }).first(),
         page.locator('button[aria-label*="send" i]').first()
-      ], { timeout: 4000 });
+      ], { timeout: 5000 });
 
       if (!sent) await composer.press('Enter');
       return true;
@@ -167,22 +194,28 @@ class ChatGPTController {
     return downloadPromise;
   }
 
-  async start({ referencePath, sourceUrl = '', reviewNotes = '', existingProjectId = null }) {
+  async start({ referencePath, sourceUrl = '', reviewNotes = '', existingProjectId = null, onStep = null }) {
     if (!referencePath || !fs.existsSync(referencePath)) throw new Error('Reference image is missing.');
 
     const project = existingProjectId
       ? this.projects.read(existingProjectId)
       : this.projects.create({ referencePath, sourceUrl });
 
-    try {
-      const { page } = await this.sessions.ensureService('chatgpt');
-      await page.bringToFront();
-      if (!page.url().startsWith('https://chatgpt.com')) {
-        await retryStep('Open ChatGPT', () => page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 45000 }), { attempts: 2 });
-      }
+    const step = (message) => {
+      if (typeof onStep === 'function') onStep(message);
+      this.projects.update(project.id, { automationStep: message });
+    };
 
+    try {
+      step('Opening ChatGPT');
+      const { page } = await this.sessions.ensureService('chatgpt');
+      step('Waiting for ChatGPT composer');
+      await this.ensureReady(page);
+      step('Uploading reference image');
       await this.attachReference(page, project.referencePath);
+      step('Sending generation prompt');
       await this.submitPrompt(page, this.buildPrompt(sourceUrl || project.sourceUrl, reviewNotes));
+      step('Waiting for generated image');
       this.waitForGeneratedDownload(page, project.id).catch(() => {});
 
       return {
@@ -198,7 +231,7 @@ class ChatGPTController {
         error,
         'Open ChatGPT from Connections, confirm you are signed in and the composer is usable, then retry the project.'
       );
-      this.projects.update(project.id, { status: 'chatgpt-recovery-needed', chatgptError: recovery });
+      this.projects.update(project.id, { status: 'chatgpt-recovery-needed', chatgptError: recovery, automationStep: 'Generation failed' });
       throw new Error(recovery.message);
     }
   }
