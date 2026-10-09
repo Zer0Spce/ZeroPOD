@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('zeroPOD', {
   connections: {
     list: () => ipcRenderer.invoke('connections:list'),
     login: (serviceId) => ipcRenderer.invoke('connections:login', serviceId),
+    test: (serviceId) => ipcRenderer.invoke('connections:test', serviceId),
+    preflight: () => ipcRenderer.invoke('connections:preflight'),
     logout: (serviceId) => ipcRenderer.invoke('connections:logout', serviceId)
   },
   pod: { rules: () => ipcRenderer.invoke('pod:rules') },
