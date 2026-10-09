@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const { SessionManager } = require('./sessionManager');
+const { ProjectStore } = require('./projectStore');
+const { ChatGPTController } = require('./chatgptController');
 
 const POD_RULES = [
   'Copy slogan and create a new style.',
@@ -20,6 +22,8 @@ const POD_RULES = [
 
 let mainWindow;
 const sessions = new SessionManager();
+const projects = new ProjectStore();
+const chatgpt = new ChatGPTController({ sessions, projects, podRules: POD_RULES });
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -46,6 +50,23 @@ app.whenReady().then(() => {
   ipcMain.handle('connections:login', (_event, serviceId) => sessions.login(serviceId));
   ipcMain.handle('connections:logout', (_event, serviceId) => sessions.logout(serviceId));
   ipcMain.handle('pod:rules', () => POD_RULES);
+  ipcMain.handle('projects:list', () => projects.list());
+  ipcMain.handle('projects:get', (_event, projectId) => projects.read(projectId));
+  ipcMain.handle('generation:start', (_event, payload) => chatgpt.start(payload));
+  ipcMain.handle('review:reject', async (_event, { projectId, notes }) => {
+    const project = projects.read(projectId);
+    projects.write({ ...project, status: 'regenerating', review: { decision: 'rejected', notes: notes || '' } });
+    return chatgpt.start({
+      referencePath: project.referencePath,
+      sourceUrl: project.sourceUrl,
+      reviewNotes: notes || '',
+      existingProjectId: projectId
+    });
+  });
+  ipcMain.handle('review:pass', (_event, { projectId }) => {
+    const project = projects.read(projectId);
+    return projects.write({ ...project, status: 'approved-image', review: { ...project.review, decision: 'passed' } });
+  });
   ipcMain.handle('file:choose-reference', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Choose reference image',
