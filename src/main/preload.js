@@ -9,6 +9,17 @@ contextBridge.exposeInMainWorld('zeroPOD', {
   pod: {
     rules: () => ipcRenderer.invoke('pod:rules')
   },
+  projects: {
+    list: () => ipcRenderer.invoke('projects:list'),
+    get: (projectId) => ipcRenderer.invoke('projects:get', projectId)
+  },
+  generation: {
+    start: (payload) => ipcRenderer.invoke('generation:start', payload)
+  },
+  review: {
+    reject: (payload) => ipcRenderer.invoke('review:reject', payload),
+    pass: (payload) => ipcRenderer.invoke('review:pass', payload)
+  },
   files: {
     chooseReference: () => ipcRenderer.invoke('file:choose-reference')
   }
