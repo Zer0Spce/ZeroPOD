@@ -1,0 +1,40 @@
+name: Windows Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - dev/initial-windows-app
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Build portable Windows package
+        run: npm run package:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZeroPOD-Windows-Portable
+          path: dist/*.exe
+          if-no-files-found: error
