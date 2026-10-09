@@ -38,4 +38,5 @@ SessionManager.prototype.rememberThreadUrl = function rememberThreadUrl(serviceI
   return value;
 };
 
+require('./chatgptUploadReadyPatch');
 require('./main');
