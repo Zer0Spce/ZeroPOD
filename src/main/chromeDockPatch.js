@@ -7,6 +7,7 @@ const originalCloseAutomationContext = SessionManager.prototype.closeAutomationC
 const originalLaunchNormalLoginBrowser = SessionManager.prototype.launchNormalLoginBrowser;
 
 const dockStates = new WeakMap();
+const wideServiceStates = new WeakMap();
 
 function stateMap(manager) {
   let map = dockStates.get(manager);
@@ -15,6 +16,15 @@ function stateMap(manager) {
     dockStates.set(manager, map);
   }
   return map;
+}
+
+function wideServices(manager) {
+  let set = wideServiceStates.get(manager);
+  if (!set) {
+    set = new Set();
+    wideServiceStates.set(manager, set);
+  }
+  return set;
 }
 
 function stopDock(manager, serviceId) {
@@ -26,7 +36,7 @@ function stopDock(manager, serviceId) {
   map.delete(serviceId);
 }
 
-function computeDockBounds(manager) {
+function displayWorkArea(manager) {
   const host = manager.__zeroPodHostWindow;
   let display;
   try {
@@ -36,8 +46,11 @@ function computeDockBounds(manager) {
   } catch {
     display = screen.getPrimaryDisplay();
   }
+  return display.workArea;
+}
 
-  const work = display.workArea;
+function computeDockBounds(manager) {
+  const work = displayWorkArea(manager);
   const minBrowserWidth = 520;
   const minHostWidth = 760;
   let browserWidth = Math.round(work.width * 0.40);
@@ -60,26 +73,119 @@ function dockHost(manager, bounds) {
   } catch {}
 }
 
-async function dockAutomationPage(manager, serviceId, page) {
+function keepHostVisibleInFront(manager) {
+  const host = manager.__zeroPodHostWindow;
+  if (!host || host.isDestroyed()) return;
+  try {
+    if (host.isMinimized()) host.restore();
+    if (manager.__zeroPodHostWasAlwaysOnTop === undefined) {
+      manager.__zeroPodHostWasAlwaysOnTop = !!host.isAlwaysOnTop?.();
+    }
+    host.setAlwaysOnTop(true, 'floating');
+    host.show();
+    host.moveTop?.();
+  } catch {}
+}
+
+function restoreHostLayer(manager) {
+  const host = manager.__zeroPodHostWindow;
+  if (!host || host.isDestroyed()) return;
+  try {
+    host.setAlwaysOnTop(!!manager.__zeroPodHostWasAlwaysOnTop);
+  } catch {}
+  delete manager.__zeroPodHostWasAlwaysOnTop;
+}
+
+async function createChromeWindowSession(page) {
+  let session;
+  try {
+    session = await page.context().newCDPSession(page);
+    const result = await session.send('Browser.getWindowForTarget');
+    const windowId = result?.windowId;
+    if (!windowId) throw new Error('Chrome window id unavailable');
+    return { session, windowId };
+  } catch (error) {
+    if (session) await session.detach().catch(() => {});
+    throw error;
+  }
+}
+
+async function wideAutomationPage(manager, serviceId, page) {
   if (!page || page.isClosed()) return;
   const map = stateMap(manager);
   const existing = map.get(serviceId);
-  if (existing?.page === page && existing?.session) {
+  if (existing?.page === page && existing?.session && existing?.mode === 'wide') {
+    keepHostVisibleInFront(manager);
+    return;
+  }
+
+  stopDock(manager, serviceId);
+
+  let chrome;
+  try {
+    chrome = await createChromeWindowSession(page);
+  } catch {
+    return;
+  }
+
+  const apply = async () => {
+    if (page.isClosed()) {
+      stopDock(manager, serviceId);
+      restoreHostLayer(manager);
+      return;
+    }
+
+    const work = displayWorkArea(manager);
+    try {
+      await chrome.session.send('Browser.setWindowBounds', {
+        windowId: chrome.windowId,
+        bounds: { windowState: 'normal' }
+      });
+    } catch {}
+    try {
+      await chrome.session.send('Browser.setWindowBounds', {
+        windowId: chrome.windowId,
+        bounds: {
+          left: Math.round(work.x),
+          top: Math.round(work.y),
+          width: Math.round(work.width),
+          height: Math.round(work.height)
+        }
+      });
+    } catch {}
+
+    // Redbubble gets the full browser viewport behind the app, while ZeroPOD
+    // remains visibly in front so live workflow status/errors are still readable.
+    keepHostVisibleInFront(manager);
+  };
+
+  await apply();
+  const timer = setInterval(() => { apply().catch(() => {}); }, 1000);
+  timer.unref?.();
+  map.set(serviceId, { page, session: chrome.session, windowId: chrome.windowId, timer, mode: 'wide' });
+}
+
+async function dockAutomationPage(manager, serviceId, page) {
+  if (!page || page.isClosed()) return;
+
+  if (wideServices(manager).has(serviceId)) {
+    await wideAutomationPage(manager, serviceId, page);
+    return;
+  }
+
+  const map = stateMap(manager);
+  const existing = map.get(serviceId);
+  if (existing?.page === page && existing?.session && existing?.mode === 'dock') {
     dockHost(manager, computeDockBounds(manager));
     return;
   }
 
   stopDock(manager, serviceId);
 
-  let session;
-  let windowId;
+  let chrome;
   try {
-    session = await page.context().newCDPSession(page);
-    const result = await session.send('Browser.getWindowForTarget');
-    windowId = result?.windowId;
-    if (!windowId) throw new Error('Chrome window id unavailable');
+    chrome = await createChromeWindowSession(page);
   } catch {
-    if (session) await session.detach().catch(() => {});
     return;
   }
 
@@ -91,11 +197,11 @@ async function dockAutomationPage(manager, serviceId, page) {
     const bounds = computeDockBounds(manager);
     dockHost(manager, bounds);
     try {
-      await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });
+      await chrome.session.send('Browser.setWindowBounds', { windowId: chrome.windowId, bounds: { windowState: 'normal' } });
     } catch {}
     try {
-      await session.send('Browser.setWindowBounds', {
-        windowId,
+      await chrome.session.send('Browser.setWindowBounds', {
+        windowId: chrome.windowId,
         bounds: {
           left: Math.round(bounds.browser.x),
           top: Math.round(bounds.browser.y),
@@ -109,7 +215,7 @@ async function dockAutomationPage(manager, serviceId, page) {
   await apply();
   const timer = setInterval(() => { apply().catch(() => {}); }, 1200);
   timer.unref?.();
-  map.set(serviceId, { page, session, windowId, timer });
+  map.set(serviceId, { page, session: chrome.session, windowId: chrome.windowId, timer, mode: 'dock' });
 }
 
 async function dockNativeLoginChrome(manager, serviceId) {
@@ -163,14 +269,40 @@ SessionManager.prototype.setHostWindow = function setHostWindow(window) {
   return this;
 };
 
+SessionManager.prototype.beginWideService = async function beginWideService(serviceId) {
+  wideServices(this).add(serviceId);
+  const existing = stateMap(this).get(serviceId);
+  if (existing?.page && !existing.page.isClosed()) {
+    await wideAutomationPage(this, serviceId, existing.page).catch(() => {});
+  }
+  keepHostVisibleInFront(this);
+  return true;
+};
+
+SessionManager.prototype.endWideService = async function endWideService(serviceId) {
+  wideServices(this).delete(serviceId);
+  const existing = stateMap(this).get(serviceId);
+  const page = existing?.page && !existing.page.isClosed() ? existing.page : null;
+  stopDock(this, serviceId);
+  restoreHostLayer(this);
+  if (page) await dockAutomationPage(this, serviceId, page).catch(() => {});
+  return true;
+};
+
 SessionManager.prototype.ensureService = async function ensureServiceDocked(serviceId) {
   const result = await originalEnsureService.call(this, serviceId);
-  await dockAutomationPage(this, serviceId, result.page).catch(() => {});
+  if (wideServices(this).has(serviceId)) {
+    await wideAutomationPage(this, serviceId, result.page).catch(() => {});
+  } else {
+    await dockAutomationPage(this, serviceId, result.page).catch(() => {});
+  }
   return result;
 };
 
 SessionManager.prototype.closeAutomationContext = async function closeAutomationContextDocked(serviceId) {
+  wideServices(this).delete(serviceId);
   stopDock(this, serviceId);
+  restoreHostLayer(this);
   return originalCloseAutomationContext.call(this, serviceId);
 };
 
