@@ -35,22 +35,17 @@ class VectorizerController {
     this.projects.update(projectId, { status: 'vectorizing' });
 
     const projectDir = this.projects.getProjectDir(projectId);
-    const downloadPromise = new Promise((resolve) => {
-      const handler = async (download) => {
-        try {
-          const suggested = download.suggestedFilename() || 'vector.svg';
-          const ext = path.extname(suggested).toLowerCase() || '.svg';
-          const savePath = path.join(projectDir, `vector${ext}`);
-          await download.saveAs(savePath);
-          page.off('download', handler);
-          const updated = this.projects.update(projectId, { status: 'vector-ready', vectorPath: savePath });
-          resolve({ ok: true, path: savePath, project: updated });
-        } catch (error) {
-          resolve({ ok: false, error: error.message });
-        }
-      };
-      page.on('download', handler);
-    });
+    const handler = async (download) => {
+      try {
+        const suggested = download.suggestedFilename() || 'vector.svg';
+        const ext = path.extname(suggested).toLowerCase() || '.svg';
+        const savePath = path.join(projectDir, `vector${ext}`);
+        await download.saveAs(savePath);
+        page.off('download', handler);
+        this.projects.update(projectId, { status: 'vector-ready', vectorPath: savePath });
+      } catch {}
+    };
+    page.on('download', handler);
 
     const tryAutoDownload = async () => {
       const candidates = [
@@ -69,8 +64,8 @@ class VectorizerController {
           return;
         } catch {}
       }
-      // If Vectorizer.ai changes its UI, the user can click its normal SVG download control.
-      // The download listener above still captures and stores the file locally.
+      // If the site UI changes, the normal user-facing SVG download can be clicked manually.
+      // The local download listener still captures the file into this ZeroPOD project.
     };
 
     tryAutoDownload().catch(() => {});
@@ -78,8 +73,7 @@ class VectorizerController {
       ok: true,
       projectId,
       status: 'vectorizing',
-      message: 'Vectorizer.ai is processing the approved image. ZeroPOD will capture the SVG download when available.',
-      completion: downloadPromise
+      message: 'Vectorizer.ai is processing the approved image. ZeroPOD will capture the SVG download when available.'
     };
   }
 }
