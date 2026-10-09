@@ -13,12 +13,12 @@ class ProjectStore {
     const dir = this.getProjectDir(projectId);
     fs.mkdirSync(dir, { recursive: true });
     const ext = path.extname(referencePath) || '.png';
-    const referenceCopy = path.join(dir, `reference${ext.toLowerCase()}`);
+    const referenceCopy = path.join(dir, `reference-original${ext.toLowerCase()}`);
     fs.copyFileSync(referencePath, referenceCopy);
     const now = new Date().toISOString();
     const project = {
       id: projectId, createdAt: now, updatedAt: now, status: 'created', sourceUrl,
-      referencePath: referenceCopy, generatedImagePath: null,
+      referencePath: referenceCopy, generatedImagePath: null, approvedImagePath: null,
       review: { decision: null, notes: '' }, metadata: null, vectorPath: null, finalPngPath: null,
       archivedAt: null,
       activity: [{ at: now, type: 'status', from: null, to: 'created', label: 'Project created' }]
