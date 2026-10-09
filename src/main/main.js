@@ -72,7 +72,9 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await automation.recoverAfterRestart();
+
   ipcMain.handle('connections:list', () => sessions.getStatuses());
   ipcMain.handle('connections:login', (_event, serviceId) => sessions.login(serviceId));
   ipcMain.handle('connections:test', (_event, serviceId) => sessions.test(serviceId));
@@ -213,7 +215,8 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', async () => {
-  automation.stop();
+  automation.pause();
+  automationStore.markCleanShutdown();
   await sessions.closeAll();
   app.quit();
 });

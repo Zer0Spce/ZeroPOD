@@ -12,6 +12,27 @@ function automationStatusLabel(status) {
   })[status] || status;
 }
 
+function renderRecoveryBanner(snapshot) {
+  let banner = document.getElementById('automationRecoveryBanner');
+  const summary = document.getElementById('automationSummary');
+  if (!banner && summary) {
+    banner = document.createElement('div');
+    banner.id = 'automationRecoveryBanner';
+    banner.className = 'automation-recovery-banner';
+    summary.parentNode.insertBefore(banner, summary);
+  }
+  if (!banner) return;
+
+  if (!snapshot.recovery) {
+    banner.hidden = true;
+    banner.innerHTML = '';
+    return;
+  }
+
+  banner.hidden = false;
+  banner.innerHTML = `<strong>Recovered after restart</strong><span>${automationEscape(snapshot.recovery.message || 'ZeroPOD restored the Automation List safely.')}</span>`;
+}
+
 async function refreshAutomationList() {
   const root = document.getElementById('automationRows');
   if (!root || !window.zeroPOD?.automation) return;
@@ -19,6 +40,9 @@ async function refreshAutomationList() {
   const state = document.getElementById('automationState');
   state.textContent = snapshot.state.charAt(0).toUpperCase() + snapshot.state.slice(1);
   state.className = `queue-state queue-state-${snapshot.state}`;
+  const startButton = document.getElementById('automationStart');
+  if (startButton) startButton.textContent = snapshot.state === 'paused' ? 'Resume Queue' : 'Start Queue';
+  renderRecoveryBanner(snapshot);
 
   const counts = snapshot.counts || {};
   document.getElementById('automationSummary').innerHTML = [
@@ -41,7 +65,7 @@ async function refreshAutomationList() {
     <td><input class="auto-link" value="${automationEscape(row.amazonLink)}" placeholder="https://amazon.com/..."></td>
     <td><input class="auto-notes" value="${automationEscape(row.notes)}" placeholder="Optional instructions"></td>
     <td><span class="stage-badge auto-status-${automationEscape(row.status)}">${automationEscape(automationStatusLabel(row.status))}</span>${row.lastError ? `<div class="auto-error" title="${automationEscape(row.lastError)}">${automationEscape(row.lastError)}</div>` : ''}</td>
-    <td>${automationEscape(row.step || 'Waiting')}</td>
+    <td>${automationEscape(row.step || 'Waiting')}${row.recoveredAt ? '<div class="auto-recovered">Recovered</div>' : ''}</td>
     <td>${row.projectId ? `<button class="auto-project small-button" data-project="${automationEscape(row.projectId)}">Projects</button>` : '—'}</td>
     <td><div class="auto-actions">${row.status === 'needs-attention' ? '<button class="auto-retry small-button">Retry</button>' : ''}<button class="auto-remove danger small-button">Remove</button></div></td>
   </tr>`).join('');
@@ -154,8 +178,12 @@ document.getElementById('automationClearCompleted')?.addEventListener('click', a
   await refreshAutomationList();
 });
 document.getElementById('automationStart')?.addEventListener('click', async () => {
-  await window.zeroPOD.automation.start();
-  await refreshAutomationList();
+  try {
+    await window.zeroPOD.automation.start();
+    await refreshAutomationList();
+  } catch (error) {
+    alert(`Queue could not start: ${error.message || error}`);
+  }
 });
 document.getElementById('automationPause')?.addEventListener('click', async () => {
   await window.zeroPOD.automation.pause();
