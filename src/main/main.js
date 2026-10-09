@@ -11,23 +11,27 @@ const { RedbubbleController } = require('./redbubbleController');
 const { AutomationQueueStore } = require('./automationQueueStore');
 const { AutomationQueueController } = require('./automationQueueController');
 const { parseCsv, toCsv } = require('./automationCsv');
+const { readAutomationWorkbook, writeAutomationWorkbook } = require('./automationSpreadsheet');
 const { validateMetadata, validateProject } = require('./qualityControl');
 const workflow = require('./workflowState');
 
 const POD_RULES = [
-  'Copy slogan and create a new style.',
+  'TEXT ALWAYS WINS: preserve the exact slogan when the reference contains text.',
+  'Copy the slogan and create a new style rather than duplicating the original artwork.',
   'Make it clean and Print On Demand friendly.',
   'Avoid using specific colors and elements from the last output unless explicitly requested.',
   'Make sure the font styling is different.',
-  'Add a few supporting elements, but do not add too much.',
-  'Make the text large and easy to read.',
-  'Do not use cursive text unless explicitly defined.',
+  'Add only a few supporting elements and keep the design uncluttered.',
+  'Make the text large, bold, easy to read, and visually uniform.',
+  'Do not use cursive, script, handwritten, or AI brush-style text unless explicitly requested.',
   'Avoid adding decorative elements on top of text.',
-  'Keep text large and visually uniform.',
+  'Prefer straight text baselines; avoid curved, arched, or warped text unless requested.',
+  'Use solid typography colors and avoid text gradients unless requested.',
   'Avoid ribbons.',
   'Use a real transparent background with true alpha; never fake transparency.',
   'Use a 4:5 output aspect ratio.',
-  'Do not use AI brush-style text.'
+  'Do not add text when the reference has no text.',
+  'If the reference is text-only, add only minimal supporting elements based on the theme.'
 ];
 
 let mainWindow;
@@ -155,6 +159,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('automation:list', () => automation.snapshot());
   ipcMain.handle('automation:add', (_event, rows) => automation.addRows(rows));
   ipcMain.handle('automation:update', (_event, { rowId, patch }) => automation.updateRow(rowId, patch));
+  ipcMain.handle('automation:move', (_event, { rowIds, direction }) => automationStore.moveRows(rowIds, direction));
   ipcMain.handle('automation:remove', (_event, rowId) => automation.removeRow(rowId));
   ipcMain.handle('automation:clear-completed', () => automation.clearCompleted());
   ipcMain.handle('automation:start', async () => {
@@ -190,6 +195,30 @@ app.whenReady().then(async () => {
     });
     if (result.canceled || !result.filePath) return { canceled: true };
     fs.writeFileSync(result.filePath, toCsv(automation.snapshot().rows), 'utf8');
+    return { canceled: false, path: result.filePath };
+  });
+
+  ipcMain.handle('automation:import-xlsx', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Import ZeroPOD Automation List Excel File',
+      properties: ['openFile'],
+      filters: [{ name: 'Excel workbooks', extensions: ['xlsx', 'xls'] }]
+    });
+    if (result.canceled) return { canceled: true };
+    const rows = readAutomationWorkbook(result.filePaths[0]);
+    if (!rows.length) throw new Error('Excel workbook did not contain any automation rows.');
+    automation.addRows(rows);
+    return { canceled: false, imported: rows.length, snapshot: automation.snapshot() };
+  });
+
+  ipcMain.handle('automation:export-xlsx', async () => {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export ZeroPOD Automation List Excel File',
+      defaultPath: 'ZeroPOD-Automation-List.xlsx',
+      filters: [{ name: 'Excel workbook', extensions: ['xlsx'] }]
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    writeAutomationWorkbook(result.filePath, automation.snapshot().rows);
     return { canceled: false, path: result.filePath };
   });
 
