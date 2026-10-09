@@ -1,6 +1,19 @@
 const { MetadataController } = require('./metadataController');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const originalAttachApprovedDesign = MetadataController.prototype.attachApprovedDesign;
+
+// Metadata does not need the image-generation conversation context. Starting from
+// a fresh ChatGPT composer avoids inheriting a stuck image-generation composer or
+// an unsent metadata draft from a previous beta build. Recovery still gets a chance
+// to harvest already-visible valid JSON before this method is called.
+MetadataController.prototype.attachApprovedDesign = async function attachApprovedDesignFreshChat(page, project) {
+  if (/^https:\/\/chatgpt\.com\/c\//i.test(page.url())) {
+    await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await this.locateComposer(page);
+  }
+  return originalAttachApprovedDesign.call(this, page, project);
+};
 
 async function composerText(composer) {
   return composer.evaluate((element) => {
@@ -22,102 +35,158 @@ async function sentState(page, composer, baselineUserCount, promptStart) {
   return stopVisible;
 }
 
-async function waitForSent(page, composer, baselineUserCount, promptStart, timeoutMs = 1800) {
+async function waitForSent(page, composer, baselineUserCount, promptStart, timeoutMs = 1200) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     if (await sentState(page, composer, baselineUserCount, promptStart)) return true;
-    await wait(120);
+    await wait(100);
   }
   return false;
 }
 
-async function composerActionCandidate(page, composer) {
-  const result = await composer.evaluate((element) => {
+async function exactSendLocators(page, composer) {
+  const scopes = [];
+  const form = page.locator('form').filter({ has: composer }).first();
+  if (await form.count().catch(() => 0)) scopes.push(form);
+  scopes.push(page.locator('body'));
+
+  const selectors = [
+    'button[data-testid="send-button"]',
+    'button[data-testid*="send" i]',
+    'button[aria-label*="send prompt" i]',
+    'button[aria-label*="send" i]',
+    'button[aria-label*="submit" i]',
+    'button[type="submit"]'
+  ];
+
+  const found = [];
+  for (const scope of scopes) {
+    for (const selector of selectors) {
+      const locator = scope.locator(selector);
+      const count = await locator.count().catch(() => 0);
+      for (let i = count - 1; i >= 0; i -= 1) {
+        const button = locator.nth(i);
+        const usable = await button.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          const disabled = element.disabled || element.getAttribute('aria-disabled') === 'true';
+          return !disabled && rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        }).catch(() => false);
+        if (usable) found.push(button);
+      }
+    }
+    if (found.length) break;
+  }
+  return found;
+}
+
+async function geometricSendCandidate(composer) {
+  return composer.evaluate((element) => {
     const visible = (node) => {
       if (!(node instanceof Element)) return false;
       const rect = node.getBoundingClientRect();
       const style = getComputedStyle(node);
-      return rect.width > 0 && rect.height > 0
-        && style.display !== 'none'
-        && style.visibility !== 'hidden'
-        && Number(style.opacity || 1) !== 0;
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) !== 0;
     };
 
     const composerRect = element.getBoundingClientRect();
     let root = element;
-    for (let i = 0; i < 7 && root.parentElement; i += 1) {
+    for (let i = 0; i < 8 && root.parentElement; i += 1) {
       root = root.parentElement;
       const rect = root.getBoundingClientRect();
-      const buttons = [...root.querySelectorAll('button')].filter(visible);
-      if (rect.width >= composerRect.width && buttons.length >= 1 && rect.height < 700) break;
+      if (rect.width >= composerRect.width && rect.height <= 760 && root.querySelectorAll('button').length) break;
     }
 
-    const buttons = [...root.querySelectorAll('button')]
+    const candidates = [...root.querySelectorAll('button')]
       .filter(visible)
       .map((button) => {
         const rect = button.getBoundingClientRect();
         const disabled = button.disabled || button.getAttribute('aria-disabled') === 'true';
-        const label = [
-          button.getAttribute('aria-label') || '',
-          button.getAttribute('title') || '',
-          button.getAttribute('data-testid') || '',
-          button.getAttribute('type') || '',
-          button.innerText || ''
-        ].join(' ').toLowerCase();
-        return {
-          button,
-          disabled,
-          label,
-          left: rect.left,
-          right: rect.right,
-          top: rect.top,
-          bottom: rect.bottom,
-          width: rect.width,
-          height: rect.height,
-          centerY: rect.top + rect.height / 2
-        };
+        const label = [button.getAttribute('aria-label') || '', button.getAttribute('title') || '', button.getAttribute('data-testid') || '', button.innerText || ''].join(' ').toLowerCase();
+        return { disabled, label, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height, centerY: rect.top + rect.height / 2 };
       })
       .filter((item) => !item.disabled)
-      .filter((item) => !/microphone|voice|dictat|record|attach|upload|add photo|add file|tools|model|stop/i.test(item.label) || /send|submit/i.test(item.label));
+      .filter((item) => !/microphone|voice|dictat|record|attach|upload|add photo|add file|tools|model|stop/i.test(item.label) || /send|submit/i.test(item.label))
+      .filter((item) => item.centerY >= composerRect.top - 120 && item.centerY <= composerRect.bottom + 160);
 
-    const bandTop = composerRect.top - 110;
-    const bandBottom = composerRect.bottom + 140;
-    const candidates = buttons.filter((item) => item.centerY >= bandTop && item.centerY <= bandBottom);
-    const pool = candidates.length ? candidates : buttons;
-    if (!pool.length) return null;
-
-    pool.sort((a, b) => {
-      const aSemantic = /send|submit/i.test(a.label) ? 1 : 0;
-      const bSemantic = /send|submit/i.test(b.label) ? 1 : 0;
-      if (aSemantic !== bSemantic) return bSemantic - aSemantic;
-      const aCompact = a.width <= 80 && a.height <= 80 ? 1 : 0;
-      const bCompact = b.width <= 80 && b.height <= 80 ? 1 : 0;
-      if (aCompact !== bCompact) return bCompact - aCompact;
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => {
+      const as = /send|submit/i.test(a.label) ? 1 : 0;
+      const bs = /send|submit/i.test(b.label) ? 1 : 0;
+      if (as !== bs) return bs - as;
+      const ac = a.width <= 84 && a.height <= 84 ? 1 : 0;
+      const bc = b.width <= 84 && b.height <= 84 ? 1 : 0;
+      if (ac !== bc) return bc - ac;
       return b.right - a.right;
     });
 
-    const target = pool[0];
-    return {
-      x: target.left + target.width / 2,
-      y: target.top + target.height / 2,
-      label: target.label
-    };
+    const target = candidates[0];
+    return { x: target.left + target.width / 2, y: target.top + target.height / 2, label: target.label };
   }).catch(() => null);
-
-  return result;
 }
 
 async function requestComposerSubmit(composer) {
   return composer.evaluate((element) => {
     const form = element.closest('form');
-    if (!form || typeof form.requestSubmit !== 'function') return false;
-    form.requestSubmit();
-    return true;
+    if (!form) return false;
+    if (typeof form.requestSubmit === 'function') {
+      form.requestSubmit();
+      return true;
+    }
+    const submit = form.querySelector('button[type="submit"]');
+    if (submit instanceof HTMLElement) {
+      submit.click();
+      return true;
+    }
+    return false;
   }).catch(() => false);
 }
 
-MetadataController.prototype.submitPrompt = async function submitPromptPersistent(page, prompt) {
-  const composer = await this.locateComposer(page);
+async function activateButton(page, button) {
+  await button.scrollIntoViewIfNeeded().catch(() => {});
+  await button.click({ force: true, timeout: 1200 }).catch(() => {});
+  await wait(120);
+  await button.evaluate((element) => {
+    try { element.focus(); } catch {}
+    try { element.click(); } catch {}
+  }).catch(() => {});
+  await wait(120);
+  const box = await button.boundingBox().catch(() => null);
+  if (box) {
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2).catch(() => {});
+    await wait(120);
+  }
+  await button.press('Enter').catch(() => {});
+  await wait(120);
+  await button.press('Space').catch(() => {});
+}
+
+async function sendDiagnostics(page, composer) {
+  const handle = await composer.elementHandle().catch(() => null);
+  if (!handle) return [];
+  return page.evaluate((composerElement) => {
+    const visible = (node) => {
+      if (!(node instanceof Element)) return false;
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const root = composerElement?.closest('form') || composerElement?.parentElement?.parentElement || document.body;
+    return [...root.querySelectorAll('button')]
+      .filter(visible)
+      .slice(-12)
+      .map((button) => ({
+        testid: button.getAttribute('data-testid') || '',
+        aria: button.getAttribute('aria-label') || '',
+        title: button.getAttribute('title') || '',
+        type: button.getAttribute('type') || '',
+        disabled: Boolean(button.disabled || button.getAttribute('aria-disabled') === 'true')
+      }));
+  }, handle).catch(() => []);
+}
+
+MetadataController.prototype.submitPrompt = async function submitPromptVerified(page, prompt) {
+  let composer = await this.locateComposer(page);
   await composer.click({ timeout: 1500 });
 
   const promptStart = prompt.slice(0, Math.min(60, prompt.length));
@@ -129,44 +198,46 @@ MetadataController.prototype.submitPrompt = async function submitPromptPersisten
   }
 
   const inserted = await composerText(composer);
-  if (!inserted.includes(promptStart)) {
-    throw new Error('ChatGPT metadata prompt was not inserted into the composer.');
-  }
+  if (!inserted.includes(promptStart)) throw new Error('ChatGPT metadata prompt was not inserted into the composer.');
 
   const baselineUserCount = await page.locator('[data-message-author-role="user"]').count().catch(() => 0);
   const started = Date.now();
-  let attempt = 0;
+  let cycle = 0;
 
-  // Keep trying until ChatGPT actually accepts the message. This intentionally
-  // survives attachment-finalization and React hydration races instead of failing
-  // immediately while the blue Send arrow is visibly ready.
-  while (Date.now() - started < 45000) {
+  while (Date.now() - started < 60000) {
     if (await sentState(page, composer, baselineUserCount, promptStart)) return { ok: true };
+    cycle += 1;
 
-    attempt += 1;
+    composer = await this.locateComposer(page);
 
-    // Enter is the most stable user-equivalent send path in ChatGPT. It is tried
-    // first once the prompt is present, then retried periodically while the image
-    // attachment finishes becoming sendable.
-    await composer.click().catch(() => {});
-    await page.keyboard.press('Enter').catch(() => {});
-    if (await waitForSent(page, composer, baselineUserCount, promptStart, 900)) return { ok: true };
-
-    const candidate = await composerActionCandidate(page, composer);
-    if (candidate) {
-      await page.mouse.click(candidate.x, candidate.y).catch(() => {});
-      if (await waitForSent(page, composer, baselineUserCount, promptStart, 1000)) return { ok: true };
+    const exactButtons = await exactSendLocators(page, composer);
+    for (const button of exactButtons) {
+      await activateButton(page, button);
+      if (await waitForSent(page, composer, baselineUserCount, promptStart, 900)) return { ok: true };
     }
 
-    if (attempt % 3 === 0) {
+    await composer.click().catch(() => {});
+    await composer.press('Enter').catch(() => {});
+    if (await waitForSent(page, composer, baselineUserCount, promptStart, 800)) return { ok: true };
+    await composer.press('Control+Enter').catch(() => {});
+    if (await waitForSent(page, composer, baselineUserCount, promptStart, 800)) return { ok: true };
+
+    const candidate = await geometricSendCandidate(composer);
+    if (candidate) {
+      await page.mouse.click(candidate.x, candidate.y).catch(() => {});
+      if (await waitForSent(page, composer, baselineUserCount, promptStart, 900)) return { ok: true };
+    }
+
+    if (cycle % 2 === 0) {
       await requestComposerSubmit(composer).catch(() => false);
       if (await waitForSent(page, composer, baselineUserCount, promptStart, 900)) return { ok: true };
     }
 
-    await wait(500);
+    await wait(350);
   }
 
-  throw new Error('ChatGPT metadata prompt is still visible after repeated Send attempts. ZeroPOD did not start response parsing because the request never left the composer.');
+  const diagnostics = await sendDiagnostics(page, composer);
+  throw new Error(`ChatGPT kept the metadata prompt in the composer after 60 seconds. Send controls detected: ${JSON.stringify(diagnostics)}`);
 };
 
 module.exports = {};
