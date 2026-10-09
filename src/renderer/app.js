@@ -12,6 +12,7 @@ navButtons.forEach((button) => button.addEventListener('click', async () => {
   setView(button.dataset.view);
   if (button.dataset.view === 'projects') await renderProjects();
   if (button.dataset.view === 'review') await refreshReview();
+  if (button.dataset.view === 'workflow') await refreshWorkflow();
 }));
 
 function formatDate(value) {
@@ -23,24 +24,19 @@ async function renderConnections() {
   const statuses = await window.zeroPOD.connections.list();
   const root = document.getElementById('connectionCards');
   root.innerHTML = '';
-
   for (const id of serviceOrder) {
     const service = statuses[id];
     const card = document.createElement('article');
     card.className = 'connection-card';
-    card.innerHTML = `
-      <div><div class="service-name">${service.name}</div><div class="status ${service.connected ? 'connected' : ''}">${service.connected ? 'Session saved locally' : 'Not connected'}</div><div class="last-seen">Last session: ${formatDate(service.lastConnectedAt)}</div></div>
-      <div class="button-row"><button class="login" data-id="${id}">${service.connected ? 'Open / Reconnect' : 'Login'}</button><button class="logout secondary" data-id="${id}" ${service.connected ? '' : 'disabled'}>Logout</button></div>`;
+    card.innerHTML = `<div><div class="service-name">${service.name}</div><div class="status ${service.connected ? 'connected' : ''}">${service.connected ? 'Session saved locally' : 'Not connected'}</div><div class="last-seen">Last session: ${formatDate(service.lastConnectedAt)}</div></div><div class="button-row"><button class="login" data-id="${id}">${service.connected ? 'Open / Reconnect' : 'Login'}</button><button class="logout secondary" data-id="${id}" ${service.connected ? '' : 'disabled'}>Logout</button></div>`;
     root.appendChild(card);
   }
-
   root.querySelectorAll('.login').forEach((button) => button.addEventListener('click', async () => {
     button.disabled = true; button.textContent = 'Opening…';
     try { await window.zeroPOD.connections.login(button.dataset.id); }
     catch (error) { alert(`Could not open login window: ${error.message || error}`); }
     finally { button.disabled = false; button.textContent = 'Open / Reconnect'; }
   }));
-
   root.querySelectorAll('.logout').forEach((button) => button.addEventListener('click', async () => {
     if (!confirm('Clear this local ZeroPOD browser session? You will need to sign in again.')) return;
     await window.zeroPOD.connections.logout(button.dataset.id);
@@ -60,8 +56,9 @@ async function renderProjects() {
   root.innerHTML = projects.map((project) => `<article class="connection-card"><div><div class="service-name">${project.id}</div><div class="status">${project.status}</div><div class="last-seen">Updated: ${formatDate(project.updatedAt)}</div></div><button class="open-project" data-id="${project.id}">Open</button></article>`).join('');
   root.querySelectorAll('.open-project').forEach((button) => button.addEventListener('click', async () => {
     currentProjectId = button.dataset.id;
-    setView('review');
-    await refreshReview();
+    const project = await window.zeroPOD.projects.get(currentProjectId);
+    setView(project.review?.decision === 'passed' ? 'workflow' : 'review');
+    if (project.review?.decision === 'passed') await refreshWorkflow(); else await refreshReview();
   }));
 }
 
@@ -87,6 +84,23 @@ async function refreshReview() {
   }
 }
 
+async function refreshWorkflow() {
+  if (!currentProjectId) {
+    const projects = await window.zeroPOD.projects.list();
+    const candidate = projects.find((item) => item.review?.decision === 'passed');
+    if (candidate) currentProjectId = candidate.id;
+  }
+  if (!currentProjectId) return;
+  const project = await window.zeroPOD.projects.get(currentProjectId);
+  document.getElementById('workflowProjectLabel').textContent = project.id;
+  document.getElementById('workflowStatus').textContent = `Status: ${project.status}`;
+  const meta = project.metadata || {};
+  document.getElementById('metaTitle').value = meta.title || '';
+  document.getElementById('metaMainTag').value = meta.mainTag || '';
+  document.getElementById('metaSupportingTags').value = (meta.supportingTags || []).join(', ');
+  document.getElementById('metaDescription').value = meta.description || '';
+}
+
 document.getElementById('chooseReference').addEventListener('click', async () => {
   const file = await window.zeroPOD.files.chooseReference();
   if (file) document.getElementById('referencePath').value = file;
@@ -105,26 +119,44 @@ document.getElementById('startGeneration').addEventListener('click', async () =>
     status.textContent = result.message;
     setView('review');
     await refreshReview();
-  } catch (error) {
-    status.textContent = `Generation could not start: ${error.message || error}`;
-  } finally { button.disabled = false; }
+  } catch (error) { status.textContent = `Generation could not start: ${error.message || error}`; }
+  finally { button.disabled = false; }
 });
 
 document.getElementById('rejectDesign').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No project selected.');
   const notes = document.getElementById('reviewNotes').value.trim();
   document.getElementById('reviewStatus').textContent = 'Submitting regeneration…';
-  try {
-    await window.zeroPOD.review.reject({ projectId: currentProjectId, notes });
-    await refreshReview();
-  } catch (error) { alert(`Regeneration failed: ${error.message || error}`); }
+  try { await window.zeroPOD.review.reject({ projectId: currentProjectId, notes }); await refreshReview(); }
+  catch (error) { alert(`Regeneration failed: ${error.message || error}`); }
 });
 
 document.getElementById('passDesign').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No project selected.');
   await window.zeroPOD.review.pass({ projectId: currentProjectId });
-  await refreshReview();
-  alert('Image approved. Next stage: generate the Redbubble title, 1 main tag, 14 supporting tags, and short description.');
+  setView('workflow');
+  await refreshWorkflow();
+});
+
+document.getElementById('generateMetadata').addEventListener('click', async () => {
+  if (!currentProjectId) return alert('No approved project selected.');
+  document.getElementById('workflowStatus').textContent = 'Generating Redbubble metadata in ChatGPT…';
+  try { await window.zeroPOD.metadata.generate(currentProjectId); await refreshWorkflow(); }
+  catch (error) { alert(`Metadata generation failed: ${error.message || error}`); }
+});
+
+document.getElementById('startVectorizer').addEventListener('click', async () => {
+  if (!currentProjectId) return alert('No project selected.');
+  document.getElementById('workflowStatus').textContent = 'Opening Vectorizer.ai and uploading the approved image…';
+  try { const result = await window.zeroPOD.vectorizer.start(currentProjectId); document.getElementById('workflowStatus').textContent = result.message; }
+  catch (error) { alert(`Vectorization failed: ${error.message || error}`); }
+});
+
+document.getElementById('exportPng').addEventListener('click', async () => {
+  if (!currentProjectId) return alert('No project selected.');
+  document.getElementById('workflowStatus').textContent = 'Exporting transparent 4500×5400 PNG…';
+  try { const result = await window.zeroPOD.export.png(currentProjectId); document.getElementById('workflowStatus').textContent = `Export ready: ${result.path}`; }
+  catch (error) { alert(`Export failed: ${error.message || error}`); }
 });
 
 renderConnections();
