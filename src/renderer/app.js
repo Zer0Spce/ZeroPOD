@@ -21,6 +21,26 @@ function formatDate(value) {
   try { return new Date(value).toLocaleString(); } catch { return value; }
 }
 
+function setButton(id, enabled, label) {
+  const button = document.getElementById(id);
+  if (!button) return;
+  button.disabled = !enabled;
+  if (label) button.textContent = label;
+}
+
+function nextText(project) {
+  return project.workflow?.next ? ` · Next: ${project.workflow.next}` : '';
+}
+
+async function routeProject(project) {
+  const view = project.workflow?.view || 'projects';
+  setView(view);
+  if (view === 'review') await refreshReview();
+  else if (view === 'workflow') await refreshWorkflow();
+  else if (view === 'upload') await refreshUpload();
+  else await renderProjects();
+}
+
 async function renderConnections() {
   const statuses = await window.zeroPOD.connections.list();
   const root = document.getElementById('connectionCards');
@@ -54,32 +74,28 @@ async function renderProjects() {
   const projects = await window.zeroPOD.projects.list();
   const root = document.getElementById('projectList');
   if (!projects.length) { root.innerHTML = '<div class="empty">No local projects yet.</div>'; return; }
-  root.innerHTML = projects.map((project) => `<article class="connection-card"><div><div class="service-name">${project.id}</div><div class="status">${project.status}</div><div class="last-seen">Updated: ${formatDate(project.updatedAt)}</div></div><button class="open-project" data-id="${project.id}">Open</button></article>`).join('');
+  root.innerHTML = projects.map((project) => `<article class="connection-card"><div><div class="service-name">${project.id}</div><div class="status">${project.status}</div><div class="last-seen">Next: ${project.workflow?.next || 'Review project'} · Updated: ${formatDate(project.updatedAt)}</div></div><button class="open-project" data-id="${project.id}">Continue</button></article>`).join('');
   root.querySelectorAll('.open-project').forEach((button) => button.addEventListener('click', async () => {
     currentProjectId = button.dataset.id;
     const project = await window.zeroPOD.projects.get(currentProjectId);
-    if (['export-ready', 'redbubble-preparing', 'redbubble-review', 'redbubble-recovery-needed', 'published'].includes(project.status)) {
-      setView('upload'); await refreshUpload();
-    } else if (project.review?.decision === 'passed') {
-      setView('workflow'); await refreshWorkflow();
-    } else {
-      setView('review'); await refreshReview();
-    }
+    await routeProject(project);
   }));
 }
 
 async function refreshReview() {
   if (!currentProjectId) {
     const projects = await window.zeroPOD.projects.list();
-    const candidate = projects.find((item) => ['awaiting-review', 'generating', 'regenerating', 'chatgpt-recovery-needed'].includes(item.status));
+    const candidate = projects.find((item) => item.workflow?.view === 'review');
     if (candidate) currentProjectId = candidate.id;
   }
   if (!currentProjectId) return;
   const project = await window.zeroPOD.projects.get(currentProjectId);
   document.getElementById('reviewProjectLabel').textContent = project.id;
   const recoveryText = project.chatgptError?.recovery ? ` · Recovery: ${project.chatgptError.recovery}` : '';
-  document.getElementById('reviewStatus').textContent = `Status: ${project.status}${recoveryText}`;
+  document.getElementById('reviewStatus').textContent = `Status: ${project.status}${nextText(project)}${recoveryText}`;
   document.getElementById('reviewNotes').value = project.review?.notes || '';
+  setButton('rejectDesign', project.status === 'awaiting-review');
+  setButton('passDesign', project.status === 'awaiting-review');
   const img = document.getElementById('reviewImage');
   const message = document.getElementById('previewMessage');
   if (project.generatedImagePath) {
@@ -87,7 +103,7 @@ async function refreshReview() {
     img.hidden = false; message.hidden = true;
   } else {
     img.hidden = true; message.hidden = false;
-    if (project.status === 'generating') message.textContent = 'ChatGPT is generating. ZeroPOD is waiting for the image download.';
+    if (project.status === 'generating' || project.status === 'regenerating') message.textContent = 'ChatGPT is generating. ZeroPOD is waiting for the image download.';
     else if (project.status === 'chatgpt-recovery-needed') message.textContent = project.chatgptError?.recovery || 'ChatGPT needs attention. Open the saved session and retry.';
     else message.textContent = 'Generated image is not available yet.';
   }
@@ -96,36 +112,38 @@ async function refreshReview() {
 async function refreshWorkflow() {
   if (!currentProjectId) {
     const projects = await window.zeroPOD.projects.list();
-    const candidate = projects.find((item) => item.review?.decision === 'passed');
+    const candidate = projects.find((item) => item.workflow?.view === 'workflow');
     if (candidate) currentProjectId = candidate.id;
   }
   if (!currentProjectId) return;
   const project = await window.zeroPOD.projects.get(currentProjectId);
   document.getElementById('workflowProjectLabel').textContent = project.id;
   const metaRecovery = project.metadataError?.recovery ? ` · Recovery: ${project.metadataError.recovery}` : '';
-  document.getElementById('workflowStatus').textContent = `Status: ${project.status}${metaRecovery}`;
+  document.getElementById('workflowStatus').textContent = `Status: ${project.status}${nextText(project)}${metaRecovery}`;
   const meta = project.metadata || {};
   document.getElementById('metaTitle').value = meta.title || '';
   document.getElementById('metaMainTag').value = meta.mainTag || '';
   document.getElementById('metaSupportingTags').value = (meta.supportingTags || []).join(', ');
   document.getElementById('metaDescription').value = meta.description || '';
-  document.getElementById('generateMetadata').textContent = project.status === 'metadata-recovery-needed' ? 'Retry Metadata' : 'Generate Metadata';
+  setButton('generateMetadata', ['approved-image', 'metadata-recovery-needed', 'metadata-ready'].includes(project.status), project.status === 'metadata-recovery-needed' ? 'Retry Metadata' : 'Generate Metadata');
+  setButton('startVectorizer', ['metadata-ready', 'vectorizer-recovery-needed'].includes(project.status), project.status === 'vectorizer-recovery-needed' ? 'Retry Vectorizer' : 'Vectorize');
+  setButton('exportPng', project.status === 'vector-ready');
 }
 
 async function refreshUpload() {
   if (!currentProjectId) {
     const projects = await window.zeroPOD.projects.list();
-    const candidate = projects.find((item) => ['export-ready', 'redbubble-preparing', 'redbubble-review', 'redbubble-recovery-needed', 'published'].includes(item.status));
+    const candidate = projects.find((item) => item.workflow?.view === 'upload');
     if (candidate) currentProjectId = candidate.id;
   }
   if (!currentProjectId) return;
   const project = await window.zeroPOD.projects.get(currentProjectId);
   document.getElementById('uploadProjectLabel').textContent = project.id;
-  document.getElementById('uploadStatus').textContent = `Status: ${project.status}${project.redbubble?.publishedAt ? ` · Published ${formatDate(project.redbubble.publishedAt)}` : ''}`;
+  document.getElementById('uploadStatus').textContent = `Status: ${project.status}${nextText(project)}${project.redbubble?.publishedAt ? ` · Published ${formatDate(project.redbubble.publishedAt)}` : ''}`;
   const recovery = document.getElementById('uploadRecovery');
   recovery.textContent = project.lastAutomationError ? `Recovery: ${project.lastAutomationError.recovery} Last error: ${project.lastAutomationError.message}` : '';
-  document.getElementById('prepareRedbubble').textContent = project.status === 'redbubble-recovery-needed' ? 'Retry Redbubble' : 'Prepare Redbubble';
-  document.getElementById('publishRedbubble').disabled = project.status !== 'redbubble-review';
+  setButton('prepareRedbubble', ['export-ready', 'redbubble-recovery-needed'].includes(project.status), project.status === 'redbubble-recovery-needed' ? 'Retry Redbubble' : 'Prepare Redbubble');
+  setButton('publishRedbubble', project.status === 'redbubble-review');
 }
 
 document.getElementById('chooseReference').addEventListener('click', async () => {
@@ -159,8 +177,11 @@ document.getElementById('rejectDesign').addEventListener('click', async () => {
 
 document.getElementById('passDesign').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No project selected.');
-  await window.zeroPOD.review.pass({ projectId: currentProjectId });
-  setView('workflow'); await refreshWorkflow();
+  try {
+    await window.zeroPOD.review.pass({ projectId: currentProjectId });
+    const project = await window.zeroPOD.projects.get(currentProjectId);
+    await routeProject(project);
+  } catch (error) { alert(error.message || error); }
 });
 
 document.getElementById('generateMetadata').addEventListener('click', async () => {
@@ -176,8 +197,8 @@ document.getElementById('generateMetadata').addEventListener('click', async () =
 document.getElementById('startVectorizer').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No project selected.');
   document.getElementById('workflowStatus').textContent = 'Opening Vectorizer.ai and uploading the approved image…';
-  try { const result = await window.zeroPOD.vectorizer.start(currentProjectId); document.getElementById('workflowStatus').textContent = result.message; }
-  catch (error) { alert(`Vectorization failed: ${error.message || error}`); }
+  try { const result = await window.zeroPOD.vectorizer.start(currentProjectId); document.getElementById('workflowStatus').textContent = result.message; await refreshWorkflow(); }
+  catch (error) { alert(`Vectorization failed: ${error.message || error}`); await refreshWorkflow(); }
 });
 
 document.getElementById('exportPng').addEventListener('click', async () => {
@@ -186,7 +207,8 @@ document.getElementById('exportPng').addEventListener('click', async () => {
   try {
     const result = await window.zeroPOD.export.png(currentProjectId);
     document.getElementById('workflowStatus').textContent = `Export ready: ${result.path}`;
-    setView('upload'); await refreshUpload();
+    const project = await window.zeroPOD.projects.get(currentProjectId);
+    await routeProject(project);
   } catch (error) { alert(`Export failed: ${error.message || error}`); }
 });
 
@@ -196,24 +218,16 @@ document.getElementById('prepareRedbubble').addEventListener('click', async () =
   const button = document.getElementById('prepareRedbubble');
   button.disabled = true;
   status.textContent = 'Opening Redbubble, copying the first existing work, and replacing artwork + metadata…';
-  try {
-    const result = await window.zeroPOD.redbubble.prepare(currentProjectId);
-    status.textContent = result.message;
-  } catch (error) {
-    status.textContent = `Redbubble needs attention: ${error.message || error}`;
-  } finally {
-    button.disabled = false;
-    await refreshUpload();
-  }
+  try { const result = await window.zeroPOD.redbubble.prepare(currentProjectId); status.textContent = result.message; }
+  catch (error) { status.textContent = `Redbubble needs attention: ${error.message || error}`; }
+  finally { button.disabled = false; await refreshUpload(); }
 });
 
 document.getElementById('publishRedbubble').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No Redbubble project selected.');
-  if (!confirm('Publish/save this copied Redbubble work now? Confirm that the artwork, inherited product settings, title, tags, and description look correct.')) return;
-  try {
-    await window.zeroPOD.redbubble.publish(currentProjectId);
-    await refreshUpload();
-  } catch (error) { alert(`Redbubble publish failed: ${error.message || error}`); }
+  if (!confirm('Publish/save this copied Redbubble work now? Confirm that the artwork, inherited product settings, title, tags, description, and product configuration look correct.')) return;
+  try { await window.zeroPOD.redbubble.publish(currentProjectId); await refreshUpload(); }
+  catch (error) { alert(`Redbubble publish failed: ${error.message || error}`); }
 });
 
 renderConnections();
