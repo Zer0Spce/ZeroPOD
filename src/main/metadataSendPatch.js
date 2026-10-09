@@ -1,6 +1,19 @@
 const { MetadataController } = require('./metadataController');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const originalAttachApprovedDesign = MetadataController.prototype.attachApprovedDesign;
+
+// Metadata does not need the image-generation conversation context. Starting from
+// a fresh ChatGPT composer avoids inheriting a stuck image-generation composer or
+// an unsent metadata draft from a previous beta build. Recovery still gets a chance
+// to harvest already-visible valid JSON before this method is called.
+MetadataController.prototype.attachApprovedDesign = async function attachApprovedDesignFreshChat(page, project) {
+  if (/^https:\/\/chatgpt\.com\/c\//i.test(page.url())) {
+    await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await this.locateComposer(page);
+  }
+  return originalAttachApprovedDesign.call(this, page, project);
+};
 
 async function composerText(composer) {
   return composer.evaluate((element) => {
@@ -131,28 +144,26 @@ async function requestComposerSubmit(composer) {
 
 async function activateButton(page, button) {
   await button.scrollIntoViewIfNeeded().catch(() => {});
-
   await button.click({ force: true, timeout: 1200 }).catch(() => {});
   await wait(120);
-
   await button.evaluate((element) => {
     try { element.focus(); } catch {}
     try { element.click(); } catch {}
   }).catch(() => {});
   await wait(120);
-
   const box = await button.boundingBox().catch(() => null);
   if (box) {
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2).catch(() => {});
     await wait(120);
   }
-
   await button.press('Enter').catch(() => {});
   await wait(120);
   await button.press('Space').catch(() => {});
 }
 
 async function sendDiagnostics(page, composer) {
+  const handle = await composer.elementHandle().catch(() => null);
+  if (!handle) return [];
   return page.evaluate((composerElement) => {
     const visible = (node) => {
       if (!(node instanceof Element)) return false;
@@ -171,7 +182,7 @@ async function sendDiagnostics(page, composer) {
         type: button.getAttribute('type') || '',
         disabled: Boolean(button.disabled || button.getAttribute('aria-disabled') === 'true')
       }));
-  }, await composer.elementHandle()).catch(() => []);
+  }, handle).catch(() => []);
 }
 
 MetadataController.prototype.submitPrompt = async function submitPromptVerified(page, prompt) {
@@ -197,8 +208,6 @@ MetadataController.prototype.submitPrompt = async function submitPromptVerified(
     if (await sentState(page, composer, baselineUserCount, promptStart)) return { ok: true };
     cycle += 1;
 
-    // Re-resolve the composer every cycle because ChatGPT frequently replaces the
-    // contenteditable and the Send button after an attachment finishes hydrating.
     composer = await this.locateComposer(page);
 
     const exactButtons = await exactSendLocators(page, composer);
@@ -207,15 +216,12 @@ MetadataController.prototype.submitPrompt = async function submitPromptVerified(
       if (await waitForSent(page, composer, baselineUserCount, promptStart, 900)) return { ok: true };
     }
 
-    // User-equivalent keyboard submission from the active composer.
     await composer.click().catch(() => {});
     await composer.press('Enter').catch(() => {});
     if (await waitForSent(page, composer, baselineUserCount, promptStart, 800)) return { ok: true };
     await composer.press('Control+Enter').catch(() => {});
     if (await waitForSent(page, composer, baselineUserCount, promptStart, 800)) return { ok: true };
 
-    // Geometry fallback for the current circular blue arrow even if ChatGPT has
-    // changed/removed its send-specific attributes.
     const candidate = await geometricSendCandidate(composer);
     if (candidate) {
       await page.mouse.click(candidate.x, candidate.y).catch(() => {});
