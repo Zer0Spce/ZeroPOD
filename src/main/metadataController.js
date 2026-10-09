@@ -1,3 +1,4 @@
+const fs = require('fs');
 const { retryStep, clickFirstVisible, automationError } = require('./automationUtils');
 
 class MetadataController {
@@ -11,11 +12,12 @@ class MetadataController {
 
     return [
       'POD WINNER MODE',
-      'Create SEO-ready Redbubble listing metadata for the approved POD design in this project.',
+      'Create SEO-ready Redbubble listing metadata for the APPROVED POD DESIGN attached to this message.',
       '',
       'PRIMARY RESEARCH SOURCE:',
       `Amazon reference URL: ${project.sourceUrl}`,
       '',
+      'Use the attached approved design as the source of truth for what the artwork actually says and shows.',
       'Use the pasted Amazon link as the PRIMARY niche and buyer-intent reference.',
       'Analyze the niche, target audience, likely search language, gift intent, emotional angle, product theme, and commercially useful generic keywords from that reference.',
       'Do NOT copy the Amazon listing title or description verbatim.',
@@ -49,10 +51,10 @@ class MetadataController {
       '- Exactly 1 mainTag.',
       '- Exactly 14 supportingTags.',
       '- No duplicates ignoring capitalization/plurals.',
-      '- Title, tags, and description all match the approved design and the Amazon-derived niche.',
+      '- Title, tags, and description all match the attached approved design and the Amazon-derived niche.',
       '- optimizationMode must equal exactly "POD WINNER".',
       '',
-      'Use the approved design context from this conversation/project and produce the final metadata now.'
+      'Produce the final metadata now.'
     ].join('\n');
   }
 
@@ -67,6 +69,28 @@ class MetadataController {
         } catch {}
       }
       throw new Error('Could not find the ChatGPT composer.');
+    }, { attempts: 3, delayMs: 900 });
+  }
+
+  async attachApprovedDesign(page, project) {
+    const approvedPath = project.generatedImagePath;
+    if (!approvedPath || !fs.existsSync(approvedPath)) throw new Error('Approved design image is missing. Re-open the project review and restore the generated image before metadata generation.');
+
+    return retryStep('Attach approved design for metadata', async () => {
+      let input = page.locator('input[type="file"]').first();
+      if (!(await input.count())) {
+        await clickFirstVisible([
+          page.getByRole('button', { name: /attach|upload|add photos|add files|add/i }).first(),
+          page.locator('button[aria-label*="attach" i]').first(),
+          page.locator('button[aria-label*="upload" i]').first()
+        ], { timeout: 5000 });
+        await page.waitForTimeout(600);
+        input = page.locator('input[type="file"]').first();
+      }
+      if (!(await input.count())) throw new Error('Could not find ChatGPT image upload input for metadata grounding.');
+      await input.setInputFiles(approvedPath);
+      await page.waitForTimeout(1200);
+      return true;
     }, { attempts: 3, delayMs: 900 });
   }
 
@@ -150,6 +174,7 @@ class MetadataController {
       throw new Error('Image must pass review before generating metadata.');
     }
     if (!project.sourceUrl) throw new Error('Paste the Amazon link before generating POD WINNER metadata.');
+    if (!project.generatedImagePath || !fs.existsSync(project.generatedImagePath)) throw new Error('Approved design image is missing.');
 
     try {
       const { page } = await this.sessions.ensureService('chatgpt');
@@ -161,6 +186,7 @@ class MetadataController {
       this.projects.update(projectId, { status: 'metadata-generating', metadataError: null });
       const assistants = page.locator('[data-message-author-role="assistant"]');
       const previousCount = await assistants.count();
+      await this.attachApprovedDesign(page, project);
       await this.submitPrompt(page, this.buildPrompt(project));
       let raw = await this.waitForAssistantResponse(page, previousCount);
       let metadata;
@@ -184,6 +210,7 @@ class MetadataController {
         metadata,
         metadataMode: 'POD WINNER',
         metadataSourceUrl: project.sourceUrl,
+        metadataGroundedImagePath: project.generatedImagePath,
         metadataError: null
       });
       return { ok: true, metadata, project: updated };
@@ -192,7 +219,7 @@ class MetadataController {
         'chatgpt',
         'metadata',
         error,
-        'Open ChatGPT from Connections, confirm the conversation is responsive, then retry Generate Metadata. ZeroPOD will reuse the approved project and Amazon source URL.'
+        'Open ChatGPT from Connections, confirm the conversation is responsive, then retry Generate Metadata. ZeroPOD will re-attach the approved design and reuse the Amazon source URL.'
       );
       this.projects.update(projectId, { status: 'metadata-recovery-needed', metadataError: recovery });
       throw new Error(recovery.message);
