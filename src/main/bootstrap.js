@@ -82,4 +82,5 @@ require('./chatgptLiveReliabilityPatch');
 require('./chatThreadPreferencePatch');
 require('./metadataVisibleJsonPatch');
 require('./metadataComposerStabilityPatch');
+require('./redbubbleVectorizerSpeedPatch');
 require('./main');
