@@ -58,7 +58,7 @@ async function renderProjects() {
   root.querySelectorAll('.open-project').forEach((button) => button.addEventListener('click', async () => {
     currentProjectId = button.dataset.id;
     const project = await window.zeroPOD.projects.get(currentProjectId);
-    if (['export-ready', 'redbubble-preparing', 'redbubble-review', 'published'].includes(project.status)) {
+    if (['export-ready', 'redbubble-preparing', 'redbubble-review', 'redbubble-recovery-needed', 'published'].includes(project.status)) {
       setView('upload'); await refreshUpload();
     } else if (project.review?.decision === 'passed') {
       setView('workflow'); await refreshWorkflow();
@@ -110,13 +110,16 @@ async function refreshWorkflow() {
 async function refreshUpload() {
   if (!currentProjectId) {
     const projects = await window.zeroPOD.projects.list();
-    const candidate = projects.find((item) => ['export-ready', 'redbubble-preparing', 'redbubble-review', 'published'].includes(item.status));
+    const candidate = projects.find((item) => ['export-ready', 'redbubble-preparing', 'redbubble-review', 'redbubble-recovery-needed', 'published'].includes(item.status));
     if (candidate) currentProjectId = candidate.id;
   }
   if (!currentProjectId) return;
   const project = await window.zeroPOD.projects.get(currentProjectId);
   document.getElementById('uploadProjectLabel').textContent = project.id;
   document.getElementById('uploadStatus').textContent = `Status: ${project.status}${project.redbubble?.publishedAt ? ` · Published ${formatDate(project.redbubble.publishedAt)}` : ''}`;
+  const recovery = document.getElementById('uploadRecovery');
+  recovery.textContent = project.lastAutomationError ? `Recovery: ${project.lastAutomationError.recovery} Last error: ${project.lastAutomationError.message}` : '';
+  document.getElementById('prepareRedbubble').textContent = project.status === 'redbubble-recovery-needed' ? 'Retry Redbubble' : 'Prepare Redbubble';
   document.getElementById('publishRedbubble').disabled = project.status !== 'redbubble-review';
 }
 
@@ -182,12 +185,18 @@ document.getElementById('exportPng').addEventListener('click', async () => {
 document.getElementById('prepareRedbubble').addEventListener('click', async () => {
   if (!currentProjectId) return alert('No export-ready project selected.');
   const status = document.getElementById('uploadStatus');
+  const button = document.getElementById('prepareRedbubble');
+  button.disabled = true;
   status.textContent = 'Opening Redbubble, copying the first existing work, and replacing artwork + metadata…';
   try {
     const result = await window.zeroPOD.redbubble.prepare(currentProjectId);
     status.textContent = result.message;
+  } catch (error) {
+    status.textContent = `Redbubble needs attention: ${error.message || error}`;
+  } finally {
+    button.disabled = false;
     await refreshUpload();
-  } catch (error) { alert(`Redbubble preparation failed: ${error.message || error}`); }
+  }
 });
 
 document.getElementById('publishRedbubble').addEventListener('click', async () => {
