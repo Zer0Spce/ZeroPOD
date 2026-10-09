@@ -1,0 +1,32 @@
+{
+  "name": "zeropod",
+  "version": "0.1.0",
+  "description": "ZeroPOD Windows desktop automation workspace for POD generation, review, vectorization, export, and upload workflows.",
+  "main": "src/main/main.js",
+  "author": "Zer0Spce",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "package:win": "electron-builder --win portable"
+  },
+  "dependencies": {
+    "electron": "^38.0.0",
+    "playwright": "^1.55.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.zer0spce.zeropod",
+    "productName": "ZeroPOD",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": ["portable"]
+    }
+  }
+}
