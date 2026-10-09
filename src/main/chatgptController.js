@@ -1,15 +1,47 @@
 const fs = require('fs');
 const path = require('path');
-const { retryStep, clickFirstVisible, automationError } = require('./automationUtils');
+const sharp = require('sharp');
+const { clickFirstVisible, automationError } = require('./automationUtils');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-class ChatGPTController {
-  constructor({ sessions, projects, podRules }) { this.sessions = sessions; this.projects = projects; this.podRules = podRules; }
+const GENERATION_PROMPT = `-Copy slogan and create a style
+-make It Clean and Print On demand Friendly
+-avoid using specific colors and elements from last output unless i told you
+-make sure that the font styling is different
+-add some few elements. but don't add too much
+-make the text Large Easy To Read
+-Don't Use Cursive text unless defined.
+-avoid adding element's on text
+-make sure that the text are large and uniformed
+-Avoid Using Ribbons
+-don't do that fake transparent background. i want real transparent background
+-make output 4:5
+-Don't USE AI Brush Text
+-DON'T ADD TEXT IF THE REFERENCE DOESN'T HAVE ONE.
+-IF THE reference is only text. add some few elements based on the text`;
 
-  buildPrompt(sourceUrl = '', reviewNotes = '') {
-    const rules = this.podRules.map((rule) => `- ${rule}`).join('\n');
-    return ['Create a new Print-On-Demand design using the attached reference image.','Copy the slogan exactly from the reference, but create a fresh visual style instead of cloning the original artwork.',sourceUrl ? `Source/reference URL for niche context only: ${sourceUrl}` : '','','Permanent ZeroPOD rules:',rules,'',reviewNotes ? `Revision notes from the previous review:\n${reviewNotes}` : '','','Generate the image only for this step. Do not generate listing metadata yet. We will review the image first.'].filter(Boolean).join('\n');
+function imageFormatFromBytes(buffer, contentType = '') {
+  if (buffer?.length >= 12) {
+    if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { ext: '.png', mime: 'image/png' };
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return { ext: '.jpg', mime: 'image/jpeg' };
+    if (buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return { ext: '.webp', mime: 'image/webp' };
+  }
+  if (/image\/png/i.test(contentType)) return { ext: '.png', mime: 'image/png' };
+  if (/image\/webp/i.test(contentType)) return { ext: '.webp', mime: 'image/webp' };
+  if (/image\/jpe?g/i.test(contentType)) return { ext: '.jpg', mime: 'image/jpeg' };
+  return null;
+}
+
+class ChatGPTController {
+  constructor({ sessions, projects, podRules }) {
+    this.sessions = sessions;
+    this.projects = projects;
+    this.podRules = podRules;
+  }
+
+  buildPrompt() {
+    return GENERATION_PROMPT;
   }
 
   async assertNoHumanGate(page) {
@@ -20,229 +52,355 @@ class ChatGPTController {
     }
   }
 
+  composerLocator(page) {
+    const selectors = [
+      '#prompt-textarea',
+      '[data-testid="composer-text-input"]',
+      'textarea[placeholder*="Message" i]',
+      'textarea',
+      '[contenteditable="true"][data-placeholder]',
+      '[contenteditable="true"]'
+    ];
+    return page.locator(selectors.map((selector) => `${selector}:visible`).join(',')).first();
+  }
+
   async locateComposer(page) {
-    const selectors = ['#prompt-textarea','[data-testid="composer-text-input"]','textarea[placeholder*="Message" i]','textarea','[contenteditable="true"][data-placeholder]','[contenteditable="true"]'];
-    return retryStep('Locate ChatGPT composer', async () => {
-      await this.assertNoHumanGate(page);
-      for (const selector of selectors) {
-        const locator = page.locator(selector).first();
-        try { await locator.waitFor({ state: 'visible', timeout: 2500 }); return locator; } catch {}
-      }
-      throw new Error('Could not find the ChatGPT message composer.');
-    }, { attempts: 3, delayMs: 900 });
+    await this.assertNoHumanGate(page);
+    const composer = this.composerLocator(page);
+    await composer.waitFor({ state: 'visible', timeout: 9000 });
+    return composer;
+  }
+
+  async openPreferredThread(page) {
+    const currentUrl = page.url();
+    if (/^https:\/\/chatgpt\.com\/c\//i.test(currentUrl)) {
+      this.sessions.rememberThreadUrl('chatgpt', currentUrl);
+      return;
+    }
+    const saved = this.sessions.getLastThreadUrl('chatgpt');
+    if (/^https:\/\/chatgpt\.com\/c\//i.test(saved || '')) {
+      await page.goto(saved, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    }
   }
 
   async ensureReady(page) {
     await page.bringToFront();
-    if (!page.url().startsWith('https://chatgpt.com')) await retryStep('Open ChatGPT', () => page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 45000 }), { attempts: 2 });
-    await page.waitForTimeout(1000);
+    if (!page.url().startsWith('https://chatgpt.com')) {
+      await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
+    }
     await this.assertNoHumanGate(page);
     const auth = await this.sessions.detectAuthState('chatgpt', page);
     if (auth.status === 'needs-login') throw new Error('ChatGPT is not signed in. Open Connections → ChatGPT → Open Login Browser, finish login, then Test Session.');
-    try { return await this.locateComposer(page); }
-    catch (error) {
+    try {
+      return await this.locateComposer(page);
+    } catch (error) {
       if (error.code === 'HUMAN_VERIFICATION_REQUIRED') throw error;
-      await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
-      await page.waitForTimeout(1000);
-      await this.assertNoHumanGate(page);
-      return this.locateComposer(page);
+      const saved = this.sessions.getLastThreadUrl('chatgpt');
+      if (/^https:\/\/chatgpt\.com\/c\//i.test(saved || '') && page.url() !== saved) {
+        await page.goto(saved, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await this.assertNoHumanGate(page);
+        return this.locateComposer(page);
+      }
+      throw error;
     }
   }
 
   async attachReference(page, referencePath) {
-    return retryStep('Attach ChatGPT reference image', async () => {
-      await this.assertNoHumanGate(page);
-      let input = page.locator('input[type="file"]').first();
-      if (!(await input.count())) {
-        await clickFirstVisible([page.locator('button[data-testid*="composer" i][aria-label*="add" i]').first(),page.locator('button[data-testid*="attach" i]').first(),page.getByRole('button', { name: /add files|attach|upload|photos|files|add/i }).first(),page.locator('button[aria-label*="add files" i]').first(),page.locator('button[aria-label*="attach" i]').first(),page.locator('button[aria-label*="upload" i]').first()], { timeout: 5000 });
-        await page.waitForTimeout(700); input = page.locator('input[type="file"]').first();
-      }
-      if (!(await input.count())) throw new Error('Could not find ChatGPT image upload input.');
-      await input.setInputFiles(referencePath); await page.waitForTimeout(1500); return true;
-    }, { attempts: 3, delayMs: 900 });
-  }
-
-  async submitPrompt(page, prompt) {
-    return retryStep('Submit ChatGPT generation prompt', async () => {
-      await this.assertNoHumanGate(page);
-      const composer = await this.locateComposer(page); await composer.click();
-      const tagName = await composer.evaluate((el) => el.tagName.toLowerCase());
-      if (tagName === 'textarea' || tagName === 'input') await composer.fill(prompt); else await composer.fill(prompt).catch(async () => composer.pressSequentially(prompt, { delay: 1 }));
-      await page.waitForTimeout(300);
-      const sent = await clickFirstVisible([page.locator('button[data-testid="send-button"]').first(),page.locator('button[data-testid*="send" i]').first(),page.getByRole('button', { name: /^send$/i }).first(),page.locator('button[aria-label*="send" i]').first()], { timeout: 5000 });
-      if (!sent) await composer.press('Enter'); return true;
-    }, { attempts: 2, delayMs: 900 });
-  }
-
-  async snapshotImageSources(page) {
-    return new Set(await page.locator('img').evaluateAll((images) => images.map((img) => img.currentSrc || img.src).filter(Boolean)).catch(() => []));
-  }
-
-  async findNewGeneratedImage(page, baselineSources) {
-    const candidates = await page.locator('img').evaluateAll((images) => images.map((img) => {
-      const rect = img.getBoundingClientRect();
-      return {
-        src: img.currentSrc || img.src || '',
-        alt: img.alt || '',
-        width: img.naturalWidth || rect.width || 0,
-        height: img.naturalHeight || rect.height || 0,
-        visible: rect.width > 180 && rect.height > 180 && getComputedStyle(img).visibility !== 'hidden'
-      };
-    }).filter((item) => item.visible && item.src && item.width >= 384 && item.height >= 384)).catch(() => []);
-
-    const fresh = candidates.filter((item) => !baselineSources.has(item.src));
-    if (!fresh.length) return null;
-    fresh.sort((a, b) => {
-      const aGenerated = /generated|imagegen|dall|create/i.test(a.alt) ? 1 : 0;
-      const bGenerated = /generated|imagegen|dall|create/i.test(b.alt) ? 1 : 0;
-      if (aGenerated !== bGenerated) return bGenerated - aGenerated;
-      return (b.width * b.height) - (a.width * a.height);
+    await this.assertNoHumanGate(page);
+    let input = page.locator('input[type="file"]').first();
+    if (!(await input.count())) {
+      await clickFirstVisible([
+        page.locator('button[data-testid*="composer" i][aria-label*="add" i]').first(),
+        page.locator('button[data-testid*="attach" i]').first(),
+        page.getByRole('button', { name: /add files|attach|upload|photos|files|add/i }).first(),
+        page.locator('button[aria-label*="add files" i]').first(),
+        page.locator('button[aria-label*="attach" i]').first(),
+        page.locator('button[aria-label*="upload" i]').first()
+      ], { timeout: 5000 });
+      await page.locator('input[type="file"]').first().waitFor({ state: 'attached', timeout: 5000 });
+      input = page.locator('input[type="file"]').first();
+    }
+    if (!(await input.count())) throw new Error('Could not find ChatGPT image upload input.');
+    await input.setInputFiles(referencePath);
+    await input.evaluate((element) => {
+      if (!element.files || element.files.length < 1) throw new Error('ChatGPT did not accept the reference file.');
     });
-    return fresh[0];
+    return true;
   }
 
-  async saveImageSource(page, source, projectDir) {
-    if (!source) throw new Error('Generated image source is empty.');
-    let body;
-    let contentType = '';
+  async fillPrompt(page, prompt) {
+    await this.assertNoHumanGate(page);
+    const composer = await this.locateComposer(page);
+    await composer.click();
+    const tagName = await composer.evaluate((element) => element.tagName.toLowerCase());
+    if (tagName === 'textarea' || tagName === 'input') {
+      await composer.fill(prompt);
+    } else {
+      await composer.fill(prompt).catch(async () => composer.pressSequentially(prompt, { delay: 1 }));
+    }
+    return composer;
+  }
 
-    if (/^(blob:|data:)/i.test(source)) {
+  async sendPrompt(page, composer) {
+    await this.assertNoHumanGate(page);
+    const sendSelectors = [
+      'button[data-testid="send-button"]:visible',
+      'button[data-testid*="send" i]:visible',
+      'button[aria-label*="send" i]:visible'
+    ];
+    const sendButton = page.locator(sendSelectors.join(',')).first();
+    try {
+      await sendButton.waitFor({ state: 'visible', timeout: 12000 });
+      await sendButton.waitFor({ state: 'attached', timeout: 12000 });
+      await sendButton.click({ timeout: 12000 });
+    } catch {
+      await composer.press('Enter');
+    }
+    return true;
+  }
+
+  async snapshotAssistantState(page) {
+    const messages = page.locator('[data-message-author-role="assistant"]');
+    const count = await messages.count();
+    const ids = await messages.evaluateAll((nodes) => nodes.map((node, index) => node.getAttribute('data-message-id') || node.closest('[data-message-id]')?.getAttribute('data-message-id') || `assistant-${index}`)).catch(() => []);
+    const imageSources = await messages.locator('img').evaluateAll((images) => images.map((img) => img.currentSrc || img.src).filter(Boolean)).catch(() => []);
+    return { count, ids: new Set(ids), imageSources: new Set(imageSources) };
+  }
+
+  async waitForNewAssistantResponse(page, baseline, onProgress) {
+    const started = Date.now();
+    while (Date.now() - started < 90000) {
+      await this.assertNoHumanGate(page);
+      const messages = page.locator('[data-message-author-role="assistant"]');
+      const count = await messages.count();
+      if (count > baseline.count) {
+        const newest = messages.nth(count - 1);
+        const id = await newest.evaluate((node, index) => node.getAttribute('data-message-id') || node.closest('[data-message-id]')?.getAttribute('data-message-id') || `assistant-${index}`).catch(() => null);
+        if (!id || !baseline.ids.has(id)) {
+          if (typeof onProgress === 'function') onProgress('Image generation in progress');
+          return newest;
+        }
+      }
+      await wait(700);
+    }
+    throw new Error('ChatGPT did not create a new assistant response for the generation request.');
+  }
+
+  async getResponseAssetCandidates(messageLocator, baselineSources) {
+    const candidates = await messageLocator.evaluate((message) => {
+      const turn = message.closest('article') || message.closest('[data-testid^="conversation-turn-"]') || message.parentElement || message;
+      const results = [];
+      const add = (src, score, width = 0, height = 0, alt = '') => {
+        if (!src || !/^((blob:|data:image\/|https?:\/\/))/i.test(src)) return;
+        results.push({ src, score, width, height, alt });
+      };
+      for (const img of turn.querySelectorAll('img')) {
+        const rect = img.getBoundingClientRect();
+        const width = img.naturalWidth || rect.width || 0;
+        const height = img.naturalHeight || rect.height || 0;
+        const alt = img.alt || '';
+        const primary = img.currentSrc || img.src || '';
+        let score = Math.min(width * height / 1000, 5000);
+        if (/generated|create|imagegen|dall/i.test(`${alt} ${primary}`)) score += 5000;
+        if (/files\.oaiusercontent\.com|blob:|backend-api|imagegen/i.test(primary)) score += 3000;
+        if (width >= 384 && height >= 384) score += 2500;
+        add(primary, score, width, height, alt);
+        if (img.srcset) {
+          for (const part of img.srcset.split(',')) add(part.trim().split(/\s+/)[0], score - 10, width, height, alt);
+        }
+        const anchor = img.closest('a[href]');
+        if (anchor) add(anchor.href, score - 20, width, height, alt);
+      }
+      return results;
+    }).catch(() => []);
+
+    const seen = new Set();
+    return candidates
+      .filter((item) => item.src && !baselineSources.has(item.src) && !seen.has(item.src) && seen.add(item.src))
+      .sort((a, b) => b.score - a.score);
+  }
+
+  async fetchImageBytes(page, source) {
+    if (/^data:image\//i.test(source)) {
+      const match = source.match(/^data:([^;,]+)?(?:;charset=[^;,]+)?(;base64)?,(.*)$/i);
+      if (!match) throw new Error('Generated data URL could not be decoded.');
+      const contentType = match[1] || '';
+      const body = match[2] ? Buffer.from(match[3], 'base64') : Buffer.from(decodeURIComponent(match[3]), 'utf8');
+      return { body, contentType };
+    }
+
+    if (/^blob:/i.test(source)) {
       const encoded = await page.evaluate(async (src) => {
         const response = await fetch(src);
         if (!response.ok) throw new Error(`Image fetch failed with ${response.status}`);
         const type = response.headers.get('content-type') || '';
-        const buffer = await response.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
+        const bytes = new Uint8Array(await response.arrayBuffer());
         let binary = '';
-        const chunk = 0x8000;
-        for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        const chunkSize = 0x8000;
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
         return { base64: btoa(binary), type };
       }, source);
-      body = Buffer.from(encoded.base64, 'base64');
-      contentType = encoded.type;
-    } else {
-      const response = await page.context().request.get(source, { timeout: 45000 });
-      if (!response.ok()) throw new Error(`Generated image request failed with ${response.status()}.`);
-      contentType = response.headers()['content-type'] || '';
-      body = await response.body();
+      return { body: Buffer.from(encoded.base64, 'base64'), contentType: encoded.type || '' };
     }
 
-    if (!body || body.length < 10000) throw new Error('Captured generated image was unexpectedly small.');
-    const ext = /webp/i.test(contentType) ? '.webp' : /jpe?g/i.test(contentType) ? '.jpg' : '.png';
-    const savePath = path.join(projectDir, `generated${ext}`);
-    fs.writeFileSync(savePath, body);
-    return savePath;
+    try {
+      const response = await page.context().request.get(source, { timeout: 45000 });
+      if (!response.ok()) throw new Error(`HTTP ${response.status()}`);
+      return { body: await response.body(), contentType: response.headers()['content-type'] || '' };
+    } catch (requestError) {
+      const encoded = await page.evaluate(async (src) => {
+        const response = await fetch(src, { credentials: 'include' });
+        if (!response.ok) throw new Error(`Image fetch failed with ${response.status}`);
+        const type = response.headers.get('content-type') || '';
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+        return { base64: btoa(binary), type };
+      }, source).catch((browserError) => {
+        throw new Error(`Could not fetch generated image bytes. ${requestError.message} ${browserError.message}`);
+      });
+      return { body: Buffer.from(encoded.base64, 'base64'), contentType: encoded.type || '' };
+    }
   }
 
-  async waitForGeneratedImage(page, projectId, baselineSources = new Set()) {
-    const projectDir = this.projects.getProjectDir(projectId);
-    const started = Date.now();
-    const timeoutMs = 360000;
+  nextDraftPath(projectDir, ext) {
+    for (let index = 1; index <= 999; index += 1) {
+      const candidate = path.join(projectDir, `chatgpt-draft-${String(index).padStart(2, '0')}${ext}`);
+      if (!fs.existsSync(candidate)) return candidate;
+    }
+    throw new Error('Too many ChatGPT draft files exist in this project.');
+  }
 
-    while (Date.now() - started < timeoutMs) {
+  async saveGeneratedAsset(page, source, projectDir) {
+    const { body, contentType } = await this.fetchImageBytes(page, source);
+    if (!body || body.length < 8192) throw new Error('Captured generated image was unexpectedly small.');
+    const format = imageFormatFromBytes(body, contentType);
+    if (!format) throw new Error(`Generated asset is not a supported PNG, WebP, or JPEG image (${contentType || 'unknown MIME'}).`);
+
+    const savePath = this.nextDraftPath(projectDir, format.ext);
+    fs.writeFileSync(savePath, body);
+    try {
+      const metadata = await sharp(savePath, { failOn: 'error' }).metadata();
+      if (!metadata.width || !metadata.height || metadata.width < 256 || metadata.height < 256) {
+        throw new Error(`Generated image dimensions are invalid (${metadata.width || 0}×${metadata.height || 0}).`);
+      }
+      return { savePath, metadata, mime: format.mime };
+    } catch (error) {
+      fs.rmSync(savePath, { force: true });
+      throw error;
+    }
+  }
+
+  async captureGeneratedImage(page, projectId, baseline, step) {
+    const projectDir = this.projects.getProjectDir(projectId);
+    step('Waiting for ChatGPT response');
+    const response = await this.waitForNewAssistantResponse(page, baseline, step);
+    const started = Date.now();
+    let lastError = null;
+
+    while (Date.now() - started < 360000) {
       await this.assertNoHumanGate(page);
-      const image = await this.findNewGeneratedImage(page, baselineSources);
-      if (image) {
+      const currentUrl = page.url();
+      if (/^https:\/\/chatgpt\.com\/c\//i.test(currentUrl)) this.sessions.rememberThreadUrl('chatgpt', currentUrl);
+      const candidates = await this.getResponseAssetCandidates(response, baseline.imageSources);
+      for (const candidate of candidates) {
         try {
-          await wait(1800);
-          const latest = await this.findNewGeneratedImage(page, baselineSources);
-          const source = latest?.src || image.src;
-          const savePath = await this.saveImageSource(page, source, projectDir);
+          step('Generated image detected');
+          step('Saving generated image');
+          const saved = await this.saveGeneratedAsset(page, candidate.src, projectDir);
           this.projects.update(projectId, {
             status: 'awaiting-review',
-            generatedImagePath: savePath,
-            automationStep: 'Ready for image review',
+            generatedImagePath: saved.savePath,
+            generatedImage: {
+              mime: saved.mime,
+              width: saved.metadata.width,
+              height: saved.metadata.height,
+              hasAlpha: Boolean(saved.metadata.hasAlpha),
+              source: candidate.src.startsWith('blob:') ? 'blob' : 'asset-url'
+            },
+            automationStep: 'Ready for review',
             chatgptError: null
           });
-          return { ok: true, path: savePath, method: 'image-source' };
-        } catch {
-          // The image may still be transitioning from a preview URL. Keep polling,
-          // then fall back to ChatGPT's download UI if source capture never succeeds.
+          step('Ready for review');
+          return { ok: true, path: saved.savePath, method: 'assistant-response-asset' };
+        } catch (error) {
+          lastError = error;
         }
       }
-      await wait(1800);
+      step('Image generation in progress');
+      await wait(900);
     }
-    throw new Error('Timed out waiting for the completed ChatGPT image.');
-  }
 
-  async clickDownloadFallback(page, projectId) {
-    const projectDir = this.projects.getProjectDir(projectId);
-    return new Promise(async (resolve, reject) => {
-      const timeout = setTimeout(() => { page.off('download', handler); reject(new Error('ChatGPT download fallback timed out.')); }, 90000);
-      const handler = async (download) => {
-        try {
-          clearTimeout(timeout);
-          page.off('download', handler);
-          const suggested = download.suggestedFilename() || 'generated-image.png';
-          const ext = path.extname(suggested) || '.png';
-          const savePath = path.join(projectDir, `generated${ext.toLowerCase()}`);
-          await download.saveAs(savePath);
-          resolve(savePath);
-        } catch (error) { reject(error); }
-      };
-      page.on('download', handler);
-      try {
-        const clicked = await clickFirstVisible([
-          page.getByRole('button', { name: /download|save image/i }).last(),
-          page.getByRole('link', { name: /download|save image/i }).last(),
-          page.locator('button[aria-label*="download" i]').last(),
-          page.locator('button[title*="download" i]').last(),
-          page.locator('[data-testid*="download" i]').last()
-        ], { timeout: 8000 });
-        if (!clicked) throw new Error('No ChatGPT download control was detected.');
-      } catch (error) {
-        clearTimeout(timeout);
-        page.off('download', handler);
-        reject(error);
-      }
+    const error = new Error(`ChatGPT created a response, but ZeroPOD could not extract a valid generated image asset${lastError ? `: ${lastError.message}` : '.'}`);
+    this.projects.update(projectId, {
+      status: 'chatgpt-recovery-needed',
+      automationStep: 'Generated image capture needs attention',
+      chatgptError: automationError('chatgpt', 'capture-generated-image', error, 'Keep the completed ChatGPT generation open, then Retry. ZeroPOD captures the original response image asset directly and does not use browser downloads or screenshots.')
     });
+    throw error;
   }
 
-  async captureGeneratedImage(page, projectId, baselineSources) {
-    this.projects.update(projectId, { status: 'generating', chatgptError: null, automationStep: 'Waiting for generated image' });
-    try {
-      return await this.waitForGeneratedImage(page, projectId, baselineSources);
-    } catch (sourceError) {
-      try {
-        const savePath = await this.clickDownloadFallback(page, projectId);
-        this.projects.update(projectId, { status: 'awaiting-review', generatedImagePath: savePath, automationStep: 'Ready for image review', chatgptError: null });
-        return { ok: true, path: savePath, method: 'download-fallback' };
-      } catch (downloadError) {
-        const error = new Error(`ZeroPOD saw the ChatGPT generation finish but could not capture the image automatically. Source capture: ${sourceError.message} Download fallback: ${downloadError.message}`);
-        this.projects.update(projectId, {
-          status: 'chatgpt-recovery-needed',
-          automationStep: 'Generated image capture needs attention',
-          chatgptError: automationError('chatgpt', 'capture-generated-image', error, 'The generated image is already visible in ChatGPT. Use its normal Download/Save Image control once, then Retry if ZeroPOD still does not capture it.')
-        });
-        throw error;
-      }
-    }
+  async newChat() {
+    const { page } = await this.sessions.ensureService('chatgpt');
+    await page.bringToFront();
+    await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await this.assertNoHumanGate(page);
+    await this.locateComposer(page);
+    this.sessions.rememberThreadUrl('chatgpt', 'https://chatgpt.com/');
+    return { ok: true, message: 'Fresh ChatGPT conversation is ready. The next generation will use this chat and ZeroPOD will remember its thread URL after the prompt is sent.' };
   }
 
   async start({ referencePath, sourceUrl = '', reviewNotes = '', existingProjectId = null, onStep = null }) {
     if (!referencePath || !fs.existsSync(referencePath)) throw new Error('Reference image is missing.');
     const project = existingProjectId ? this.projects.read(existingProjectId) : this.projects.create({ referencePath, sourceUrl });
-    const step = (message) => { if (typeof onStep === 'function') onStep(message); this.projects.update(project.id, { automationStep: message }); };
+    const step = (message) => {
+      if (typeof onStep === 'function') onStep(message);
+      this.projects.update(project.id, { automationStep: message });
+    };
+
     try {
-      step('Opening ChatGPT'); const { page } = await this.sessions.ensureService('chatgpt');
-      step('Checking ChatGPT'); await this.assertNoHumanGate(page);
-      step('Waiting for ChatGPT composer'); await this.ensureReady(page);
-      step('Uploading reference image'); await this.attachReference(page, project.referencePath);
-      const baselineSources = await this.snapshotImageSources(page);
-      step('Sending generation prompt'); await this.submitPrompt(page, this.buildPrompt(sourceUrl || project.sourceUrl, reviewNotes));
-      step('Waiting for generated image');
-      this.captureGeneratedImage(page, project.id, baselineSources).catch(async (error) => {
+      step('Opening saved ChatGPT thread');
+      const { page } = await this.sessions.ensureService('chatgpt');
+      await this.openPreferredThread(page);
+
+      step('Waiting for composer');
+      await this.ensureReady(page);
+      const baseline = await this.snapshotAssistantState(page);
+
+      step('Uploading reference image');
+      await this.attachReference(page, project.referencePath);
+      step('Reference upload complete');
+
+      step('Pasting generation prompt');
+      const composer = await this.fillPrompt(page, this.buildPrompt());
+      step('Sending prompt');
+      await this.sendPrompt(page, composer);
+
+      const currentUrl = page.url();
+      if (/^https:\/\/chatgpt\.com\/c\//i.test(currentUrl)) this.sessions.rememberThreadUrl('chatgpt', currentUrl);
+
+      this.projects.update(project.id, { status: 'generating', chatgptError: null });
+      this.captureGeneratedImage(page, project.id, baseline, step).catch(async (error) => {
         if (error.code === 'HUMAN_VERIFICATION_REQUIRED') await this.sessions.login('chatgpt').catch(() => {});
       });
-      return { ok: true, projectId: project.id, status: 'generating', message: 'Generation submitted. ZeroPOD will capture the completed image directly from ChatGPT and move it to Review Queue.' };
+
+      return {
+        ok: true,
+        projectId: project.id,
+        status: 'generating',
+        message: 'Generation submitted. ZeroPOD is watching the new ChatGPT response and will capture the original generated image asset automatically.'
+      };
     } catch (error) {
       const human = error.code === 'HUMAN_VERIFICATION_REQUIRED';
       if (human) await this.sessions.login('chatgpt').catch(() => {});
-      const recovery = human ? { service: 'chatgpt', step: 'human-verification', message: error.message, recovery: 'Complete the human-verification challenge manually in the normal Edge window ZeroPOD opened, close it if it remains open, then retry. ZeroPOD does not automate or bypass verification.' } : automationError('chatgpt','generation',error,'Open ChatGPT from Connections, confirm you are signed in and the composer is usable, then retry the project.');
+      const recovery = human
+        ? { service: 'chatgpt', step: 'human-verification', message: error.message, recovery: 'Complete the human-verification challenge manually in the normal Edge window ZeroPOD opened, close it if it remains open, then retry. ZeroPOD does not automate or bypass verification.' }
+        : automationError('chatgpt', 'generation', error, 'Open ChatGPT from Connections, confirm you are signed in and the composer is usable, then retry the project.');
       this.projects.update(project.id, { status: 'chatgpt-recovery-needed', chatgptError: recovery, automationStep: human ? 'Human verification required' : 'Generation failed' });
       throw new Error(recovery.message);
     }
   }
 }
 
-module.exports = { ChatGPTController };
+module.exports = { ChatGPTController, GENERATION_PROMPT };
