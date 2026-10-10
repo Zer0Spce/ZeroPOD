@@ -102,5 +102,6 @@ require('./redbubblePublishStateRecoveryPatch');
 require('./automationFullAutoPatch');
 require('./workflowImageCheckDockPatch');
 require('./workspaceResearchBackupPatch');
+require('./researchPodSourcePatch');
 require('./researchIpcPatch');
 require('./main');
