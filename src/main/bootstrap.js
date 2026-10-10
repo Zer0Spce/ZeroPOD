@@ -64,7 +64,8 @@ SessionManager.prototype.rememberThreadUrl = function rememberThreadUrl(serviceI
 SessionManager.prototype.clearLastThreadUrl = function clearLastThreadUrl(serviceId) {
   const state = readThreadState();
   if (!state[serviceId]) return false;
-  delete state[serviceId];
+  delete state[serviceId].lastThreadUrl;
+  state[serviceId].updatedAt = new Date().toISOString();
   writeThreadState(state);
   return true;
 };
@@ -100,5 +101,6 @@ require('./redbubbleAgreementReliabilityPatch');
 require('./redbubblePublishStateRecoveryPatch');
 require('./automationFullAutoPatch');
 require('./workflowImageCheckDockPatch');
+require('./workspaceResearchBackupPatch');
 require('./researchIpcPatch');
 require('./main');
