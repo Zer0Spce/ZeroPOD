@@ -92,7 +92,7 @@ require('./redbubbleTagChipPatch');
 require('./redbubbleAcceptedTagsPatch');
 require('./redbubbleDescriptionRetryPatch');
 require('./redbubbleDescriptionPastePatch');
-require('./redbubbleWideEditorPatch');
 require('./redbubbleDescriptionCoordinatePatch');
 require('./redbubbleSkipDescriptionBetaPatch');
+require('./redbubbleReviewCapturePatch');
 require('./main');
