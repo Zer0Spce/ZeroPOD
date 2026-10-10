@@ -4,6 +4,28 @@ const { automationError } = require('./automationUtils');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Metadata runs immediately after the approved image-generation turn in the same
+// remembered ChatGPT conversation. Do not attach the approved PNG a second time:
+// current ChatGPT exposes a hidden camera input before its upload input on some
+// layouts, and a metadata-only turn does not need another file upload anyway.
+// The latest generated/approved design already exists in conversation context.
+const previousBuildPrompt = MetadataController.prototype.buildPrompt;
+MetadataController.prototype.buildPrompt = function buildPromptFromCurrentConversation(project) {
+  return previousBuildPrompt.call(this, project)
+    .replace(
+      'Create SEO-ready Redbubble listing metadata for the APPROVED POD DESIGN attached to this message.',
+      'Create SEO-ready Redbubble listing metadata for the APPROVED POD DESIGN that was just generated and approved in this conversation.'
+    )
+    .replace(
+      'Use the attached approved design as the source of truth for what the artwork actually says and shows.',
+      'Use the most recent generated/approved design visible in this conversation as the source of truth for what the artwork actually says and shows.'
+    )
+    .replace(
+      '- Title, tags, and description all match the attached approved design and the Amazon-derived niche.',
+      '- Title, tags, and description all match the most recent generated/approved design and the Amazon-derived niche.'
+    );
+};
+
 async function composerText(controller, page) {
   const composer = controller.chat.composerLocator(page);
   if (!(await composer.count().catch(() => 0))) return '';
@@ -13,6 +35,8 @@ async function composerText(controller, page) {
   }).catch(() => '');
 }
 
+// Kept exported for compatibility with older tests/diagnostics, but the metadata
+// generation path below intentionally no longer calls it.
 async function metadataAttachmentReady(controller, page, timeoutMs = 20000) {
   const started = Date.now();
   let sawAttachment = false;
@@ -94,7 +118,7 @@ async function fillStableMetadataPrompt(controller, page, prompt, timeoutMs = 10
     }
   }
 
-  throw new Error(`ChatGPT image attachment is ready, but ZeroPOD could not keep the metadata prompt in the composer. ${lastError?.message || ''}`.trim());
+  throw new Error(`ChatGPT is ready, but ZeroPOD could not keep the metadata prompt in the composer. ${lastError?.message || ''}`.trim());
 }
 
 MetadataController.prototype.generate = async function generateWithStableComposer(projectId) {
@@ -124,9 +148,9 @@ MetadataController.prototype.generate = async function generateWithStableCompose
     const baselineUsers = await this.userTurnCount(page);
     const prompt = this.buildPrompt(project);
 
-    await this.chat.attachReference(page, approvedPath);
-    await metadataAttachmentReady(this, page, 20000);
-
+    // IMPORTANT: metadata is a text-only follow-up in the same ChatGPT thread.
+    // The approved design is the most recent generated image in this conversation.
+    // Do not call attachReference() here; that is reserved for generation only.
     const composer = await fillStableMetadataPrompt(this, page, prompt, 10000);
     await this.chat.sendPrompt(page, composer);
 
@@ -150,7 +174,7 @@ MetadataController.prototype.generate = async function generateWithStableCompose
       'chatgpt',
       'metadata',
       error,
-      'Keep the current ChatGPT thread open and press Retry Metadata. ZeroPOD will consume valid JSON already visible, otherwise it will wait for the approved-image attachment to stabilize before pasting and sending metadata.'
+      'Keep the current ChatGPT thread open and press Retry Metadata. ZeroPOD will consume valid JSON already visible; otherwise it will send a text-only metadata request using the most recent approved design already in the conversation.'
     );
     this.projects.update(projectId, { status: 'metadata-recovery-needed', metadataError: recovery });
     throw new Error(recovery.message);
