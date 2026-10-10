@@ -22,7 +22,8 @@ class ResearchFeature {
     const history = Array.isArray(item.history) ? item.history : [];
     const trend7 = computeTrend(history, 'bsr', 7) || computeTrend(history, 'bestSellerPosition', 7);
     const trend30 = computeTrend(history, 'bsr', 30) || computeTrend(history, 'bestSellerPosition', 30);
-    return { ...item, trend7, trend30 };
+    const cachedImagePath = item.cachedImagePath && fs.existsSync(item.cachedImagePath) ? item.cachedImagePath : null;
+    return { ...item, cachedImagePath, trend7, trend30 };
   }
 
   list(filters = {}) { return this.store.list(filters).map((item) => this.enrich(item)); }
