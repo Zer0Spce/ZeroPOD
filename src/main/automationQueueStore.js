@@ -91,6 +91,7 @@ class AutomationQueueStore {
         projectId: row.projectId || null,
         lastError: row.lastError || null,
         recoveredAt: row.recoveredAt || null,
+        research: row.research && typeof row.research === 'object' ? row.research : null,
         createdAt: row.createdAt || now,
         updatedAt: now
       });
