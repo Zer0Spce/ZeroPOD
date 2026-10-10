@@ -56,31 +56,41 @@ async function markTagSection(page, labelText, nextLabelText) {
   return result ? page.locator(`[data-zeropod-tagbox="${result}"]`).first() : null;
 }
 
-async function clearChips(box) {
-  if (!box) return;
-  for (let round = 0; round < 24; round += 1) {
-    const button = box.locator('button, [role="button"]').filter({ has: box.page().locator('svg, span') }).last();
-    const count = await box.locator('button, [role="button"]').count().catch(() => 0);
-    if (!count) break;
+async function tagBoxState(box) {
+  if (!box) return { empty: false, text: '', buttonCount: -1, removeCount: -1 };
+  return box.evaluate((el) => {
+    const visible = (node) => {
+      if (!(node instanceof Element)) return false;
+      const r = node.getBoundingClientRect();
+      const s = getComputedStyle(node);
+      return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+    };
 
-    let removed = false;
-    for (let i = count - 1; i >= 0; i -= 1) {
-      const candidate = box.locator('button, [role="button"]').nth(i);
-      const info = await candidate.evaluate((el) => ({
-        text: String(el.innerText || el.textContent || '').trim(),
-        aria: String(el.getAttribute('aria-label') || ''),
-        title: String(el.getAttribute('title') || '')
-      })).catch(() => null);
-      if (!info) continue;
-      if (/^(×|x|✕|✖)$/i.test(info.text) || /\b(remove|delete|clear)\b/i.test(`${info.aria} ${info.title}`)) {
-        await candidate.click({ force: true, timeout: 1200 }).catch(() => {});
-        await wait(70);
-        removed = true;
-        break;
-      }
-    }
-    if (!removed) break;
-  }
+    const buttons = [...el.querySelectorAll('button, [role="button"]')].filter(visible);
+    const removeButtons = buttons.filter((button) => {
+      const text = String(button.innerText || button.textContent || '').trim();
+      const aria = String(button.getAttribute('aria-label') || '').trim();
+      const title = String(button.getAttribute('title') || '').trim();
+      return /^(×|x|✕|✖)$/i.test(text)
+        || /\b(remove|delete|clear)\b/i.test(`${aria} ${title}`)
+        || /[×✕✖]\s*$/i.test(text);
+    });
+
+    // Redbubble's empty chip box has no visible text. Chip labels contribute to
+    // innerText, while input placeholders do not. Strip only common remove glyphs.
+    const text = String(el.innerText || el.textContent || '')
+      .replace(/[×✕✖]/g, ' ')
+      .replace(/(^|\s)x(?=\s|$)/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return {
+      empty: text.length === 0 && removeButtons.length === 0 && buttons.length === 0,
+      text,
+      buttonCount: buttons.length,
+      removeCount: removeButtons.length
+    };
+  }).catch(() => ({ empty: false, text: '', buttonCount: -1, removeCount: -1 }));
 }
 
 async function focusChipEditor(page, box) {
@@ -108,12 +118,97 @@ async function focusChipEditor(page, box) {
   return null;
 }
 
+async function clearChipsByBackspace(page, labelText, nextLabelText) {
+  // Redbubble removes the previous chip when Backspace is pressed while the chip
+  // editor is focused and empty. React recreates the editor after removals, so
+  // periodically reacquire both the box and the editor.
+  for (let pass = 0; pass < 3; pass += 1) {
+    let box = await markTagSection(page, labelText, nextLabelText);
+    if (!box) return { ok: false, reason: 'tag box not found' };
+    await box.scrollIntoViewIfNeeded().catch(() => {});
+
+    let state = await tagBoxState(box);
+    if (state.empty) return { ok: true, state };
+
+    let editor = await focusChipEditor(page, box);
+    if (!editor) {
+      const rect = await box.boundingBox().catch(() => null);
+      if (!rect) return { ok: false, reason: 'chip editor could not be focused', state };
+      await page.mouse.click(rect.x + Math.max(16, rect.width - 16), rect.y + Math.max(16, rect.height - 16));
+      await wait(80);
+    } else {
+      const tagName = await editor.evaluate((el) => el.tagName).catch(() => '');
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
+        await editor.fill('').catch(() => {});
+      } else {
+        await editor.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A').catch(() => {});
+        await editor.press('Backspace').catch(() => {});
+      }
+    }
+
+    // More than enough for Redbubble's maximum 15 chips. Extra presses are safe
+    // because the editor is empty; they simply become no-ops after the last chip.
+    for (let press = 0; press < 64; press += 1) {
+      await page.keyboard.press('Backspace').catch(() => {});
+      await wait(32);
+
+      if ((press + 1) % 4 === 0) {
+        box = await markTagSection(page, labelText, nextLabelText) || box;
+        state = await tagBoxState(box);
+        if (state.empty) return { ok: true, state };
+
+        // Re-focus after React rebuilt the chip list/editor.
+        editor = await focusChipEditor(page, box);
+        if (editor) {
+          const tagName = await editor.evaluate((el) => el.tagName).catch(() => '');
+          if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
+            await editor.fill('').catch(() => {});
+          }
+        }
+      }
+    }
+
+    box = await markTagSection(page, labelText, nextLabelText) || box;
+    state = await tagBoxState(box);
+    if (state.empty) return { ok: true, state };
+
+    // Give the next pass a fresh click/focus in case Redbubble swallowed a key.
+    const rect = await box.boundingBox().catch(() => null);
+    if (rect) {
+      await page.mouse.click(rect.x + Math.max(16, rect.width - 16), rect.y + Math.max(16, rect.height - 16));
+      await wait(120);
+    }
+  }
+
+  const finalBox = await markTagSection(page, labelText, nextLabelText);
+  const finalState = await tagBoxState(finalBox);
+  return {
+    ok: finalState.empty,
+    state: finalState,
+    reason: finalState.empty
+      ? ''
+      : `copied tags remain (text=${JSON.stringify(finalState.text).slice(0, 180)}, buttons=${finalState.buttonCount}, removeControls=${finalState.removeCount})`
+  };
+}
+
 async function setTags(page, labelText, nextLabelText, tags) {
   let box = await markTagSection(page, labelText, nextLabelText);
-  if (!box) return false;
+  if (!box) return { ok: false, reason: 'tag box not found' };
   await box.scrollIntoViewIfNeeded().catch(() => {});
-  await clearChips(box);
-  await wait(120);
+
+  const cleared = await clearChipsByBackspace(page, labelText, nextLabelText);
+  if (!cleared.ok) return cleared;
+
+  // Hard gate: do not type a single replacement tag until the copied chips have
+  // been independently confirmed gone.
+  box = await markTagSection(page, labelText, nextLabelText) || box;
+  const emptyCheck = await tagBoxState(box);
+  if (!emptyCheck.empty) {
+    return {
+      ok: false,
+      reason: `tag clear verification failed before typing (text=${JSON.stringify(emptyCheck.text).slice(0, 180)}, buttons=${emptyCheck.buttonCount})`
+    };
+  }
 
   for (const raw of tags) {
     const tag = norm(raw);
@@ -122,7 +217,7 @@ async function setTags(page, labelText, nextLabelText, tags) {
     // React can recreate the box/editor after every committed chip.
     box = await markTagSection(page, labelText, nextLabelText) || box;
     const editor = await focusChipEditor(page, box);
-    if (!editor) return false;
+    if (!editor) return { ok: false, reason: `chip editor disappeared while entering ${tag}` };
 
     const tagName = await editor.evaluate((el) => el.tagName).catch(() => '');
     if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
@@ -134,7 +229,7 @@ async function setTags(page, labelText, nextLabelText, tags) {
     await editor.press('Enter').catch(async () => page.keyboard.press('Enter'));
     await wait(110);
   }
-  return true;
+  return { ok: true };
 }
 
 async function sectionText(page, startLabel, endLabel) {
@@ -187,12 +282,16 @@ RedbubbleController.prototype.fillListingFields = async function fillListingFiel
     throw new Error(`ZeroPOD metadata has ${supporting.length} Supporting Tags; expected exactly 14.`);
   }
 
-  if (!(await setTags(page, 'Main Tag', 'Supporting Tags', [metadata.mainTag]))) {
-    throw new Error('Redbubble Main Tag chip box could not be edited.');
+  const mainResult = await setTags(page, 'Main Tag', 'Supporting Tags', [metadata.mainTag]);
+  if (!mainResult.ok) {
+    throw new Error(`Redbubble Main Tag could not be cleared/edited: ${mainResult.reason || 'unknown tag editor error'}.`);
   }
-  if (!(await setTags(page, 'Supporting Tags', 'Description', supporting))) {
-    throw new Error('Redbubble Supporting Tags chip box could not be edited.');
+
+  const supportingResult = await setTags(page, 'Supporting Tags', 'Description', supporting);
+  if (!supportingResult.ok) {
+    throw new Error(`Redbubble Supporting Tags could not be cleared/edited: ${supportingResult.reason || 'unknown tag editor error'}.`);
   }
+
   if (!(await setDescription(page, metadata.description))) {
     throw new Error('Redbubble Description field could not be updated after tag entry.');
   }
