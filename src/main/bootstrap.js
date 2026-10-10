@@ -74,6 +74,7 @@ SessionManager.prototype.isValidChatGPTThreadUrl = function isValidChatGPTThread
   return isValidChatGPTThreadUrl(url);
 };
 
+require('./backgroundChromeLaunchPatch');
 require('./chatgptChromePatch');
 require('./chromeDockPatch');
 require('./chatgptUploadReadyPatch');
@@ -95,4 +96,5 @@ require('./redbubbleDescriptionPastePatch');
 require('./redbubbleDescriptionCoordinatePatch');
 require('./redbubbleSkipDescriptionBetaPatch');
 require('./redbubbleReviewCapturePatch');
+require('./automationFullAutoPatch');
 require('./main');

@@ -1,15 +1,48 @@
 (() => {
   const ACTIVE_KEY = 'zeropod.unified.activeProject.v1';
   const AUTO_KEY = 'zeropod.unified.automateEverything.v1';
+  const NEW_CHAT_KEY = 'zeropod.unified.newChat.v1';
   const seenActivity = new Set();
   let activeProjectId = localStorage.getItem(ACTIVE_KEY) || null;
   let running = false;
   let selectedAutoMode = localStorage.getItem(AUTO_KEY) === 'true';
+  let selectedNewChat = localStorage.getItem(NEW_CHAT_KEY) === 'true';
   let pollTimer = null;
+  let workflowStartedAt = null;
+  let workflowTimer = null;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
   const fileUrl = (filePath) => `file:///${String(filePath || '').replace(/\\/g, '/')}`;
+
+  function formatElapsed(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    return hours > 0
+      ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+      : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  function updateTimer() {
+    const root = document.getElementById('uwTimer');
+    if (!root) return;
+    root.textContent = workflowStartedAt ? formatElapsed(Date.now() - workflowStartedAt) : '00:00';
+  }
+
+  function startTimer(startAt = Date.now()) {
+    workflowStartedAt = Number(startAt) || Date.now();
+    if (workflowTimer) clearInterval(workflowTimer);
+    updateTimer();
+    workflowTimer = setInterval(updateTimer, 1000);
+  }
+
+  function stopTimer() {
+    updateTimer();
+    if (workflowTimer) clearInterval(workflowTimer);
+    workflowTimer = null;
+  }
 
   function installStyles() {
     if (document.getElementById('unifiedWorkflowStyles')) return;
@@ -19,12 +52,12 @@
       .uw-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:18px;align-items:start}
       .uw-panel{background:#171b21;border:1px solid #2a313c;border-radius:14px;padding:16px;margin:0 0 16px}
       .uw-panel h3{margin:0 0 8px}.uw-stage{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 16px}.uw-stage span{padding:7px 10px;border-radius:999px;background:#11151a;border:1px solid #303744;font-size:12px;color:#8f99a8}.uw-stage span.current{border-color:#6875ff;color:#dce0ff}.uw-stage span.done{color:#85ddb0;border-color:#355b48}
-      .uw-auto{display:flex;gap:11px;align-items:flex-start;padding:13px 14px;border:1px solid #62522b;background:#241f12;border-radius:12px}.uw-auto input{margin-top:3px}.uw-auto strong{display:block}.uw-beta{font-size:11px;color:#e9d27a;line-height:1.45;margin-top:4px}
+      .uw-options{display:grid;gap:10px;margin-top:12px}.uw-option{position:relative;display:grid;grid-template-columns:28px 1fr;gap:12px;align-items:start;padding:14px 16px;border:1px solid #394251;background:#141920;border-radius:12px;cursor:pointer}.uw-option-beta{border-color:#62522b;background:#241f12}.uw-option input{position:absolute;opacity:0;pointer-events:none}.uw-checkmark{width:22px;height:22px;border:2px solid #657083;border-radius:6px;background:#0f1318;display:grid;place-items:center;margin-top:1px;transition:.15s ease}.uw-option input:checked + .uw-checkmark{background:#6875ff;border-color:#7f89ff;box-shadow:0 0 0 3px rgba(104,117,255,.14)}.uw-option input:checked + .uw-checkmark::after{content:'✓';color:white;font-weight:900;font-size:14px;line-height:1}.uw-option strong{display:block;font-size:14px}.uw-option-copy{font-size:12px;color:#98a3b2;line-height:1.45;margin-top:4px}.uw-beta-pill{display:inline-flex;align-items:center;padding:2px 6px;border-radius:999px;background:#4a3d16;color:#f1d462;font-size:9px;font-weight:800;letter-spacing:.05em;margin-left:4px}.uw-beta{font-size:11px;color:#e9d27a;line-height:1.45;margin-top:4px}
       .uw-review{display:none}.uw-review.visible{display:block}.uw-review-image{width:100%;max-height:610px;object-fit:contain;background:#0b0d10;border-radius:12px;border:1px solid #2a313c}.uw-review-actions{display:flex;gap:9px;margin-top:12px;flex-wrap:wrap}
-      .uw-final-grid{display:grid;grid-template-columns:minmax(240px,.8fr) minmax(300px,1.2fr);gap:14px}.uw-shirt{width:100%;max-height:460px;object-fit:contain;background:#0b0d10;border-radius:10px}.uw-meta{display:grid;gap:10px}.uw-meta-row{padding:10px 12px;background:#101419;border-radius:9px}.uw-meta-row b{display:block;font-size:11px;color:#8f99a8;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em}.uw-tags{line-height:1.55;word-break:break-word}
+      .uw-final-grid,.uw-published-grid{display:grid;grid-template-columns:minmax(240px,.8fr) minmax(300px,1.2fr);gap:14px}.uw-shirt,.uw-published-preview{width:100%;max-height:460px;object-fit:contain;background:#0b0d10;border-radius:10px;border:1px solid #2a313c}.uw-meta{display:grid;gap:10px}.uw-meta-row{padding:10px 12px;background:#101419;border-radius:9px}.uw-meta-row b{display:block;font-size:11px;color:#8f99a8;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em}.uw-tags{line-height:1.55;word-break:break-word}
       .uw-log{height:250px;overflow:auto;background:#090c0f;border:1px solid #2a313c;border-radius:10px;padding:10px;font-family:Consolas,monospace;font-size:11px;line-height:1.55}.uw-log-line{display:grid;grid-template-columns:78px 1fr;gap:8px}.uw-log-time{color:#687588}.uw-log-error{color:#ff9ba5}.uw-log-ok{color:#85ddb0}.uw-log-warn{color:#e9d27a}
-      .uw-status{padding:10px 12px;border-radius:9px;background:#101419;margin-top:10px;min-height:20px}.uw-inputs{display:grid;grid-template-columns:1fr 1fr;gap:12px}.uw-full{grid-column:1/-1}.uw-hidden-nav{display:none!important}.uw-preview-missing{padding:30px;text-align:center;background:#0b0d10;border-radius:10px;color:#8f99a8}
-      @media(max-width:1050px){.uw-grid,.uw-final-grid,.uw-inputs{grid-template-columns:1fr}}
+      .uw-status{padding:10px 12px;border-radius:9px;background:#101419;margin-top:10px;min-height:20px}.uw-inputs{display:grid;grid-template-columns:1fr 1fr;gap:12px}.uw-full{grid-column:1/-1}.uw-hidden-nav{display:none!important}.uw-preview-missing{padding:30px;text-align:center;background:#0b0d10;border-radius:10px;color:#8f99a8}.uw-header-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}.uw-timer{font-family:Consolas,monospace;font-variant-numeric:tabular-nums;padding:8px 11px;border:1px solid #394251;border-radius:9px;background:#101419;color:#b8c1ce;min-width:72px;text-align:center}.uw-published-link{display:inline-block;margin-top:12px}.uw-published-link a{color:#8ea0ff;text-decoration:none}.uw-published-link a:hover{text-decoration:underline}
+      @media(max-width:1050px){.uw-grid,.uw-final-grid,.uw-published-grid,.uw-inputs{grid-template-columns:1fr}}
     `;
     document.head.appendChild(style);
   }
@@ -39,7 +72,7 @@
     if (!section) return;
     section.innerHTML = `
       <div class="eyebrow">ONE-CLICK POD PIPELINE</div>
-      <div class="heading-row"><div><h2>Workflow</h2><p class="muted">Create → image review → metadata → vectorize → export → Redbubble → final review → publish.</p></div><div id="uwProjectBadge" class="queue-state">No active project</div></div>
+      <div class="heading-row"><div><h2>Workflow</h2><p class="muted">Create → image review → metadata → vectorize → export → Redbubble → final review → publish.</p></div><div class="uw-header-right"><div id="uwTimer" class="uw-timer" title="Temporary start-to-finish timer">00:00</div><div id="uwProjectBadge" class="queue-state">No active project</div></div></div>
       <div class="uw-grid">
         <div>
           <div class="uw-panel">
@@ -49,9 +82,17 @@
               <label>Amazon / source URL<input id="uwSourceUrl" type="url" placeholder="https://..." /></label>
               <label class="uw-full">Optional generation / regeneration notes<textarea id="uwNotes" placeholder="Optional notes for ChatGPT…"></textarea></label>
             </div>
-            <div class="uw-auto" style="margin-top:12px">
-              <input type="checkbox" id="uwAutomateEverything" ${selectedAutoMode ? 'checked' : ''} />
-              <div><strong>Automate everything <span class="uw-beta">BETA</span></strong><div class="uw-beta">Skips both approval checks and automatically publishes when Redbubble is ready. Beta automation cannot guarantee product placement, listing accuracy, or the final Redbubble result. Use only when you accept that risk.</div></div>
+            <div class="uw-options">
+              <label class="uw-option uw-option-beta">
+                <input type="checkbox" id="uwAutomateEverything" ${selectedAutoMode ? 'checked' : ''} />
+                <span class="uw-checkmark" aria-hidden="true"></span>
+                <span><strong>Automate everything <span class="uw-beta-pill">BETA</span></strong><span class="uw-option-copy">Skips both approval checks and publishes automatically. Beta automation cannot guarantee product placement, listing accuracy, or the final Redbubble result. Use only when you accept that risk.</span></span>
+              </label>
+              <label class="uw-option">
+                <input type="checkbox" id="uwNewChat" ${selectedNewChat ? 'checked' : ''} />
+                <span class="uw-checkmark" aria-hidden="true"></span>
+                <span><strong>New Chat</strong><span class="uw-option-copy">Checked: start this design in a fresh ChatGPT thread. Unchecked: continue the last working ChatGPT thread.</span></span>
+              </label>
             </div>
             <div class="uw-review-actions"><button class="primary" id="uwStart">Start Workflow</button><button id="uwResume" class="secondary">Resume Active Project</button></div>
             <div id="uwStatus" class="uw-status muted">Ready.</div>
@@ -71,9 +112,9 @@
 
           <div id="uwFinalReview" class="uw-panel uw-review">
             <h3>Check 2 · Redbubble Final Review</h3>
-            <p class="muted">Review exactly what ZeroPOD prepared plus one Redbubble product preview. Description is intentionally skipped in the current beta.</p>
+            <p class="muted">Review the prepared listing plus the cleaner second Redbubble product preview. Description is intentionally skipped in the current beta.</p>
             <div class="uw-final-grid">
-              <div id="uwShirtPreviewWrap"><div class="uw-preview-missing">Waiting for Redbubble shirt preview…</div></div>
+              <div id="uwShirtPreviewWrap"><div class="uw-preview-missing">Waiting for Redbubble product preview…</div></div>
               <div class="uw-meta">
                 <div class="uw-meta-row"><b>Title</b><span id="uwFinalTitle">—</span></div>
                 <div class="uw-meta-row"><b>Main Tag</b><span id="uwFinalMainTag">—</span></div>
@@ -85,7 +126,13 @@
             <div class="uw-review-actions"><button class="danger" id="uwRedoFinal">Fail · Redo Redbubble Prep</button><button class="primary" id="uwPublish">Pass · Publish</button></div>
           </div>
 
-          <div id="uwPublished" class="uw-panel uw-review"><h3>Published ✓</h3><div id="uwPublishedText" class="muted"></div></div>
+          <div id="uwPublished" class="uw-panel uw-review">
+            <h3>Published ✓</h3>
+            <div class="uw-published-grid">
+              <div id="uwPublishedPreviewWrap"><div class="uw-preview-missing">Published product preview unavailable.</div></div>
+              <div><div id="uwPublishedText" class="muted"></div><div id="uwPublishedLink" class="uw-published-link"></div><div class="uw-meta-row" style="margin-top:12px"><b>Total workflow time</b><span id="uwPublishedElapsed">—</span></div></div>
+            </div>
+          </div>
         </div>
 
         <div class="uw-panel">
@@ -95,6 +142,7 @@
       </div>`;
 
     wireUnifiedControls();
+    updateTimer();
   }
 
   function log(message, kind = '') {
@@ -184,8 +232,8 @@
     document.getElementById('uwFinalTags').textContent = rb.tags || [meta.mainTag, ...(meta.supportingTags || [])].filter(Boolean).join(', ') || '—';
     document.getElementById('uwFinalArtwork').textContent = p.finalPngPath ? '4500×5400 exported PNG prepared' : '—';
     const wrap = document.getElementById('uwShirtPreviewWrap');
-    if (rb.reviewScreenshotPath) wrap.innerHTML = `<img class="uw-shirt" src="${esc(fileUrl(rb.reviewScreenshotPath))}" alt="Redbubble shirt preview">`;
-    else wrap.innerHTML = '<div class="uw-preview-missing">Shirt preview capture was unavailable. Check the docked Redbubble browser before publishing.</div>';
+    if (rb.reviewScreenshotPath) wrap.innerHTML = `<img class="uw-shirt" src="${esc(fileUrl(rb.reviewScreenshotPath))}" alt="Redbubble second product preview">`;
+    else wrap.innerHTML = '<div class="uw-preview-missing">Product preview capture was unavailable. The workflow can still continue.</div>';
     setStatus('Redbubble is prepared. Check the listing data and product preview, then publish or redo.');
     log('Redbubble preparation complete. Waiting for final approval.', 'ok');
   }
@@ -197,9 +245,18 @@
     document.getElementById('uwFinalReview').classList.remove('visible');
     const panel = document.getElementById('uwPublished');
     panel.classList.add('visible');
-    document.getElementById('uwPublishedText').textContent = p?.redbubble?.publishedUrl ? `Verified: ${p.redbubble.publishedUrl}` : 'Redbubble confirmed the work was published.';
+    const rb = p?.redbubble || {};
+    document.getElementById('uwPublishedText').textContent = rb.publishedUrl ? 'Redbubble publish verified successfully.' : 'Redbubble confirmed the work was published.';
+    const wrap = document.getElementById('uwPublishedPreviewWrap');
+    if (rb.reviewScreenshotPath) wrap.innerHTML = `<img class="uw-published-preview" src="${esc(fileUrl(rb.reviewScreenshotPath))}" alt="Published Redbubble product preview">`;
+    else wrap.innerHTML = '<div class="uw-preview-missing">Published product preview was not captured.</div>';
+    const link = document.getElementById('uwPublishedLink');
+    link.innerHTML = rb.publishedUrl ? `<a href="${esc(rb.publishedUrl)}" target="_blank" rel="noreferrer">Open published Redbubble work ↗</a>` : '';
+    const elapsed = workflowStartedAt ? formatElapsed(Date.now() - workflowStartedAt) : '—';
+    document.getElementById('uwPublishedElapsed').textContent = elapsed;
+    stopTimer();
     setStatus('Workflow complete · Published ✓', 'ok');
-    log('Workflow complete. Redbubble publish verified.', 'ok');
+    log(`Workflow complete. Redbubble publish verified.${elapsed !== '—' ? ` Total time: ${elapsed}.` : ''}`, 'ok');
   }
 
   async function syncActivity() {
@@ -269,12 +326,12 @@
         } else if (/recovery-needed$/.test(p.status)) {
           throw new Error(p.lastAutomationError?.message || p.metadataError?.message || p.chatgptError?.message || `Workflow needs attention at ${p.status}.`);
         } else {
-          // Give asynchronous service callbacks a short chance to settle to the next persisted state.
           await sleep(900);
         }
         p = await project();
       }
     } catch (error) {
+      stopTimer();
       setStatus(`Workflow needs attention: ${error.message || error}`, 'error');
       log(`ERROR: ${error.message || error}`, 'error');
     } finally {
@@ -307,17 +364,20 @@
     const notes = document.getElementById('uwNotes').value.trim();
     if (!referencePath) return setStatus('Choose a reference image first.', 'error');
     selectedAutoMode = document.getElementById('uwAutomateEverything').checked;
+    selectedNewChat = document.getElementById('uwNewChat').checked;
     localStorage.setItem(AUTO_KEY, String(selectedAutoMode));
+    localStorage.setItem(NEW_CHAT_KEY, String(selectedNewChat));
+    startTimer();
     running = true;
     seenActivity.clear();
     document.getElementById('uwImageReview').classList.remove('visible');
     document.getElementById('uwFinalReview').classList.remove('visible');
     document.getElementById('uwPublished').classList.remove('visible');
     stage('generate');
-    setStatus('Opening ChatGPT and generating design…');
-    log(`Starting workflow${selectedAutoMode ? ' · AUTOMATE EVERYTHING BETA' : ''}.`, selectedAutoMode ? 'warn' : '');
+    setStatus('Generating design in background ChatGPT…');
+    log(`Starting workflow${selectedAutoMode ? ' · AUTOMATE EVERYTHING BETA' : ''}${selectedNewChat ? ' · NEW CHAT' : ''}.`, selectedAutoMode ? 'warn' : '');
     try {
-      const result = await window.zeroPOD.generation.start({ referencePath, sourceUrl, reviewNotes: notes });
+      const result = await window.zeroPOD.generation.start({ referencePath, sourceUrl, reviewNotes: notes, newChat: selectedNewChat });
       setActiveProject(result.projectId);
       await syncActivity();
       let p = await project();
@@ -332,6 +392,7 @@
       }
       await renderImageGate(p);
     } catch (error) {
+      stopTimer();
       setStatus(`Workflow could not continue: ${error.message || error}`, 'error');
       log(`ERROR: ${error.message || error}`, 'error');
     } finally {
@@ -346,7 +407,7 @@
     const notes = document.getElementById('uwRegenerationNotes').value.trim();
     try {
       stage('generate');
-      setStatus('Regenerating image in ChatGPT…');
+      setStatus('Regenerating image in background ChatGPT…');
       log(`Image failed. Regenerating${notes ? ` with notes: ${notes}` : ''}…`, 'warn');
       await window.zeroPOD.review.reject({ projectId: activeProjectId, notes });
       let p = await project();
@@ -381,6 +442,7 @@
   }
 
   async function resumeWorkflow() {
+    if (!workflowStartedAt) startTimer();
     if (!activeProjectId) {
       const projects = await window.zeroPOD.projects.list();
       const candidate = projects.find((p) => p.status !== 'published');
@@ -410,6 +472,11 @@
       localStorage.setItem(AUTO_KEY, String(selectedAutoMode));
       log(selectedAutoMode ? 'Automate everything BETA enabled.' : 'Automate everything disabled.', selectedAutoMode ? 'warn' : '');
     });
+    document.getElementById('uwNewChat').addEventListener('change', (event) => {
+      selectedNewChat = event.target.checked;
+      localStorage.setItem(NEW_CHAT_KEY, String(selectedNewChat));
+      log(selectedNewChat ? 'New Chat enabled for the next generation.' : 'New Chat disabled; the last ChatGPT thread will be reused.');
+    });
     document.getElementById('uwStart').addEventListener('click', startWorkflow);
     document.getElementById('uwResume').addEventListener('click', resumeWorkflow);
     document.getElementById('uwRegenerate').addEventListener('click', regenerateImage);
@@ -419,7 +486,7 @@
       if (running) return;
       running = true;
       try { await publishActive(); }
-      catch (error) { setStatus(`Publish failed: ${error.message || error}`, 'error'); log(`ERROR publishing: ${error.message || error}`, 'error'); }
+      catch (error) { stopTimer(); setStatus(`Publish failed: ${error.message || error}`, 'error'); log(`ERROR publishing: ${error.message || error}`, 'error'); }
       finally { running = false; await syncActivity(); }
     });
     document.getElementById('uwClearLog').addEventListener('click', () => { document.getElementById('uwLog').innerHTML = ''; });
@@ -442,5 +509,8 @@
   pollTimer = setInterval(() => {
     if (document.getElementById('create')?.classList.contains('active-view')) syncActivity().catch(() => {});
   }, 1400);
-  window.addEventListener('beforeunload', () => { if (pollTimer) clearInterval(pollTimer); });
+  window.addEventListener('beforeunload', () => {
+    if (pollTimer) clearInterval(pollTimer);
+    if (workflowTimer) clearInterval(workflowTimer);
+  });
 })();
