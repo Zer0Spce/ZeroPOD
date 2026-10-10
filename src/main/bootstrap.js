@@ -94,4 +94,5 @@ require('./redbubbleDescriptionRetryPatch');
 require('./redbubbleDescriptionPastePatch');
 require('./redbubbleWideEditorPatch');
 require('./redbubbleDescriptionCoordinatePatch');
+require('./redbubbleSkipDescriptionBetaPatch');
 require('./main');
