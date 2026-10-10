@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { ResearchStore } = require('./researchStore');
 const { ZeroPODBuiltInProvider, MARKETPLACES, BEST_SELLER_PRESETS, canonicalAmazonUrl, computeTrend } = require('./researchProvider');
+const { assessTrademarkRisk } = require('./researchTrademarkSafety');
 
 const POD_TYPES = new Set(['tshirt', 'hoodie', 'sweatshirt', 'tank']);
 const POD_TITLE_PATTERNS = {
@@ -17,14 +18,28 @@ function sameUrl(a, b) {
   return String(a || '').trim().replace(/\/$/, '').toLowerCase() === String(b || '').trim().replace(/\/$/, '').toLowerCase();
 }
 
+function trademarkAssessment(item) {
+  if (item?.trademarkRisk === true) {
+    return {
+      risky: true,
+      reason: item.trademarkRiskReason || 'stored-trademark-risk',
+      matched: item.trademarkRiskMatched || null
+    };
+  }
+  return assessTrademarkRisk(item || {});
+}
+
 function isPodDesign(item, requestedType = 'all') {
   if (!item) return false;
   const type = String(item.productType || '').trim().toLowerCase();
   if (!POD_TYPES.has(type)) return false;
   if (requestedType && requestedType !== 'all' && type !== requestedType) return false;
 
+  // Never surface or queue obvious licensed / branded / trademark-risk designs.
+  if (trademarkAssessment(item).risky) return false;
+
   // Strict Research rule: a supported apparel title is not enough. The Amazon
-  // product page must have been positively verified as Merch on Demand / Merch by Amazon.
+  // product must have positive POD / Merch provenance.
   if (item.merchOnDemandVerified !== true) return false;
 
   const title = String(item.title || '').trim();
@@ -80,15 +95,19 @@ class ResearchFeature {
 
   async importProduct({ value, marketplace }) {
     const item = await this.provider.importProduct(value, marketplace);
+    const risk = trademarkAssessment(item);
+    if (risk.risky) {
+      throw new Error(`Skipped potential trademark/licensed design${risk.matched ? ` (${risk.matched})` : ''}. ZeroPOD Research does not allow obvious brand or franchise designs into Automation.`);
+    }
     if (!isPodDesign(item)) {
-      throw new Error('That Amazon item is not a verified Amazon Merch on Demand / Merch by Amazon design. ZeroPOD Research now only accepts verified POD design listings.');
+      throw new Error('That Amazon item is not a verified Amazon POD / Merch design. ZeroPOD Research only accepts verified POD design listings.');
     }
     return this.enrich(item);
   }
 
   save(key, saved) {
     const item = this.store.get(key);
-    if (!item || !isPodDesign(item)) throw new Error('Research item is not a verified Merch on Demand POD design.');
+    if (!item || !isPodDesign(item)) throw new Error('Research item is not an eligible trademark-safe POD design.');
     return this.enrich(this.store.setSaved(key, saved));
   }
 
@@ -130,7 +149,9 @@ class ResearchFeature {
     for (const key of uniqueKeys) {
       const item = this.store.get(key);
       if (!item) { skipped.push({ key, reason: 'research item not found' }); continue; }
-      if (!isPodDesign(item)) { skipped.push({ key, reason: 'not a verified Amazon Merch on Demand POD design' }); continue; }
+      const risk = trademarkAssessment(item);
+      if (risk.risky) { skipped.push({ key, reason: `potential trademark/licensed design${risk.matched ? `: ${risk.matched}` : ''}` }); continue; }
+      if (!isPodDesign(item)) { skipped.push({ key, reason: 'not an eligible verified Amazon POD / Merch design' }); continue; }
       const duplicate = this.duplicateReason(item);
       if (duplicate) { skipped.push({ key, reason: duplicate }); continue; }
       if (added.length >= capacity) { skipped.push({ key, reason: 'Automation List is full (15 row maximum)' }); continue; }
@@ -161,6 +182,8 @@ class ResearchFeature {
           merchOnDemandVerified: true,
           merchOnDemandEvidence: item.merchOnDemandEvidence || null,
           merchOnDemandCheckedAt: item.merchOnDemandCheckedAt || null,
+          trademarkRisk: false,
+          trademarkCheckedAt: item.trademarkCheckedAt || null,
           verifiedBestSeller: Boolean(item.verifiedBestSeller),
           bestSellerPosition: item.bestSellerPosition ?? null,
           bestSellerCategory: item.bestSellerCategory || null,
