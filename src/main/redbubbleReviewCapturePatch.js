@@ -5,6 +5,17 @@ const { RedbubbleController } = require('./redbubbleController');
 const previousPrepare = RedbubbleController.prototype.prepare;
 
 async function captureFirstProductPreview(page, targetPath) {
+  const scrolled = await page.evaluate(() => {
+    const tidy = (value) => String(value || '').trim().replace(/\s+/g, ' ');
+    const label = [...document.querySelectorAll('body *')].find((el) => tidy(el.innerText || el.textContent) === 'Product Previews');
+    if (!label) return false;
+    label.scrollIntoView({ block: 'start', behavior: 'auto' });
+    return true;
+  }).catch(() => false);
+  if (!scrolled) return false;
+
+  await page.waitForTimeout(1500).catch(() => {});
+
   const marker = await page.evaluate(() => {
     const visible = (el) => {
       if (!(el instanceof Element)) return false;
@@ -16,12 +27,11 @@ async function captureFirstProductPreview(page, targetPath) {
     const all = [...document.querySelectorAll('body *')];
     const label = all.find((el) => tidy(el.innerText || el.textContent) === 'Product Previews');
     if (!label) return null;
-    label.scrollIntoView({ block: 'start', behavior: 'instant' });
     const lr = label.getBoundingClientRect();
     const images = [...document.querySelectorAll('img')]
       .filter(visible)
       .map((el) => ({ el, r: el.getBoundingClientRect(), alt: tidy(el.alt), src: String(el.currentSrc || el.src || '') }))
-      .filter(({ r }) => r.top >= lr.bottom - 20 && r.top <= lr.bottom + 1800)
+      .filter(({ r }) => r.top >= lr.bottom - 40 && r.top <= lr.bottom + 1800)
       .sort((a, b) => {
         const as = /shirt|t-?shirt|tee|apparel/i.test(`${a.alt} ${a.src}`) ? 0 : 1;
         const bs = /shirt|t-?shirt|tee|apparel/i.test(`${b.alt} ${b.src}`) ? 0 : 1;
@@ -35,7 +45,6 @@ async function captureFirstProductPreview(page, targetPath) {
     return token;
   }).catch(() => null);
 
-  await page.waitForTimeout(1200).catch(() => {});
   if (!marker) return false;
   const image = page.locator(`[data-zeropod-product-preview="${marker}"]`).first();
   if (!(await image.isVisible().catch(() => false))) return false;
