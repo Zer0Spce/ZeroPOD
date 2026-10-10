@@ -64,8 +64,7 @@ SessionManager.prototype.rememberThreadUrl = function rememberThreadUrl(serviceI
 SessionManager.prototype.clearLastThreadUrl = function clearLastThreadUrl(serviceId) {
   const state = readThreadState();
   if (!state[serviceId]) return false;
-  delete state[serviceId].lastThreadUrl;
-  state[serviceId].updatedAt = new Date().toISOString();
+  delete state[serviceId];
   writeThreadState(state);
   return true;
 };
@@ -104,5 +103,6 @@ require('./workflowImageCheckDockPatch');
 require('./workspaceResearchBackupPatch');
 require('./researchPodSourcePatch');
 require('./researchMerchVerificationPatch');
+require('./researchTrademarkFilterPatch');
 require('./researchIpcPatch');
 require('./main');
