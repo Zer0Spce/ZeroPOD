@@ -47,6 +47,25 @@ function ensureAppearanceSettings() {
   applyAppearance();
 }
 
+function loadZeroPODFeatureScript(src, id) {
+  if (document.getElementById(id)) return;
+  const script = document.createElement('script');
+  script.id = id;
+  script.src = src;
+  script.defer = true;
+  document.body.appendChild(script);
+}
+
+function loadResearchFeatures() {
+  try {
+    if (typeof serviceOrder !== 'undefined' && Array.isArray(serviceOrder) && !serviceOrder.includes('amazonResearch')) serviceOrder.push('amazonResearch');
+  } catch {}
+  loadZeroPODFeatureScript('research.js', 'researchFeatureScript');
+  loadZeroPODFeatureScript('storageSettings.js', 'storageSettingsFeatureScript');
+}
+
 media.addEventListener('change', () => { if (getPreference() === 'system') applyAppearance('system'); });
 applyAppearance();
 ensureAppearanceSettings();
+if (document.readyState === 'complete') loadResearchFeatures();
+else window.addEventListener('load', loadResearchFeatures, { once: true });
