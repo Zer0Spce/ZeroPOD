@@ -42,7 +42,7 @@ async function findFinalDownloadControl(page) {
     };
 
     const candidateSet = new Set([
-      ...document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"], [aria-label*="download" i], [title*="download" i], [data-testid*="download" i], [class*="download" i]')
+      ...document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"], [aria-label*="download" i], [title*="download" i], [data-testid*="download" i]')
     ]);
 
     // Vectorizer has changed the final button wrapper more than once. Include
