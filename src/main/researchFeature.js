@@ -5,8 +5,30 @@ const crypto = require('crypto');
 const { ResearchStore } = require('./researchStore');
 const { ZeroPODBuiltInProvider, MARKETPLACES, BEST_SELLER_PRESETS, canonicalAmazonUrl, computeTrend } = require('./researchProvider');
 
+const POD_TYPES = new Set(['tshirt', 'hoodie', 'sweatshirt', 'tank']);
+const POD_TITLE_PATTERNS = {
+  tshirt: /\b(?:t-?shirts?|tees?|graphic shirts?|novelty shirts?)\b/i,
+  hoodie: /\b(?:hoodies?|hooded sweatshirts?)\b/i,
+  sweatshirt: /\b(?:sweatshirts?|crewnecks?)\b/i,
+  tank: /\b(?:tank tops?|tanktops?|racerbacks?)\b/i
+};
+
 function sameUrl(a, b) {
   return String(a || '').trim().replace(/\/$/, '').toLowerCase() === String(b || '').trim().replace(/\/$/, '').toLowerCase();
+}
+
+function isPodDesign(item, requestedType = 'all') {
+  if (!item) return false;
+  const type = String(item.productType || '').trim().toLowerCase();
+  if (!POD_TYPES.has(type)) return false;
+  if (requestedType && requestedType !== 'all' && type !== requestedType) return false;
+
+  // Research is intentionally POD-only. Do not trust the source page/context alone:
+  // require the actual Amazon product title to look like supported printable apparel.
+  const title = String(item.title || '').trim();
+  if (!title) return false;
+  const pattern = POD_TITLE_PATTERNS[type];
+  return Boolean(pattern && pattern.test(title));
 }
 
 class ResearchFeature {
@@ -26,18 +48,48 @@ class ResearchFeature {
     return { ...item, cachedImagePath, trend7, trend30 };
   }
 
-  list(filters = {}) { return this.store.list(filters).map((item) => this.enrich(item)); }
-  get(key) { const item = this.store.get(key); return item ? this.enrich(item) : null; }
+  list(filters = {}) {
+    const requestedType = filters.productType || 'all';
+    return this.store.list(filters)
+      .filter((item) => isPodDesign(item, requestedType))
+      .map((item) => this.enrich(item));
+  }
+
+  get(key) {
+    const item = this.store.get(key);
+    return item && isPodDesign(item) ? this.enrich(item) : null;
+  }
+
   marketplaces() { return MARKETPLACES; }
   presets() { return BEST_SELLER_PRESETS; }
 
-  async refreshBestSellers(payload) {
+  async refreshBestSellers(payload = {}) {
     const result = await this.provider.refreshBestSellers(payload || {});
-    return { ...result, items: result.items.map((item) => this.enrich(item)) };
+    const requestedType = payload.productType || 'all';
+    const podItems = result.items.filter((item) => isPodDesign(item, requestedType));
+    return {
+      ...result,
+      rawCount: result.items.length,
+      filteredOut: result.items.length - podItems.length,
+      count: podItems.length,
+      items: podItems.map((item) => this.enrich(item))
+    };
   }
 
-  async importProduct({ value, marketplace }) { return this.enrich(await this.provider.importProduct(value, marketplace)); }
-  save(key, saved) { return this.enrich(this.store.setSaved(key, saved)); }
+  async importProduct({ value, marketplace }) {
+    const item = await this.provider.importProduct(value, marketplace);
+    if (!isPodDesign(item)) {
+      throw new Error('That Amazon item is not recognized as a supported POD apparel design. ZeroPOD Research only shows T-shirts, hoodies, sweatshirts, and tank tops.');
+    }
+    return this.enrich(item);
+  }
+
+  save(key, saved) {
+    const item = this.store.get(key);
+    if (!item || !isPodDesign(item)) throw new Error('Research item is not a supported POD apparel design.');
+    return this.enrich(this.store.setSaved(key, saved));
+  }
+
   async openAmazon(url) { if (url) await shell.openExternal(url); return { ok: true }; }
 
   duplicateReason(item) {
@@ -76,6 +128,7 @@ class ResearchFeature {
     for (const key of uniqueKeys) {
       const item = this.store.get(key);
       if (!item) { skipped.push({ key, reason: 'research item not found' }); continue; }
+      if (!isPodDesign(item)) { skipped.push({ key, reason: 'not a supported POD apparel design' }); continue; }
       const duplicate = this.duplicateReason(item);
       if (duplicate) { skipped.push({ key, reason: duplicate }); continue; }
       if (added.length >= capacity) { skipped.push({ key, reason: 'Automation List is full (15 row maximum)' }); continue; }
@@ -124,4 +177,4 @@ class ResearchFeature {
   }
 }
 
-module.exports = { ResearchFeature };
+module.exports = { ResearchFeature, isPodDesign };
