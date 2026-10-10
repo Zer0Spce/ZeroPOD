@@ -90,5 +90,6 @@ require('./redbubbleUploadCompletionPatch');
 require('./redbubbleCurrentFieldsPatch');
 require('./redbubbleTagChipPatch');
 require('./redbubbleAcceptedTagsPatch');
+require('./redbubbleDescriptionRetryPatch');
 require('./redbubbleWideEditorPatch');
 require('./main');
