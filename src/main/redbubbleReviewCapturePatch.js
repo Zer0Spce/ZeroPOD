@@ -4,7 +4,7 @@ const { RedbubbleController } = require('./redbubbleController');
 
 const previousPrepare = RedbubbleController.prototype.prepare;
 
-async function captureFirstProductPreview(page, targetPath) {
+async function capturePreferredProductPreview(page, targetPath) {
   const scrolled = await page.evaluate(() => {
     const tidy = (value) => String(value || '').trim().replace(/\s+/g, ' ');
     const label = [...document.querySelectorAll('body *')].find((el) => tidy(el.innerText || el.textContent) === 'Product Previews');
@@ -40,8 +40,12 @@ async function captureFirstProductPreview(page, targetPath) {
         return a.r.left - b.r.left;
       });
     if (!images.length) return null;
+
+    // The second product preview is consistently the cleaner mockup in the
+    // current Redbubble editor. Fall back to the first if Redbubble only renders one.
+    const chosen = images[1] || images[0];
     const token = `zeropod-product-preview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    images[0].el.setAttribute('data-zeropod-product-preview', token);
+    chosen.el.setAttribute('data-zeropod-product-preview', token);
     return token;
   }).catch(() => null);
 
@@ -63,16 +67,17 @@ RedbubbleController.prototype.prepare = async function prepareWithReviewCapture(
     const projectDir = this.projects.getProjectDir(projectId);
     fs.mkdirSync(projectDir, { recursive: true });
     const screenshotPath = path.join(projectDir, 'redbubble-shirt-preview.png');
-    const captured = await captureFirstProductPreview(page, screenshotPath);
+    const captured = await capturePreferredProductPreview(page, screenshotPath);
     const latest = this.projects.read(projectId);
     this.projects.update(projectId, {
       redbubble: {
         ...(latest.redbubble || {}),
         reviewScreenshotPath: captured ? screenshotPath : null,
-        reviewScreenshotCapturedAt: captured ? new Date().toISOString() : null
+        reviewScreenshotCapturedAt: captured ? new Date().toISOString() : null,
+        reviewScreenshotIndex: captured ? 2 : null
       }
     });
-    if (captured) this.projects.addActivity(projectId, { type: 'review', label: 'Captured Redbubble shirt preview for final approval' });
+    if (captured) this.projects.addActivity(projectId, { type: 'review', label: 'Captured Redbubble second product preview for final approval' });
   } catch (error) {
     console.warn('[ZeroPOD] Redbubble review preview capture skipped:', error?.message || error);
   }
@@ -80,4 +85,4 @@ RedbubbleController.prototype.prepare = async function prepareWithReviewCapture(
   return { ...result, project: this.projects.read(projectId) };
 };
 
-module.exports = { captureFirstProductPreview };
+module.exports = { capturePreferredProductPreview };
