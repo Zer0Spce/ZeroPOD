@@ -58,6 +58,23 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     importXlsx: () => ipcRenderer.invoke('automation:import-xlsx'),
     exportXlsx: () => ipcRenderer.invoke('automation:export-xlsx')
   },
+  research: {
+    list: (filters) => ipcRenderer.invoke('research:list', filters),
+    get: (key) => ipcRenderer.invoke('research:get', key),
+    marketplaces: () => ipcRenderer.invoke('research:marketplaces'),
+    presets: () => ipcRenderer.invoke('research:presets'),
+    refreshBestSellers: (payload) => ipcRenderer.invoke('research:refresh-best-sellers', payload),
+    importProduct: (payload) => ipcRenderer.invoke('research:import-product', payload),
+    save: (payload) => ipcRenderer.invoke('research:save', payload),
+    addToAutomation: (keys) => ipcRenderer.invoke('research:add-to-automation', keys),
+    openAmazon: (url) => ipcRenderer.invoke('research:open-amazon', url)
+  },
+  storage: {
+    usage: () => ipcRenderer.invoke('storage:usage'),
+    settings: () => ipcRenderer.invoke('storage:settings'),
+    updateSettings: (patch) => ipcRenderer.invoke('storage:update-settings', patch),
+    cleanup: (payload) => ipcRenderer.invoke('storage:cleanup', payload)
+  },
   files: {
     chooseReference: () => ipcRenderer.invoke('file:choose-reference'),
     chooseMultipleReferences: () => ipcRenderer.invoke('file:choose-multiple-references')
