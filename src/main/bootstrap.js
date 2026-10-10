@@ -104,5 +104,6 @@ require('./workflowImageCheckDockPatch');
 require('./workspaceResearchBackupPatch');
 require('./researchPodSourcePatch');
 require('./researchMerchVerificationPatch');
+require('./researchTrademarkFilterPatch');
 require('./researchIpcPatch');
 require('./main');
