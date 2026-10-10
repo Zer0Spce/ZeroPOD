@@ -65,6 +65,7 @@ SessionManager.prototype.clearLastThreadUrl = function clearLastThreadUrl(servic
   const state = readThreadState();
   if (!state[serviceId]) return false;
   delete state[serviceId];
+  state[serviceId].updatedAt = new Date().toISOString();
   writeThreadState(state);
   return true;
 };
