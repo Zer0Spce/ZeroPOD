@@ -3,7 +3,6 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 
-const DAY = 86400000;
 const DEFAULT_CATEGORIES = ['temporary','researchCache','thumbnails','logs','browserCache'];
 
 async function exists(file) { try { await fsp.access(file); return true; } catch { return false; } }
@@ -38,22 +37,13 @@ class StorageManager {
         cleanupInterval: raw.cleanupInterval || 'off',
         selectedCleanupCategories: Array.isArray(raw.selectedCleanupCategories) ? raw.selectedCleanupCategories : DEFAULT_CATEGORIES,
         lastCleanupAt: raw.lastCleanupAt || null,
+        nextCleanupAt: raw.nextCleanupAt || null,
         lastCleanupRecoveredBytes: Number(raw.lastCleanupRecoveredBytes || 0),
         lastCleanupFilesRemoved: Number(raw.lastCleanupFilesRemoved || 0)
       };
     } catch {
-      return { cleanupInterval: 'off', selectedCleanupCategories: [...DEFAULT_CATEGORIES], lastCleanupAt: null, lastCleanupRecoveredBytes: 0, lastCleanupFilesRemoved: 0 };
+      return { cleanupInterval: 'off', selectedCleanupCategories: [...DEFAULT_CATEGORIES], lastCleanupAt: null, nextCleanupAt: null, lastCleanupRecoveredBytes: 0, lastCleanupFilesRemoved: 0 };
     }
-  }
-
-  writeSettings(patch) {
-    const next = { ...this.readSettings(), ...patch };
-    fs.mkdirSync(this.root(), { recursive: true });
-    const temp = `${this.settingsFile()}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(next, null, 2), 'utf8');
-    fs.copyFileSync(temp, this.settingsFile());
-    fs.rmSync(temp, { force: true });
-    return this.withSchedule(next);
   }
 
   addInterval(date, interval) {
@@ -69,9 +59,34 @@ class StorageManager {
   }
 
   withSchedule(settings = this.readSettings()) {
-    const base = settings.lastCleanupAt ? new Date(settings.lastCleanupAt) : new Date();
-    const next = settings.cleanupInterval === 'off' ? null : this.addInterval(base, settings.cleanupInterval);
+    if (settings.cleanupInterval === 'off') return { ...settings, nextCleanupAt: null };
+    let next = settings.nextCleanupAt ? new Date(settings.nextCleanupAt) : null;
+    if (!next || !Number.isFinite(next.getTime())) {
+      const base = settings.lastCleanupAt ? new Date(settings.lastCleanupAt) : new Date();
+      next = this.addInterval(base, settings.cleanupInterval);
+    }
     return { ...settings, nextCleanupAt: next ? next.toISOString() : null };
+  }
+
+  writeSettings(patch) {
+    const previous = this.readSettings();
+    const next = { ...previous, ...patch };
+    const intervalChanged = Object.prototype.hasOwnProperty.call(patch, 'cleanupInterval') && patch.cleanupInterval !== previous.cleanupInterval;
+    const cleanupJustRan = Object.prototype.hasOwnProperty.call(patch, 'lastCleanupAt') && patch.lastCleanupAt;
+    if (next.cleanupInterval === 'off') next.nextCleanupAt = null;
+    else if (cleanupJustRan) {
+      const scheduled = this.addInterval(new Date(patch.lastCleanupAt), next.cleanupInterval);
+      next.nextCleanupAt = scheduled ? scheduled.toISOString() : null;
+    } else if (intervalChanged || !next.nextCleanupAt) {
+      const scheduled = this.addInterval(new Date(), next.cleanupInterval);
+      next.nextCleanupAt = scheduled ? scheduled.toISOString() : null;
+    }
+    fs.mkdirSync(this.root(), { recursive: true });
+    const temp = `${this.settingsFile()}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(next, null, 2), 'utf8');
+    fs.copyFileSync(temp, this.settingsFile());
+    fs.rmSync(temp, { force: true });
+    return this.withSchedule(next);
   }
 
   cacheTargets() {
@@ -118,13 +133,14 @@ class StorageManager {
   async usage() {
     const root = this.root();
     const targets = this.cacheTargets();
+    const browserDisposableCache = await this.sumTargets(targets.browserCache);
     const parts = {
       temporary: await this.sumTargets(targets.temporary),
       researchCache: await this.sumTargets(targets.researchCache),
       thumbnails: await this.sumTargets(targets.thumbnails),
       automationWorking: (await sizeOf(path.join(root, 'automation-inputs'))) + (await sizeOf(path.join(root, 'projects'))),
-      browserDisposableCache: await this.sumTargets(targets.browserCache),
-      browserProfilesProtected: Math.max(0, (await sizeOf(path.join(root, 'profiles'))) - (await this.sumTargets(targets.browserCache))),
+      browserDisposableCache,
+      browserProfilesProtected: Math.max(0, (await sizeOf(path.join(root, 'profiles'))) - browserDisposableCache),
       logs: await this.sumTargets(targets.logs),
       publishedProjectCache: await this.sumTargets(targets.publishedCache),
       researchDatabase: (await sizeOf(path.join(root, 'research', 'research.json'))) + (await sizeOf(path.join(root, 'research', 'research.json.bak'))),
