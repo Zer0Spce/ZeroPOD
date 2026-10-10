@@ -91,5 +91,6 @@ require('./redbubbleCurrentFieldsPatch');
 require('./redbubbleTagChipPatch');
 require('./redbubbleAcceptedTagsPatch');
 require('./redbubbleDescriptionRetryPatch');
+require('./redbubbleDescriptionPastePatch');
 require('./redbubbleWideEditorPatch');
 require('./main');
