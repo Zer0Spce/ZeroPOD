@@ -98,6 +98,7 @@ require('./redbubbleDescriptionCoordinatePatch');
 require('./redbubbleSkipDescriptionBetaPatch');
 require('./redbubbleReviewCapturePatch');
 require('./redbubbleAgreementReliabilityPatch');
+require('./redbubblePublishStateRecoveryPatch');
 require('./automationFullAutoPatch');
 require('./workflowImageCheckDockPatch');
 require('./main');
