@@ -86,6 +86,7 @@ require('./metadataSingleWordTagsPatch');
 require('./metadataComposerStabilityPatch');
 require('./redbubbleVectorizerSpeedPatch');
 require('./vectorizerFirstStageRestorePatch');
+require('./vectorizerFinalDownloadReliabilityPatch');
 require('./redbubbleEditorFieldsPatch');
 require('./redbubbleUploadCompletionPatch');
 require('./redbubbleCurrentFieldsPatch');
