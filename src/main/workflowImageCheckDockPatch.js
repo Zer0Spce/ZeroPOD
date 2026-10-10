@@ -1,6 +1,6 @@
 const { app } = require('electron');
 
-const injection = String.raw`(() => {
+function rendererImageCheckDockInjection() {
   if (window.__zeroPodImageCheckDockInstalled) return;
   window.__zeroPodImageCheckDockInstalled = true;
 
@@ -104,13 +104,14 @@ const injection = String.raw`(() => {
   };
   boot();
 
-  // If the unified view is rebuilt later, put the review card back in the rail.
   const root = document.getElementById('create');
   if (root) {
     const observer = new MutationObserver(() => dock());
     observer.observe(root, { childList: true, subtree: true });
   }
-})();`;
+}
+
+const injection = `(${rendererImageCheckDockInjection.toString()})();`;
 
 function installOnWindow(win) {
   const inject = () => {
