@@ -23,8 +23,10 @@ function isPodDesign(item, requestedType = 'all') {
   if (!POD_TYPES.has(type)) return false;
   if (requestedType && requestedType !== 'all' && type !== requestedType) return false;
 
-  // Research is intentionally POD-only. Do not trust the source page/context alone:
-  // require the actual Amazon product title to look like supported printable apparel.
+  // Strict Research rule: a supported apparel title is not enough. The Amazon
+  // product page must have been positively verified as Merch on Demand / Merch by Amazon.
+  if (item.merchOnDemandVerified !== true) return false;
+
   const title = String(item.title || '').trim();
   if (!title) return false;
   const pattern = POD_TITLE_PATTERNS[type];
@@ -69,8 +71,8 @@ class ResearchFeature {
     const podItems = result.items.filter((item) => isPodDesign(item, requestedType));
     return {
       ...result,
-      rawCount: result.items.length,
-      filteredOut: result.items.length - podItems.length,
+      rawCount: result.sourceCount ?? result.rawCount ?? result.items.length,
+      filteredOut: (result.sourceCount ?? result.items.length) - podItems.length,
       count: podItems.length,
       items: podItems.map((item) => this.enrich(item))
     };
@@ -79,14 +81,14 @@ class ResearchFeature {
   async importProduct({ value, marketplace }) {
     const item = await this.provider.importProduct(value, marketplace);
     if (!isPodDesign(item)) {
-      throw new Error('That Amazon item is not recognized as a supported POD apparel design. ZeroPOD Research only shows T-shirts, hoodies, sweatshirts, and tank tops.');
+      throw new Error('That Amazon item is not a verified Amazon Merch on Demand / Merch by Amazon design. ZeroPOD Research now only accepts verified POD design listings.');
     }
     return this.enrich(item);
   }
 
   save(key, saved) {
     const item = this.store.get(key);
-    if (!item || !isPodDesign(item)) throw new Error('Research item is not a supported POD apparel design.');
+    if (!item || !isPodDesign(item)) throw new Error('Research item is not a verified Merch on Demand POD design.');
     return this.enrich(this.store.setSaved(key, saved));
   }
 
@@ -128,7 +130,7 @@ class ResearchFeature {
     for (const key of uniqueKeys) {
       const item = this.store.get(key);
       if (!item) { skipped.push({ key, reason: 'research item not found' }); continue; }
-      if (!isPodDesign(item)) { skipped.push({ key, reason: 'not a supported POD apparel design' }); continue; }
+      if (!isPodDesign(item)) { skipped.push({ key, reason: 'not a verified Amazon Merch on Demand POD design' }); continue; }
       const duplicate = this.duplicateReason(item);
       if (duplicate) { skipped.push({ key, reason: duplicate }); continue; }
       if (added.length >= capacity) { skipped.push({ key, reason: 'Automation List is full (15 row maximum)' }); continue; }
@@ -156,6 +158,9 @@ class ResearchFeature {
           asin: item.asin,
           title: item.title || null,
           productType: item.productType || null,
+          merchOnDemandVerified: true,
+          merchOnDemandEvidence: item.merchOnDemandEvidence || null,
+          merchOnDemandCheckedAt: item.merchOnDemandCheckedAt || null,
           verifiedBestSeller: Boolean(item.verifiedBestSeller),
           bestSellerPosition: item.bestSellerPosition ?? null,
           bestSellerCategory: item.bestSellerCategory || null,
