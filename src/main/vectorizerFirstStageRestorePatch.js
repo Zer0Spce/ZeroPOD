@@ -61,4 +61,59 @@ VectorizerController.prototype.waitForResultReady = async function waitForResult
   throw new Error('Vectorizer.ai did not expose the finished result Download button before timeout.');
 };
 
+// Live testing showed an intermittent first-run race: the proven result Download
+// button is found and clicked, but Vectorizer occasionally ignores that first
+// click. Manually pressing Resume succeeds because the same result page is still
+// open and the next click works. Keep the known-good finder/click path unchanged,
+// but automatically perform that resume-like retry before surfacing recovery.
+VectorizerController.prototype.clickResultDownload = async function clickResultDownloadWithRetry(page, resultControl) {
+  if (await this.isDownloadOptionsPage(page)) return true;
+
+  let control = resultControl;
+  const maxAttempts = 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (await this.isDownloadOptionsPage(page)) return true;
+
+    if (!control || !(await visibleEnabled(control))) {
+      control = await legacyFindLargestDownloadControl(page, { minWidth: 100 }).catch(() => null);
+    }
+
+    if (!control) {
+      // The result card may be rerendering between attempts. Give it a short
+      // chance to settle, then reacquire the same known-good large Download.
+      const state = await this.waitForResultReady(page, 8000).catch(() => null);
+      if (state?.stage === 'options') return true;
+      control = state?.control || null;
+    }
+
+    if (!control) {
+      if (attempt < maxAttempts) {
+        await wait(1000);
+        continue;
+      }
+      throw new Error('Vectorizer.ai result Download button was not available for retry.');
+    }
+
+    await this.clickControl(page, control, `Vectorizer.ai result Download button (attempt ${attempt}/${maxAttempts})`);
+
+    // Most successful transitions happen quickly. A shorter per-attempt wait lets
+    // us self-heal faster than the old one-shot 20 second timeout while still
+    // allowing slower SPA navigation to complete.
+    const reachedOptions = await this.waitForDownloadOptions(page, attempt === 1 ? 10000 : 8000);
+    if (reachedOptions) return true;
+
+    // Do not reuse a possibly stale element after Vectorizer rerenders. This is
+    // effectively the same safe action the user was doing by pressing Resume.
+    control = null;
+    await wait(1200);
+  }
+
+  // One last passive grace period covers a click that navigated late while the
+  // third attempt's wait was expiring.
+  if (await this.waitForDownloadOptions(page, 8000)) return true;
+
+  throw new Error('Vectorizer.ai result Download button was clicked 3 times, but the SVG download/options page did not open.');
+};
+
 module.exports = { legacyFindLargestDownloadControl };
