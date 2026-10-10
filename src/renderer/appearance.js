@@ -59,6 +59,7 @@ function loadZeroPODFeatureScript(src, id) {
 function loadResearchFeatures() {
   try {
     if (typeof serviceOrder !== 'undefined' && Array.isArray(serviceOrder) && !serviceOrder.includes('amazonResearch')) serviceOrder.push('amazonResearch');
+    if (typeof renderConnections === 'function') Promise.resolve(renderConnections()).catch(() => {});
   } catch {}
   loadZeroPODFeatureScript('research.js', 'researchFeatureScript');
   loadZeroPODFeatureScript('storageSettings.js', 'storageSettingsFeatureScript');
