@@ -77,9 +77,21 @@ async function autoApproveGeneratedProject(controller, project) {
 
 AutomationQueueController.prototype.processRow = async function processRowFullAuto(row) {
   // Keep the proven generation / metadata / vectorizer paths from the original
-  // controller. Only intercept the two former review gates and the quality gate.
+  // controller. Only intercept the former review gates, quality gate, and the
+  // per-row ChatGPT thread preference supplied by the Automation List UI.
   if (!row.projectId) {
-    return originalProcessRow.call(this, row);
+    if (!row.newChat) return originalProcessRow.call(this, row);
+
+    // The queue is strictly serial, so it is safe to inject the per-row newChat
+    // flag only for this initial generation call and restore the controller method
+    // immediately afterward. Retries for an existing project keep their thread.
+    const previousStart = this.chatgpt.start;
+    this.chatgpt.start = (payload = {}) => previousStart.call(this.chatgpt, { ...payload, newChat: true });
+    try {
+      return await originalProcessRow.call(this, row);
+    } finally {
+      this.chatgpt.start = previousStart;
+    }
   }
 
   const project = this.projects.read(row.projectId);
