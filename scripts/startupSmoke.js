@@ -8,6 +8,8 @@ const researchUx = fs.readFileSync(path.join(rendererDir, 'researchUxPatch.js'),
 
 if (!index.includes('<section id="dashboard" class="view active-view">')) throw new Error('Renderer dashboard shell missing.');
 if (!index.includes('<script src="appearance.js"></script>')) throw new Error('Appearance bootstrap missing.');
+if (!appearance.trim().startsWith('(() => {')) throw new Error('Appearance bootstrap must be isolated from duplicate script execution.');
+if (!appearance.includes('window.__zeroPODAppearanceInitialized')) throw new Error('Appearance duplicate-execution guard missing.');
 if (!appearance.includes("loadZeroPODFeatureScript('research.js'")) throw new Error('Research renderer loader missing.');
 if (!appearance.includes("loadZeroPODFeatureScript('researchUxPatch.js'")) throw new Error('Research UX safe loader missing.');
 if (/executeJavaScript\s*\(/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'researchIpcPatch.js'), 'utf8'))) throw new Error('Research IPC must not inject renderer JavaScript at startup.');
