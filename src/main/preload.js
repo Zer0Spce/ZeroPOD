@@ -16,7 +16,8 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     duplicates: (sourceUrl) => ipcRenderer.invoke('projects:duplicates', sourceUrl),
     archive: (projectId) => ipcRenderer.invoke('projects:archive', projectId),
     restore: (projectId) => ipcRenderer.invoke('projects:restore', projectId),
-    delete: (projectId) => ipcRenderer.invoke('projects:delete', projectId)
+    delete: (projectId) => ipcRenderer.invoke('projects:delete', projectId),
+    clearAll: (payload) => ipcRenderer.invoke('projects:clear-all', payload)
   },
   workspace: {
     backup: () => ipcRenderer.invoke('workspace:backup'),
