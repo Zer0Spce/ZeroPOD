@@ -100,6 +100,7 @@ require('./redbubbleReviewCapturePatch');
 require('./redbubbleAgreementReliabilityPatch');
 require('./redbubblePublishStateRecoveryPatch');
 require('./redbubbleDailyLimitPatch');
+require('./projectClearPatch');
 require('./automationFullAutoPatch');
 require('./workflowImageCheckDockPatch');
 require('./workspaceResearchBackupPatch');
