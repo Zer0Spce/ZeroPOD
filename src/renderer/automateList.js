@@ -12,6 +12,83 @@
   let timer = null;
   let lastSnapshot = null;
 
+  function ensureUI() {
+    const automationNav = document.querySelector('.nav[data-view="automation"]');
+    if (automationNav) automationNav.textContent = 'Automation';
+    const automationHeading = document.querySelector('#automation h2');
+    if (automationHeading) automationHeading.textContent = 'Automation';
+
+    let nav = document.querySelector('.nav[data-view="automateList"]');
+    if (!nav && automationNav?.parentElement) {
+      nav = document.createElement('button');
+      nav.className = 'nav';
+      nav.dataset.view = 'automateList';
+      nav.textContent = 'Automate List';
+      automationNav.insertAdjacentElement('afterend', nav);
+    }
+
+    let section = document.getElementById('automateList');
+    if (!section) {
+      section = document.createElement('section');
+      section.id = 'automateList';
+      section.className = 'view';
+      section.innerHTML = `
+        <div class="eyebrow">FILE → AMAZON → AUTOMATION</div>
+        <div class="heading-row">
+          <div>
+            <h2>Automate List</h2>
+            <p class="muted">Upload an Excel or text list of Amazon POD links. ZeroPOD checks each link, captures the product shirt image, and sends the image + original Amazon link into Automation. Dead or invalid links are skipped automatically.</p>
+          </div>
+          <div id="automateListState" class="queue-state">Stopped</div>
+        </div>
+        <div class="automate-list-toolbar">
+          <button class="primary" id="automateListUpload">Upload List File</button>
+          <button id="automateListStart">Start Import</button>
+          <button id="automateListPause">Pause</button>
+          <button class="danger" id="automateListStop">Stop</button>
+          <button class="secondary" id="automateListClear">Clear List</button>
+        </div>
+        <div class="panel">
+          <div class="heading-row"><div><h3>Imported file</h3><p id="automateListMessage" class="muted">Upload a list containing Amazon product links.</p></div></div>
+          <div id="automateListSource" class="automate-list-source">No list file loaded yet.</div>
+          <div id="automateListSummary" class="automate-list-summary"></div>
+          <div class="automate-list-capacity">
+            <div><strong>Automation capacity</strong><div class="muted">Automation holds up to 15 live rows. If it fills up, Automate List waits instead of dropping the rest of your file, then continues automatically after space is cleared.</div></div>
+            <strong id="automateListAutomationSpace">0 / 15 rows used</strong>
+          </div>
+        </div>
+        <div class="automation-table-wrap">
+          <table class="automate-list-table">
+            <thead><tr><th>#</th><th>Amazon Link</th><th>Product</th><th>Status</th><th>Result</th></tr></thead>
+            <tbody id="automateListRows"></tbody>
+          </table>
+        </div>
+        <p class="muted automation-footnote">Supported file types: .xlsx, .csv, .tsv, .txt, .md, .json, and .log. Links can be anywhere in the file. Amazon CAPTCHA/login is never bypassed; if Amazon asks for normal human verification, Automate List pauses instead of falsely marking valid links as dead.</p>`;
+      const automationSection = document.getElementById('automation');
+      if (automationSection) automationSection.insertAdjacentElement('afterend', section);
+      else document.querySelector('main.content')?.appendChild(section);
+    }
+
+    if (nav && !nav.dataset.automateListBound) {
+      nav.dataset.automateListBound = '1';
+      nav.addEventListener('click', async () => {
+        document.querySelectorAll('.nav').forEach((button) => button.classList.toggle('active', button === nav));
+        document.querySelectorAll('.view').forEach((view) => view.classList.toggle('active-view', view === section));
+        await refresh();
+      });
+    }
+
+    if (!document.documentElement.dataset.automateListNavGuard) {
+      document.documentElement.dataset.automateListNavGuard = '1';
+      document.addEventListener('click', (event) => {
+        const clicked = event.target.closest?.('.nav');
+        if (!clicked || clicked.dataset.view === 'automateList') return;
+        document.getElementById('automateList')?.classList.remove('active-view');
+        document.querySelector('.nav[data-view="automateList"]')?.classList.remove('active');
+      });
+    }
+  }
+
   function stateLabel(state) {
     return ({
       stopped: 'Stopped',
@@ -34,6 +111,7 @@
   }
 
   function render(snapshot) {
+    ensureUI();
     lastSnapshot = snapshot;
     const counts = snapshot.counts || {};
     const root = document.getElementById('automateListRows');
@@ -100,6 +178,7 @@
   }
 
   async function refresh() {
+    ensureUI();
     try {
       render(await api.snapshot());
     } catch (error) {
@@ -125,6 +204,8 @@
     }
   }
 
+  ensureUI();
+
   document.getElementById('automateListUpload')?.addEventListener('click', async (event) => {
     const result = await runAction(event.currentTarget, () => api.importFile(), 'Reading file…');
     if (result?.canceled) return;
@@ -138,7 +219,6 @@
     await runAction(event.currentTarget, () => api.clear(), 'Clearing…');
   });
 
-  document.querySelector('.nav[data-view="automateList"]')?.addEventListener('click', refresh);
   window.addEventListener('focus', () => {
     if (document.getElementById('automateList')?.classList.contains('active-view')) refresh();
   });
