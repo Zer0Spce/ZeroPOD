@@ -63,6 +63,7 @@ function loadResearchFeatures() {
   } catch {}
   loadZeroPODFeatureScript('research.js', 'researchFeatureScript');
   loadZeroPODFeatureScript('storageSettings.js', 'storageSettingsFeatureScript');
+  loadZeroPODFeatureScript('researchAutomationSafePatch.js', 'researchAutomationSafePatchScript');
 }
 
 media.addEventListener('change', () => { if (getPreference() === 'system') applyAppearance('system'); });
