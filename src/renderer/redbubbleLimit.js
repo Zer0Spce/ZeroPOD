@@ -2,10 +2,24 @@
   const REFERENCE_LIMIT = 30;
   let usage = { count: 0, blocked: false, detectedAt: null, clearedAt: null, message: null };
   let refreshTimer = null;
+  let automationTimer = null;
 
   function formatDate(value) {
     if (!value) return 'Not detected';
     try { return new Date(value).toLocaleString(); } catch { return String(value); }
+  }
+
+  function ensureStyles() {
+    if (document.getElementById('redbubbleLimitPauseStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'redbubbleLimitPauseStyles';
+    style.textContent = `
+      .rb-limit-automation-notice{display:none;margin:12px 0 0;padding:13px 15px;border-radius:11px;border:1px solid rgba(239,68,68,.45);background:rgba(239,68,68,.09);color:var(--text);line-height:1.45}
+      .rb-limit-automation-notice.visible{display:block}
+      .rb-limit-automation-notice strong{display:block;color:#ff9898;margin-bottom:4px}
+      .rb-limit-automation-notice span{color:var(--muted);font-size:12px}
+    `;
+    document.head.appendChild(style);
   }
 
   function ensureCard() {
@@ -31,6 +45,21 @@
       <div class="redbubble-limit-clock"><span>REDBUBBLE</span><strong id="redbubbleLimitState">READY</strong><small>page-based detection</small></div>`;
     stats.insertAdjacentElement('afterend', card);
     return card;
+  }
+
+  function ensureAutomationNotice() {
+    ensureStyles();
+    const section = document.getElementById('automation');
+    if (!section) return null;
+    let notice = document.getElementById('redbubbleAutomationLimitNotice');
+    if (notice) return notice;
+    const warning = section.querySelector('.az-warning');
+    if (!warning) return null;
+    notice = document.createElement('div');
+    notice.id = 'redbubbleAutomationLimitNotice';
+    notice.className = 'rb-limit-automation-notice';
+    warning.insertAdjacentElement('afterend', notice);
+    return notice;
   }
 
   function render() {
@@ -63,6 +92,23 @@
     }
   }
 
+  async function refreshAutomationNotice() {
+    const notice = ensureAutomationNotice();
+    if (!notice || !window.zeroPOD?.automation?.list) return;
+    try {
+      const snapshot = await window.zeroPOD.automation.list();
+      const recovery = snapshot.recovery || {};
+      const active = snapshot.state === 'paused' && recovery.type === 'redbubble-upload-limit';
+      notice.classList.toggle('visible', active);
+      if (!active) {
+        notice.innerHTML = '';
+        return;
+      }
+      const recovered = Number(recovery.recoveredRows || 0);
+      notice.innerHTML = `<strong>⏸ Automation paused — Redbubble upload limit reached</strong><span>${recovery.message || 'Redbubble reported that uploads are currently blocked.'} All unfinished jobs were preserved at their current stage.${recovered ? ` ${recovered} earlier Redbubble failure${recovered === 1 ? '' : 's'} were returned to the queue because they occurred while this limit page was active.` : ''} Press Start Automation later to test Redbubble again; ZeroPOD will retry from the Redbubble step.</span>`;
+    } catch {}
+  }
+
   async function refresh() {
     try {
       if (!window.zeroPOD?.redbubble?.dailyUsage) return;
@@ -73,6 +119,7 @@
       const summary = document.getElementById('redbubbleLimitSummary');
       if (summary) summary.textContent = `Redbubble limit status unavailable: ${error.message || error}`;
     }
+    await refreshAutomationNotice();
   }
 
   window.refreshRedbubbleUsage = refresh;
@@ -80,4 +127,5 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
   refresh();
   if (!refreshTimer) refreshTimer = setInterval(refresh, 30000);
+  if (!automationTimer) automationTimer = setInterval(refreshAutomationNotice, 1500);
 })();
