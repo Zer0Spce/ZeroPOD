@@ -47,13 +47,23 @@ function ensureAppearanceSettings() {
   applyAppearance();
 }
 
-function loadZeroPODFeatureScript(src, id) {
-  if (document.getElementById(id)) return;
+function loadZeroPODFeatureScript(src, id, onload) {
+  const existing = document.getElementById(id);
+  if (existing) {
+    if (onload && existing.dataset.loaded === '1') onload();
+    else if (onload) existing.addEventListener('load', onload, { once: true });
+    return existing;
+  }
   const script = document.createElement('script');
   script.id = id;
   script.src = src;
   script.defer = true;
+  script.addEventListener('load', () => {
+    script.dataset.loaded = '1';
+    if (onload) onload();
+  }, { once: true });
   document.body.appendChild(script);
+  return script;
 }
 
 function loadResearchFeatures() {
@@ -61,7 +71,9 @@ function loadResearchFeatures() {
     if (typeof serviceOrder !== 'undefined' && Array.isArray(serviceOrder) && !serviceOrder.includes('amazonResearch')) serviceOrder.push('amazonResearch');
     if (typeof renderConnections === 'function') Promise.resolve(renderConnections()).catch(() => {});
   } catch {}
-  loadZeroPODFeatureScript('research.js', 'researchFeatureScript');
+  loadZeroPODFeatureScript('research.js', 'researchFeatureScript', () => {
+    loadZeroPODFeatureScript('researchUxPatch.js', 'researchUxPatchScript');
+  });
   loadZeroPODFeatureScript('storageSettings.js', 'storageSettingsFeatureScript');
 }
 

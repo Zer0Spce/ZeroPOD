@@ -13,25 +13,6 @@ const projects = new ProjectStore();
 const research = new ResearchFeature({ sessions: researchSessions, automationStore, projects });
 const storage = new StorageManager({ automationStore, projects });
 
-// Research is inserted dynamically after app.js has already captured its static view list.
-// Load a tiny renderer patch after the main page finishes so live tab isolation and
-// Research card actions work without replacing the existing renderer/navigation engine.
-app.on('browser-window-created', (_event, win) => {
-  win.webContents.on('did-finish-load', () => {
-    const url = win.webContents.getURL();
-    if (!/\/renderer\/index\.html(?:$|[?#])/i.test(url)) return;
-    win.webContents.executeJavaScript(`
-      (() => {
-        if (document.querySelector('script[data-zeropod-research-ux]')) return;
-        const script = document.createElement('script');
-        script.src = 'researchUxPatch.js';
-        script.dataset.zeropodResearchUx = '1';
-        document.body.appendChild(script);
-      })();
-    `).catch(() => {});
-  });
-});
-
 app.whenReady().then(async () => {
   ipcMain.handle('research:list', (_event, filters) => research.list(filters || {}));
   ipcMain.handle('research:get', (_event, key) => research.get(key));
