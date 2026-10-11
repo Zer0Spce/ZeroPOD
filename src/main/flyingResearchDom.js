@@ -35,4 +35,18 @@ function readFlyingListCards() {
   });
 }
 
-module.exports = { readFlyingListCards };
+// Flying retains its loading node with aria-hidden=true even when it has a box.
+function isFlyingResultsReady() {
+  const visible = (el) => {
+    if (el.closest('[aria-hidden="true"],[hidden]')) return false;
+    const style = getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0;
+  };
+  const loading = [...document.querySelectorAll('.research-results-loading')].some(visible);
+  if (loading) return false;
+  const cards = [...document.querySelectorAll('.list-card-content,.design-card-v2')].some(visible);
+  const empty = [...document.querySelectorAll('strong')].some((el) => visible(el) && /^0\s+designs$/i.test(el.textContent.trim()));
+  return cards || empty;
+}
+
+module.exports = { readFlyingListCards, isFlyingResultsReady };

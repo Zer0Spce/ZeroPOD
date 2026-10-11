@@ -6,7 +6,7 @@ const sharp = require('sharp');
 const { ResearchStore } = require('./researchStore');
 const { MARKETPLACES, canonicalAmazonUrl } = require('./researchProvider');
 const { assessTrademarkRisk } = require('./researchTrademarkSafety');
-const { readFlyingListCards } = require('./flyingResearchDom');
+const { readFlyingListCards, isFlyingResultsReady } = require('./flyingResearchDom');
 
 const ORIGIN = 'https://app.flyingresearch.net/';
 const TOOLS = {
@@ -103,13 +103,13 @@ class FlyingResearchFeature {
     return { tool, url };
   }
   async waitForResults(page) {
-    await page.getByRole('button', { name: 'Copy all ASINs', exact: true }).waitFor({ state: 'visible', timeout: 30000 });
-    await page.waitForFunction(() => {
-      const button = [...document.querySelectorAll('button')].find((el) => el.textContent.includes('Copy all ASINs'));
-      const loading = [...document.querySelectorAll('[role="status"]')].some((el) => el.getClientRects().length && /loading/i.test(`${el.getAttribute('aria-label') || ''} ${el.textContent}`));
-      const empty = [...document.querySelectorAll('strong')].some((el) => /^0 designs$/.test(el.textContent.trim()));
-      return !loading && ((button && !button.disabled) || empty);
-    }, null, { timeout: 30000 });
+    try {
+      await page.waitForFunction(isFlyingResultsReady, null, { timeout: 60000 });
+    } catch (error) {
+      if (error.name !== 'TimeoutError') throw error;
+      await this.requireSignedIn(page);
+      throw new Error('Flying has not displayed a results list yet. Open Flying Tools to check the search, then Import Current Results once designs appear.');
+    }
   }
   async choose(page, name, label) {
     const control = page.getByRole('button', { name, exact: true });

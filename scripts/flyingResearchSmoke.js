@@ -13,7 +13,7 @@ async function run() {
     return originalLoad.call(this, request, ...args);
   };
   try {
-    const { readFlyingListCards } = require('../src/main/flyingResearchDom');
+    const { readFlyingListCards, isFlyingResultsReady } = require('../src/main/flyingResearchDom');
     const { FlyingResearchFeature, normalizeFlyingCard } = require('../src/main/flyingResearchFeature');
     const { AutomationQueueStore } = require('../src/main/automationQueueStore');
     const { ResearchStore } = require('../src/main/researchStore');
@@ -28,8 +28,26 @@ async function run() {
         <ul class="list-card-description"><li>Dog lovers gift idea.</li></ul></div>
       <div class="list-card-content"><h4 class="list-card-title">Funny Cat T-Shirt</h4><div class="asin-info">ASIN : B0HF9KQR1C</div><img alt="Marketplace flag" src="assets/country-flags/1x1/gb.svg"><span class="list-card-review-count">0 review(s)</span></div>`);
     global.document = dom.window.document;
+    global.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
+    dom.window.Element.prototype.getClientRects = () => [{ width: 100, height: 50 }];
+    const loading = dom.window.document.createElement('span');
+    loading.className = 'research-results-loading'; loading.setAttribute('role', 'status');
+    loading.textContent = 'Loading more...'; loading.setAttribute('aria-hidden', 'true');
+    dom.window.document.body.append(loading);
+    assert.equal(isFlyingResultsReady(), true, 'Retained aria-hidden loading node must not block loaded cards');
+    loading.setAttribute('aria-hidden', 'false');
+    assert.equal(isFlyingResultsReady(), false, 'Active visible loading must still block stale results');
+    loading.style.visibility = 'hidden';
+    assert.equal(isFlyingResultsReady(), true, 'CSS-hidden loading must not block results');
+    const cardsMarkup = dom.window.document.body.innerHTML;
+    dom.window.document.body.innerHTML = '<strong>0 designs</strong>';
+    assert.equal(isFlyingResultsReady(), true, 'Explicit empty search must finish normally');
+    dom.window.document.body.innerHTML = '<button>Copy all ASINs</button>';
+    assert.equal(isFlyingResultsReady(), false, 'Toolbar without loaded results must not be ready');
+    dom.window.document.body.innerHTML = cardsMarkup;
     const cards = readFlyingListCards();
     delete global.document;
+    delete global.getComputedStyle;
     assert.equal(cards.length, 2);
     assert.equal(cards[0].bsr, 1720);
     assert.equal(cards[0].estimatedSales30, 95);
