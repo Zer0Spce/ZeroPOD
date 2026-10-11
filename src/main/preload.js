@@ -41,7 +41,8 @@ contextBridge.exposeInMainWorld('zeroPOD', {
   export: { png: (projectId) => ipcRenderer.invoke('export:png', projectId) },
   redbubble: {
     prepare: (projectId) => ipcRenderer.invoke('redbubble:prepare', projectId),
-    publish: (projectId) => ipcRenderer.invoke('redbubble:publish', projectId)
+    publish: (projectId) => ipcRenderer.invoke('redbubble:publish', projectId),
+    dailyUsage: () => ipcRenderer.invoke('redbubble:daily-usage')
   },
   automation: {
     list: () => ipcRenderer.invoke('automation:list'),
