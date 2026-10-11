@@ -117,6 +117,22 @@
     return true;
   }
 
+  document.addEventListener('click', async (event) => {
+    const start = event.target.closest?.('#automationStartV2');
+    if (!start || start.dataset.safeNewChatStart === 'running') return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    start.dataset.safeNewChatStart = 'running';
+    start.disabled = true;
+    try {
+      await syncNewChatRows(newChatEnabled());
+      if (typeof startAutomationV2 === 'function') await startAutomationV2();
+    } finally {
+      delete start.dataset.safeNewChatStart;
+      start.disabled = false;
+    }
+  }, true);
+
   function initializeWhenReady() {
     let attempts = 0;
     const timer = setInterval(() => {
