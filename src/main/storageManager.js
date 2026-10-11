@@ -4,8 +4,20 @@ const fsp = fs.promises;
 const path = require('path');
 
 const DEFAULT_CATEGORIES = ['temporary','researchCache','thumbnails','logs','browserCache'];
+const BROWSER_CACHE_DIR_NAMES = [
+  'Cache',
+  'Code Cache',
+  'GPUCache',
+  'DawnCache',
+  'DawnGraphiteCache',
+  'GrShaderCache',
+  'GraphiteDawnCache',
+  'ShaderCache',
+  'Media Cache'
+];
 
 async function exists(file) { try { await fsp.access(file); return true; } catch { return false; } }
+async function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function sizeOf(target) {
   if (!target || !(await exists(target))) return 0;
@@ -89,23 +101,45 @@ class StorageManager {
     return this.withSchedule(next);
   }
 
-  cacheTargets() {
-    const root = this.root();
-    const profiles = path.join(root, 'profiles');
-    const browserCacheDirs = [];
-    if (fs.existsSync(profiles)) {
-      const profileRoots = fs.readdirSync(profiles, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => path.join(profiles, entry.name));
-      const names = ['Cache','Code Cache','GPUCache','DawnCache','GrShaderCache','GraphiteDawnCache'];
-      for (const profile of profileRoots) {
-        for (const relative of ['', 'Default']) for (const name of names) browserCacheDirs.push(path.join(profile, relative, name));
+  browserProfileRoots() {
+    const profiles = path.join(this.root(), 'profiles');
+    if (!fs.existsSync(profiles)) return [];
+    const roots = [];
+    let services = [];
+    try { services = fs.readdirSync(profiles, { withFileTypes: true }).filter((entry) => entry.isDirectory()); } catch { return roots; }
+    for (const service of services) {
+      const serviceRoot = path.join(profiles, service.name);
+      roots.push(serviceRoot);
+      let children = [];
+      try { children = fs.readdirSync(serviceRoot, { withFileTypes: true }); } catch { continue; }
+      for (const child of children) {
+        if (!child.isDirectory()) continue;
+        if (child.name === 'Default' || /^Profile\s+\d+$/i.test(child.name) || child.name === 'Guest Profile') roots.push(path.join(serviceRoot, child.name));
       }
     }
+    return unique(roots);
+  }
+
+  browserCacheTargets() {
+    const targets = [];
+    for (const profileRoot of this.browserProfileRoots()) {
+      for (const name of BROWSER_CACHE_DIR_NAMES) targets.push(path.join(profileRoot, name));
+      // These are disposable service-worker caches. Cookies, Local Storage,
+      // IndexedDB, Login Data and the profile itself are deliberately untouched.
+      targets.push(path.join(profileRoot, 'Service Worker', 'CacheStorage'));
+      targets.push(path.join(profileRoot, 'Service Worker', 'ScriptCache'));
+    }
+    return unique(targets);
+  }
+
+  cacheTargets() {
+    const root = this.root();
     return {
       temporary: [path.join(root, 'temp'), path.join(root, 'tmp')],
       researchCache: [path.join(root, 'research', 'cache')],
       thumbnails: [path.join(root, 'research', 'thumbnails')],
       logs: [path.join(root, 'logs')],
-      browserCache: browserCacheDirs,
+      browserCache: this.browserCacheTargets(),
       publishedCache: [path.join(root, 'publish-cache')],
       buildArtifacts: [path.join(root, 'build-artifacts')]
     };
@@ -162,22 +196,49 @@ class StorageManager {
     });
   }
 
+  rememberFailure(target, result) {
+    result.failed += 1;
+    if (result.failedPaths.length < 12) result.failedPaths.push(target);
+  }
+
+  async removeDisposableTarget(target, protectedRefs, result) {
+    if (this.pathProtected(target, protectedRefs)) { result.protectedSkipped += 1; return; }
+    const bytes = await sizeOf(target);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await fsp.rm(target, { recursive: true, force: true, maxRetries: 2, retryDelay: 80 });
+        result.filesRemoved += 1;
+        result.bytesRecovered += bytes;
+        return;
+      } catch {
+        if (attempt < 2) await wait(120 * (attempt + 1));
+      }
+    }
+
+    // Chromium can lock one file while leaving the rest of a cache directory
+    // removable. Fall back to clearing children individually so one lock does
+    // not make the whole cache cleanup appear to do nothing.
+    let stat = null;
+    try { stat = await fsp.stat(target); } catch { return; }
+    if (stat.isDirectory()) {
+      await this.clearDirectoryContents(target, protectedRefs, result);
+      try { await fsp.rmdir(target); } catch {}
+      return;
+    }
+    this.rememberFailure(target, result);
+  }
+
   async clearDirectoryContents(dir, protectedRefs, result) {
     if (!(await exists(dir))) return;
     let entries = [];
-    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { result.failed += 1; return; }
-    for (const entry of entries) {
-      const target = path.join(dir, entry.name);
-      if (this.pathProtected(target, protectedRefs)) { result.protectedSkipped += 1; continue; }
-      let bytes = 0;
-      try { bytes = await sizeOf(target); await fsp.rm(target, { recursive: true, force: true }); result.filesRemoved += 1; result.bytesRecovered += bytes; }
-      catch { result.failed += 1; }
-    }
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); }
+    catch { this.rememberFailure(dir, result); return; }
+    for (const entry of entries) await this.removeDisposableTarget(path.join(dir, entry.name), protectedRefs, result);
   }
 
   async cleanup(categories = DEFAULT_CATEGORIES, options = {}) {
     const chosen = [...new Set(categories || [])];
-    const result = { filesRemoved: 0, bytesRecovered: 0, protectedSkipped: 0, failed: 0, skippedCategories: [], ranAt: new Date().toISOString() };
+    const result = { filesRemoved: 0, bytesRecovered: 0, protectedSkipped: 0, failed: 0, failedPaths: [], skippedCategories: [], ranAt: new Date().toISOString() };
     const targets = this.cacheTargets();
     const protectedRefs = this.protectedReferences();
     const busy = this.isBusy();
