@@ -32,6 +32,7 @@ app.whenReady().then(() => {
   ipcMain.handle('automate-list:start', () => feature.start());
   ipcMain.handle('automate-list:pause', () => feature.pause());
   ipcMain.handle('automate-list:stop', () => feature.stop());
+  ipcMain.handle('automate-list:retry-skipped', () => feature.retrySkipped());
   ipcMain.handle('automate-list:clear', () => feature.clear());
 });
 
