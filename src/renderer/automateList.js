@@ -37,7 +37,7 @@
         <div class="heading-row">
           <div>
             <h2>Automate List</h2>
-            <p class="muted">Upload an Excel or text list of up to 30 Amazon POD links. ZeroPOD checks each link, captures the product shirt image, and sends the image + original Amazon link into Automation. Dead or invalid links are skipped automatically.</p>
+            <p class="muted">Upload an Excel or text list of up to 30 Amazon POD links. ZeroPOD retries temporary Amazon/image failures automatically, then sends the product shirt image + original Amazon link into Automation.</p>
           </div>
           <div id="automateListState" class="queue-state">Stopped</div>
         </div>
@@ -46,6 +46,7 @@
           <button id="automateListStart">Start Import</button>
           <button id="automateListPause">Pause</button>
           <button class="danger" id="automateListStop">Stop</button>
+          <button class="secondary" id="automateListRetrySkipped">Retry Skipped</button>
           <button class="secondary" id="automateListClear">Clear List</button>
         </div>
         <div class="panel">
@@ -63,7 +64,7 @@
             <tbody id="automateListRows"></tbody>
           </table>
         </div>
-        <p class="muted automation-footnote">Supported file types: .xlsx, .csv, .tsv, .txt, .md, .json, and .log. Links can be anywhere in the file. Amazon CAPTCHA/login is never bypassed; if Amazon asks for normal human verification, Automate List pauses instead of falsely marking valid links as dead.</p>`;
+        <p class="muted automation-footnote">Amazon reliability: each valid ASIN gets up to 3 automatic attempts, including a clean /dp/ASIN fallback, extra image selectors, browser-session image download, and a final product-image screenshot fallback. Use Retry Skipped to re-run temporary failures. Invalid URLs and duplicates stay skipped. CAPTCHA/login is never bypassed; ZeroPOD pauses for normal human verification.</p>`;
       const automationSection = document.getElementById('automation');
       if (automationSection) automationSection.insertAdjacentElement('afterend', section);
       else document.querySelector('main.content')?.appendChild(section);
@@ -129,21 +130,25 @@
     if (message) message.textContent = snapshot.lastMessage || 'Upload a list containing Amazon product links.';
     if (automationSpace) automationSpace.textContent = `${snapshot.automation?.used || 0} / ${snapshot.automation?.limit || 30} rows used`;
 
+    const items = snapshot.items || [];
+    const retryableSkipped = items.filter((item) => item.status === 'skipped' && item.retryable !== false).length;
+
     if (summary) {
       const stats = [
         ['Total', counts.total || 0],
         ['Pending', (counts.pending || 0) + (counts.checking || 0) + (counts['waiting-space'] || 0)],
         ['Sent', counts.added || 0],
         ['Skipped', counts.skipped || 0],
+        ['Retryable', retryableSkipped],
         ['Attention', counts['needs-attention'] || 0]
       ];
       summary.innerHTML = stats.map(([label, value]) => `<span><strong>${value}</strong> ${label}</span>`).join('');
     }
 
-    const items = snapshot.items || [];
     if (root) {
       root.innerHTML = items.length ? items.map((item, index) => {
-        const detail = item.reason || item.title || '';
+        const attemptText = item.attempts ? ` · try ${item.attempts}/3` : '';
+        const detail = `${item.reason || item.title || ''}${attemptText}`;
         const badgeClass = item.status === 'added' ? 'automate-ok'
           : item.status === 'skipped' ? 'automate-skip'
           : item.status === 'needs-attention' ? 'automate-attention'
@@ -165,6 +170,7 @@
     const start = document.getElementById('automateListStart');
     const pause = document.getElementById('automateListPause');
     const stop = document.getElementById('automateListStop');
+    const retry = document.getElementById('automateListRetrySkipped');
     const clear = document.getElementById('automateListClear');
     const upload = document.getElementById('automateListUpload');
     if (start) {
@@ -173,6 +179,10 @@
     }
     if (pause) pause.disabled = !running;
     if (stop) stop.disabled = !running && snapshot.state !== 'paused';
+    if (retry) {
+      retry.disabled = running || retryableSkipped === 0;
+      retry.textContent = retryableSkipped ? `Retry Skipped (${retryableSkipped})` : 'Retry Skipped';
+    }
     if (clear) clear.disabled = running;
     if (upload) upload.disabled = running;
   }
@@ -214,6 +224,10 @@
   document.getElementById('automateListStart')?.addEventListener('click', (event) => runAction(event.currentTarget, () => api.start(), 'Starting…'));
   document.getElementById('automateListPause')?.addEventListener('click', (event) => runAction(event.currentTarget, () => api.pause(), 'Pausing…'));
   document.getElementById('automateListStop')?.addEventListener('click', (event) => runAction(event.currentTarget, () => api.stop(), 'Stopping…'));
+  document.getElementById('automateListRetrySkipped')?.addEventListener('click', async (event) => {
+    const result = await runAction(event.currentTarget, () => api.retrySkipped(), 'Queuing retries…');
+    if (result) await runAction(document.getElementById('automateListStart'), () => api.start(), 'Starting retries…');
+  });
   document.getElementById('automateListClear')?.addEventListener('click', async (event) => {
     if (!confirm('Clear the imported Automate List? This does not delete rows already sent to Automation.')) return;
     await runAction(event.currentTarget, () => api.clear(), 'Clearing…');
