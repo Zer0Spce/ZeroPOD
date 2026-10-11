@@ -141,16 +141,21 @@ function loadZeroPODFeatureScript(src, id) {
   document.body.appendChild(script);
 }
 
+function hideResearchBeta() {
+  document.querySelectorAll('.nav[data-view="research"]').forEach((node) => node.remove());
+  document.querySelectorAll('#research').forEach((node) => node.remove());
+}
+
 function loadResearchFeatures() {
-  try {
-    if (typeof serviceOrder !== 'undefined' && Array.isArray(serviceOrder) && !serviceOrder.includes('amazonResearch')) serviceOrder.push('amazonResearch');
-    if (typeof renderConnections === 'function') Promise.resolve(renderConnections()).catch(() => {});
-  } catch {}
-  loadZeroPODFeatureScript('research.js', 'researchFeatureScript');
+  // Research / Research BETA is intentionally hidden for now. Keep its files in
+  // the codebase so we can fix and re-enable it later without affecting Flying Research BETA.
+  hideResearchBeta();
   loadZeroPODFeatureScript('storageSettings.js', 'storageSettingsFeatureScript');
-  loadZeroPODFeatureScript('researchAutomationSafePatch.js', 'researchAutomationSafePatchScript');
   loadZeroPODFeatureScript('redbubbleLimit.js', 'redbubbleLimitFeatureScript');
-  setTimeout(installLateThemeOverrides, 0);
+  setTimeout(() => {
+    hideResearchBeta();
+    installLateThemeOverrides();
+  }, 0);
 }
 
 media.addEventListener('change', () => { if (getPreference() === 'system') applyAppearance('system', getColorTheme()); });
