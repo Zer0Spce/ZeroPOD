@@ -60,6 +60,14 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     importXlsx: () => ipcRenderer.invoke('automation:import-xlsx'),
     exportXlsx: () => ipcRenderer.invoke('automation:export-xlsx')
   },
+  automateList: {
+    snapshot: () => ipcRenderer.invoke('automate-list:snapshot'),
+    importFile: () => ipcRenderer.invoke('automate-list:import-file'),
+    start: () => ipcRenderer.invoke('automate-list:start'),
+    pause: () => ipcRenderer.invoke('automate-list:pause'),
+    stop: () => ipcRenderer.invoke('automate-list:stop'),
+    clear: () => ipcRenderer.invoke('automate-list:clear')
+  },
   research: {
     list: (filters) => ipcRenderer.invoke('research:list', filters),
     get: (key) => ipcRenderer.invoke('research:get', key),
