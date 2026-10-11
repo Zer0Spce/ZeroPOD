@@ -77,9 +77,18 @@ async function autoApproveGeneratedProject(controller, project) {
 
 AutomationQueueController.prototype.processRow = async function processRowFullAuto(row) {
   // Keep the proven generation / metadata / vectorizer paths from the original
-  // controller. Only intercept the two former review gates and the quality gate.
+  // controller. Only intercept the review gates, quality gate, and the optional
+  // per-row request to begin generation in a fresh ChatGPT thread.
   if (!row.projectId) {
-    return originalProcessRow.call(this, row);
+    if (!row.newChat) return originalProcessRow.call(this, row);
+
+    const previousStart = this.chatgpt.start;
+    this.chatgpt.start = (payload = {}) => previousStart.call(this.chatgpt, { ...payload, newChat: true });
+    try {
+      return await originalProcessRow.call(this, row);
+    } finally {
+      this.chatgpt.start = previousStart;
+    }
   }
 
   const project = this.projects.read(row.projectId);
@@ -92,8 +101,6 @@ AutomationQueueController.prototype.processRow = async function processRowFullAu
 
   if (['export-ready', 'redbubble-recovery-needed'].includes(project.status)) {
     this.markRunning(row.id, 'Preparing Redbubble Copy Existing Work', 'redbubble-prepare');
-    // The proven unified workflow already showed that an extra manual quality gate
-    // is unnecessary here. Redbubble preparation itself remains unchanged.
     await this.redbubble.prepare(project.id);
     return;
   }
