@@ -132,7 +132,7 @@ class FlyingResearchFeature {
     await this.requireSignedIn(page);
     const url = `${ORIGIN}#/research/research/${TOOLS[tool].route}`;
     if (page.url() !== url) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.locator('h1.header-title').filter({ hasText: TOOLS[tool].label }).waitFor({ state: 'visible', timeout: 30000 });
+    await page.locator('h1.header-title').filter({ hasText: tool === 'favorites' ? /(?:Design|Flying) Favorites/ : TOOLS[tool].label }).waitFor({ state: 'visible', timeout: 30000 });
     await page.getByRole('button', { name: 'Marketplace', exact: true }).waitFor({ state: 'visible', timeout: 30000 });
     await this.choose(page, 'Marketplace', marketplace === 'ALL' && tool !== 'live' ? 'All Marketplaces' : MARKETPLACES[marketplace === 'ALL' ? 'US' : marketplace].label);
     await this.choose(page, 'Product', PRODUCTS[productType]);

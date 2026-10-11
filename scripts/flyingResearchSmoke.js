@@ -96,11 +96,12 @@ async function run() {
     // mixed success retains skipped selections, and dynamic-tab isolation.
     const ui = new JSDOM(`<button class="nav active" data-view="dashboard">Dashboard</button><button class="nav" data-view="automation">Automation</button><button class="nav" data-view="create">Workflow</button><main class="content"><section class="view active-view" id="dashboard"></section><section class="view" id="create"><input id="uwReferencePath"><input id="uwSourceUrl"><button id="uwStart">Start</button></section></main>`,{url:'https://zeropod.test/',runScripts:'outside-only'});
     const w=ui.window;
-    let requestedKeys=null, requestedNewChat=null, generations=0;
+    let requestedKeys=null, requestedNewChat=null, generations=0, searches=[];
     const uiItems=[first,second].map((v)=>({...v,trademarkRisk:false}));
     w.zeroPOD={generation:{start:()=>{generations++;}},flyingResearch:{
-      options:async()=>({tools:{best:{label:'Best Sellers'}},marketplaces:{FR:{label:'France'}},products:{tshirt:'T-Shirt'}}),
-      list:async()=>uiItems,
+      options:async()=>({tools:{best:{label:'Best Sellers'},trends:{label:'Seller Trends'}},marketplaces:{FR:{label:'France'}},products:{tshirt:'T-Shirt'}}),
+      list:async()=>{throw Error('Initial tab must load live results automatically');},
+      search:async(payload)=>{searches.push(payload);return {items:uiItems,count:uiItems.length,capturedAt:new Date().toISOString(),skippedItems:[]};},
       workflow:async(key)=>({referencePath:`C:/protected/${key}.png`,sourceUrl:uiItems.find(v=>v.key===key).canonicalUrl,title:'Ready'}),
       addToAutomation:async({keys,newChat})=>{requestedKeys=keys;requestedNewChat=newChat;return {added:1,rows:[{researchKey:keys[0]}],skippedItems:[{key:keys[1],reason:'Queue full'}]};}
     }};
@@ -108,6 +109,10 @@ async function run() {
     const tick=()=>new Promise(resolve=>setImmediate(resolve));
     await tick();
     w.document.querySelector('.nav[data-view="flyingResearch"]').click();await tick();
+    assert.equal(w.document.querySelectorAll('.fr-card').length,2);
+    assert.equal(searches.length,1);assert.equal(searches[0].tool,'best');
+    w.document.querySelector('[data-tool=trends]').click();await tick();await tick();
+    assert.equal(searches.length,2);assert.equal(searches[1].tool,'trends');
     assert.equal(w.document.querySelectorAll('.fr-card').length,2);
     const all=w.document.getElementById('frSelectAll');all.checked=true;all.dispatchEvent(new w.Event('change'));
     assert.equal(w.document.getElementById('frWorkflow').disabled,true);
