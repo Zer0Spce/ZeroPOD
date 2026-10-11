@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('zeroPOD', {
+  app: {
+    clearCache: () => ipcRenderer.invoke('app:clear-cache')
+  },
   connections: {
     list: () => ipcRenderer.invoke('connections:list'),
     login: (serviceId) => ipcRenderer.invoke('connections:login', serviceId),
