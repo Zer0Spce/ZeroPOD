@@ -27,9 +27,9 @@ class FlyingResearchStore extends ResearchStore {
   getRoot() { return path.join(app.getPath('userData'), 'flying-research'); }
 }
 
-function normalizeFlyingCard(raw, sourceUrl, at = new Date().toISOString()) {
+function normalizeFlyingCard(raw, sourceUrl, at = new Date().toISOString(), marketplaceHint = null) {
   const asin = String(raw.asin || '').toUpperCase();
-  const marketplace = String(raw.marketplace || '').toUpperCase();
+  const marketplace = String(raw.marketplace || marketplaceHint || '').toUpperCase();
   if (!/^[A-Z0-9]{10}$/.test(asin) || !MARKETPLACES[marketplace] || !raw.title) return null;
   let imageUrl = null;
   try {
@@ -116,12 +116,48 @@ class FlyingResearchFeature {
     if ((await control.innerText()).includes(label)) return;
     await control.click();
     const option = page.getByRole('button', { name: new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$') }).filter({ hasNot: page.locator(`#${name.toLowerCase()}`) });
-    // Dropdown options contain an icon/image label plus the visible choice.
     const candidates = await option.all();
     const visible = [];
     for (const candidate of candidates) if (await candidate.isVisible()) visible.push(candidate);
     if (visible.length !== 1) throw new Error(`Flying ${name} choice changed. Use Open Flying Tools to select ${label}, then Import Current Results.`);
     await visible[0].click();
+  }
+  async selectedMarketplace(page) {
+    try {
+      const text = (await page.getByRole('button', { name: 'Marketplace', exact: true }).innerText()).replace(/\s+/g, ' ').trim();
+      if (/all marketplaces/i.test(text)) return null;
+      for (const [code, info] of Object.entries(MARKETPLACES)) {
+        if (text.toLowerCase().includes(String(info.label || '').toLowerCase())) return code;
+      }
+    } catch {}
+    return null;
+  }
+  async collectLoadedCards(page) {
+    const collected = new Map();
+    let stagnant = 0;
+    let previousSize = 0;
+    for (let pass = 0; pass < 30 && collected.size < 200; pass += 1) {
+      const batch = await page.evaluate(readFlyingListCards);
+      for (const card of batch) {
+        const identity = String(card.asin || '').toUpperCase();
+        if (identity) collected.set(identity, card);
+      }
+      if (collected.size === previousSize) stagnant += 1;
+      else stagnant = 0;
+      previousSize = collected.size;
+      if (stagnant >= 4) break;
+
+      await page.evaluate(() => {
+        const cards = [...document.querySelectorAll('.list-card-content,.design-card-v2')];
+        const last = cards[cards.length - 1];
+        last?.scrollIntoView({ block: 'end' });
+        window.scrollBy(0, Math.max(window.innerHeight * 0.85, 650));
+      }).catch(() => {});
+      await page.waitForTimeout(450);
+      const loading = page.locator('.research-results-loading:visible');
+      if (await loading.count()) await loading.first().waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    }
+    return [...collected.values()];
   }
   async search({ tool = 'best', query = '', marketplace = 'ALL', productType = 'tshirt' } = {}) {
     if (!['best', 'trends', 'archive', 'live', 'favorites'].includes(tool)) throw new Error('Open this analysis tool in Flying, then import a results list when available.');
@@ -131,7 +167,12 @@ class FlyingResearchFeature {
     const page = await this.ensurePage();
     await this.requireSignedIn(page);
     const url = `${ORIGIN}#/research/research/${TOOLS[tool].route}`;
-    if (page.url() !== url) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // Flying keeps the old result cards mounted. Reloading the same route before a
+    // new search prevents waitForResults() from immediately accepting stale cards.
+    if (page.url() === url) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+    else await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
     await page.locator('h1.header-title').filter({ hasText: tool === 'favorites' ? /(?:Design|Flying) Favorites/ : TOOLS[tool].label }).waitFor({ state: 'visible', timeout: 30000 });
     await page.getByRole('button', { name: 'Marketplace', exact: true }).waitFor({ state: 'visible', timeout: 30000 });
     await this.choose(page, 'Marketplace', marketplace === 'ALL' && tool !== 'live' ? 'All Marketplaces' : MARKETPLACES[marketplace === 'ALL' ? 'US' : marketplace].label);
@@ -141,9 +182,9 @@ class FlyingResearchFeature {
     const search = page.getByRole('button', { name: /Search$/ }).filter({ hasNotText: /options|analysis/i }).first();
     await search.click({ timeout: 30000 });
     await this.waitForResults(page);
-    return this.capture();
+    return this.capture({ marketplaceHint: marketplace === 'ALL' ? null : marketplace });
   }
-  async capture() {
+  async capture({ marketplaceHint = null } = {}) {
     const page = await this.ensurePage();
     await this.requireSignedIn(page);
     const sourceUrl = page.url();
@@ -156,12 +197,18 @@ class FlyingResearchFeature {
     const radioId = await label.getAttribute('for');
     if (!await page.locator(`[id="${radioId}"]`).isChecked()) await label.click({ timeout: 30000 });
     await this.waitForResults(page);
-    const raw = await page.evaluate(readFlyingListCards);
+
+    const fallbackMarketplace = marketplaceHint || await this.selectedMarketplace(page);
+    const raw = await this.collectLoadedCards(page);
     if (!raw.length) throw new Error('No loaded list cards to import. Run a search or load results in Flying first.');
     const items = [], skippedItems = [], seen = new Set();
     for (const card of raw.slice(0, 200)) {
-      const item = normalizeFlyingCard(card, sourceUrl, at);
-      if (!item) { skippedItems.push({ asin: card.asin, reason: 'Missing title, ASIN, or marketplace' }); continue; }
+      const item = normalizeFlyingCard(card, sourceUrl, at, fallbackMarketplace);
+      if (!item) {
+        const missing = [!card.title && 'title', !card.asin && 'ASIN', !(card.marketplace || fallbackMarketplace) && 'marketplace'].filter(Boolean).join(', ');
+        skippedItems.push({ asin: card.asin, reason: `Missing ${missing || 'required identity'}` });
+        continue;
+      }
       const key = this.store.key(item.marketplace, item.asin);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -225,7 +272,6 @@ class FlyingResearchFeature {
           research: { source: 'flying-research', researchKey: key, asin: item.asin, marketplace: item.marketplace, title: item.title, sourceUrl: item.sourceUrl, capturedAt: item.capturedAt, bsr: item.bsr, estimatedSales30: item.estimatedSales30, verifiedBestSeller: false } });
       } catch (error) { skippedItems.push({ key, reason: error.message || String(error) }); }
     }
-    // Re-check after network waits so other UI additions cannot exceed capacity.
     const current = this.automationStore.read();
     const accepted = [];
     for (const row of rows) {
