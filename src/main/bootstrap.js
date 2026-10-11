@@ -103,6 +103,7 @@ require('./redbubbleDailyLimitPatch');
 require('./projectClearPatch');
 require('./automationFullAutoPatch');
 require('./redbubbleUploadLimitPausePatch');
+require('./redbubbleLimitCheckPatch');
 require('./workflowImageCheckDockPatch');
 require('./workspaceResearchBackupPatch');
 require('./researchPodSourcePatch');

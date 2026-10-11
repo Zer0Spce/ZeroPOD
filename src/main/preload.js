@@ -43,7 +43,10 @@ contextBridge.exposeInMainWorld('zeroPOD', {
   redbubble: {
     prepare: (projectId) => ipcRenderer.invoke('redbubble:prepare', projectId),
     publish: (projectId) => ipcRenderer.invoke('redbubble:publish', projectId),
-    dailyUsage: () => ipcRenderer.invoke('redbubble:daily-usage')
+    dailyUsage: () => ipcRenderer.invoke('redbubble:daily-usage'),
+    checkUploadLimit: () => ipcRenderer.invoke('redbubble:check-upload-limit'),
+    limitCheckSettings: () => ipcRenderer.invoke('redbubble:limit-check-settings'),
+    updateLimitCheckSettings: (patch) => ipcRenderer.invoke('redbubble:update-limit-check-settings', patch)
   },
   automation: {
     list: () => ipcRenderer.invoke('automation:list'),
