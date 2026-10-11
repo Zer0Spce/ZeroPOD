@@ -1,7 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
-const { RedbubbleController } = require('./redbubbleController');
+const { app, ipcMain } = require('electron');
+const redbubbleModule = require('./redbubbleController');
+const { RedbubbleController } = redbubbleModule;
+const { AutomationQueueStore } = require('./automationQueueStore');
 const { detectUploadLimitPage, readLimitState } = require('./redbubbleDailyLimitPatch');
 
 const MANAGE_WORKS_URL = 'https://www.redbubble.com/portfolio/manage_works?ref=duplicate_work';
@@ -71,10 +73,9 @@ function writeLimitState(patch = {}) {
 }
 
 function markLimitAvailable() {
-  const now = new Date().toISOString();
   return writeLimitState({
     blocked: false,
-    clearedAt: now,
+    clearedAt: new Date().toISOString(),
     message: null,
     url: null
   });
@@ -120,10 +121,9 @@ RedbubbleController.prototype.getLimitCheckSettings = function getLimitCheckSett
 
 RedbubbleController.prototype.updateLimitCheckSettings = function updateLimitCheckSettings(patch = {}) {
   const intervalHours = normalizeInterval(patch.intervalHours);
-  const now = Date.now();
   const next = writeSettings({
     intervalHours,
-    nextCheckAt: new Date(now + intervalHours * HOUR_MS).toISOString(),
+    nextCheckAt: new Date(Date.now() + intervalHours * HOUR_MS).toISOString(),
     deferredBecauseAutomation: false
   });
   return { ...next, allowedIntervals: ALLOWED_INTERVALS };
@@ -222,8 +222,8 @@ RedbubbleController.prototype.checkUploadLimit = async function checkUploadLimit
       throw error;
     }
 
-    // Reaching the copied-work editor proves Redbubble currently allows the
-    // duplicate workflow. Do not replace artwork, edit fields, or save anything.
+    // Reaching the copied-work editor proves Redbubble currently permits the
+    // duplicate workflow. Never replace artwork, edit fields, or save anything.
     markLimitAvailable();
     const availableMessage = 'Redbubble Copy Settings opened normally. Upload capacity is currently available.';
     const settings = recordCheck({ result: 'available', message: availableMessage, source });
@@ -276,6 +276,35 @@ RedbubbleController.prototype.startUploadLimitScheduler = function startUploadLi
   this.limitCheckScheduler = setInterval(tick, 60 * 1000);
   setTimeout(tick, 5000);
 };
+
+// bootstrap loads this patch before main.js. Replace the exported class with a
+// tiny tracked subclass so the main process Redbubble instance can expose the
+// checker through IPC without changing the proven controller construction flow.
+let activeController = null;
+class LimitCheckRedbubbleController extends RedbubbleController {
+  constructor(options) {
+    super(options);
+    activeController = this;
+    this.attachAutomationStore(new AutomationQueueStore());
+  }
+}
+redbubbleModule.RedbubbleController = LimitCheckRedbubbleController;
+
+app.whenReady().then(() => {
+  ipcMain.handle('redbubble:check-upload-limit', () => {
+    if (!activeController) throw new Error('Redbubble controller is not ready yet.');
+    return activeController.checkUploadLimit({ source: 'manual' });
+  });
+  ipcMain.handle('redbubble:limit-check-settings', () => {
+    if (!activeController) throw new Error('Redbubble controller is not ready yet.');
+    return activeController.getLimitCheckSettings();
+  });
+  ipcMain.handle('redbubble:update-limit-check-settings', (_event, patch) => {
+    if (!activeController) throw new Error('Redbubble controller is not ready yet.');
+    return activeController.updateLimitCheckSettings(patch || {});
+  });
+  activeController?.startUploadLimitScheduler();
+});
 
 module.exports = {
   ALLOWED_INTERVALS,
