@@ -11,15 +11,20 @@
     let usage = null;
     try { usage = await window.zeroPOD.redbubble?.dailyUsage?.(); } catch {}
 
+    const localCount = Number(usage?.localCount ?? usage?.count ?? 0);
     const trackerLine = usage
-      ? `ZeroPOD currently tracks ${usage.count} / ${usage.limit} successful Redbubble publishes in the last 24 hours.`
-      : 'ZeroPOD could not read the current Redbubble upload tracker before this deletion.';
+      ? `ZeroPOD currently has ${localCount} successful Redbubble publishes recorded in the last 24 hours. This count is informational only.`
+      : 'ZeroPOD could not read the current local Redbubble publish history before this deletion.';
+
+    const detectedLine = usage?.blocked
+      ? `Redbubble upload-limit status is currently DETECTED from Redbubble's own page. That detection state is stored separately from Projects and will not be erased by Clear Projects.`
+      : `No Redbubble upload-limit page is currently marked as detected.`;
 
     const accepted = confirm(
       `WARNING — CLEAR ALL PROJECTS\n\n` +
       `This permanently deletes every ZeroPOD project folder, including generated artwork, metadata, project history, archived projects, and published-project records.\n\n` +
-      `${trackerLine}\n\n` +
-      `The Redbubble 30-upload tracker is calculated from publish records stored inside these projects. Clearing Projects can make ZeroPOD UNDERCOUNT uploads from the current rolling 24-hour period and may show upload slots as available even when Redbubble still considers the account at its limit. Redbubble's own warning remains the source of truth.\n\n` +
+      `${trackerLine}\n${detectedLine}\n\n` +
+      `Clearing Projects will erase the local publish-history count shown on the dashboard, so that informational number may become inaccurate for the current 24-hour period. It does NOT reset Redbubble's real upload limit and it does NOT make ZeroPOD assume uploads are available. ZeroPOD determines the actual limit only from Redbubble's own “exceeded your upload limit” page/message.\n\n` +
       `Automation rows that still depend on project data must be completed, skipped, or removed first.\n\n` +
       `This action cannot be undone. Continue?`
     );
@@ -48,12 +53,12 @@
 
       if (typeof renderProjects === 'function') await renderProjects();
       if (typeof renderDashboard === 'function') await renderDashboard();
-      if (typeof refreshRedbubbleUsage === 'function') await refreshRedbubbleUsage();
+      if (typeof window.refreshRedbubbleUsage === 'function') await window.refreshRedbubbleUsage();
 
-      const trackerImpact = result.recentPublishedRecordsRemoved
-        ? ` ${plural(result.recentPublishedRecordsRemoved, 'publish record')} from the current 24-hour tracking window ${result.recentPublishedRecordsRemoved === 1 ? 'was' : 'were'} also removed, so use Redbubble itself to confirm when uploads are available.`
+      const historyImpact = result.recentPublishedRecordsRemoved
+        ? ` ${plural(result.recentPublishedRecordsRemoved, 'publish record')} from the current 24-hour local history ${result.recentPublishedRecordsRemoved === 1 ? 'was' : 'were'} also removed. This affects only the informational count; Redbubble page detection remains the source of truth.`
         : '';
-      alert(`Cleared ${plural(result.deleted, 'project')}.${trackerImpact}`);
+      alert(`Cleared ${plural(result.deleted, 'project')}.${historyImpact}`);
     } catch (error) {
       alert(`Projects were not cleared: ${error.message || error}`);
     } finally {
