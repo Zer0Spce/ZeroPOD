@@ -3,22 +3,15 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 
-const DEFAULT_CATEGORIES = ['temporary','researchCache','thumbnails','logs','browserCache'];
-const BROWSER_CACHE_DIR_NAMES = [
-  'Cache',
-  'Code Cache',
-  'GPUCache',
-  'DawnCache',
-  'DawnGraphiteCache',
-  'GrShaderCache',
-  'GraphiteDawnCache',
-  'ShaderCache',
-  'Media Cache'
-];
+// Browser data is intentionally NOT a cleanup category. Clear Cache only removes
+// known ZeroPOD temporary/unused files and never touches browser profiles,
+// Chromium cache, cookies, Local Storage, IndexedDB, saved logins or sessions.
+const SAFE_CATEGORIES = ['temporary','researchCache','thumbnails','logs','publishedCache','buildArtifacts'];
+const DEFAULT_CATEGORIES = ['temporary','researchCache','thumbnails','logs','buildArtifacts'];
+const BROWSER_CACHE_DIR_NAMES = ['Cache','Code Cache','GPUCache','DawnCache','DawnGraphiteCache','GrShaderCache','GraphiteDawnCache','ShaderCache','Media Cache'];
 
 async function exists(file) { try { await fsp.access(file); return true; } catch { return false; } }
 async function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
-
 async function sizeOf(target) {
   if (!target || !(await exists(target))) return 0;
   let stat;
@@ -31,23 +24,23 @@ async function sizeOf(target) {
   for (const entry of entries) total += await sizeOf(path.join(target, entry.name));
   return total;
 }
-
-function unique(values) { return [...new Set(values.filter(Boolean).map((item) => path.resolve(item)))]; }
+function unique(values) { return [...new Set((values || []).filter(Boolean).map((item) => path.resolve(item)))]; }
+function sanitizeCategories(values, fallback = DEFAULT_CATEGORIES) {
+  if (!Array.isArray(values)) return [...fallback];
+  return [...new Set(values.filter((value) => SAFE_CATEGORIES.includes(value)))];
+}
 
 class StorageManager {
-  constructor({ automationStore, projects }) {
-    this.automationStore = automationStore;
-    this.projects = projects;
-  }
-
+  constructor({ automationStore, projects }) { this.automationStore = automationStore; this.projects = projects; }
   root() { return app.getPath('userData'); }
   settingsFile() { return path.join(this.root(), 'storage-cleanup.json'); }
+
   readSettings() {
     try {
       const raw = JSON.parse(fs.readFileSync(this.settingsFile(), 'utf8'));
       return {
         cleanupInterval: raw.cleanupInterval || 'off',
-        selectedCleanupCategories: Array.isArray(raw.selectedCleanupCategories) ? raw.selectedCleanupCategories : DEFAULT_CATEGORIES,
+        selectedCleanupCategories: sanitizeCategories(raw.selectedCleanupCategories),
         lastCleanupAt: raw.lastCleanupAt || null,
         nextCleanupAt: raw.nextCleanupAt || null,
         lastCleanupRecoveredBytes: Number(raw.lastCleanupRecoveredBytes || 0),
@@ -82,12 +75,14 @@ class StorageManager {
 
   writeSettings(patch) {
     const previous = this.readSettings();
-    const next = { ...previous, ...patch };
-    const intervalChanged = Object.prototype.hasOwnProperty.call(patch, 'cleanupInterval') && patch.cleanupInterval !== previous.cleanupInterval;
-    const cleanupJustRan = Object.prototype.hasOwnProperty.call(patch, 'lastCleanupAt') && patch.lastCleanupAt;
+    const cleanPatch = { ...patch };
+    if (Object.prototype.hasOwnProperty.call(cleanPatch, 'selectedCleanupCategories')) cleanPatch.selectedCleanupCategories = sanitizeCategories(cleanPatch.selectedCleanupCategories, []);
+    const next = { ...previous, ...cleanPatch };
+    const intervalChanged = Object.prototype.hasOwnProperty.call(cleanPatch, 'cleanupInterval') && cleanPatch.cleanupInterval !== previous.cleanupInterval;
+    const cleanupJustRan = Object.prototype.hasOwnProperty.call(cleanPatch, 'lastCleanupAt') && cleanPatch.lastCleanupAt;
     if (next.cleanupInterval === 'off') next.nextCleanupAt = null;
     else if (cleanupJustRan) {
-      const scheduled = this.addInterval(new Date(patch.lastCleanupAt), next.cleanupInterval);
+      const scheduled = this.addInterval(new Date(cleanPatch.lastCleanupAt), next.cleanupInterval);
       next.nextCleanupAt = scheduled ? scheduled.toISOString() : null;
     } else if (intervalChanged || !next.nextCleanupAt) {
       const scheduled = this.addInterval(new Date(), next.cleanupInterval);
@@ -124,8 +119,6 @@ class StorageManager {
     const targets = [];
     for (const profileRoot of this.browserProfileRoots()) {
       for (const name of BROWSER_CACHE_DIR_NAMES) targets.push(path.join(profileRoot, name));
-      // These are disposable service-worker caches. Cookies, Local Storage,
-      // IndexedDB, Login Data and the profile itself are deliberately untouched.
       targets.push(path.join(profileRoot, 'Service Worker', 'CacheStorage'));
       targets.push(path.join(profileRoot, 'Service Worker', 'ScriptCache'));
     }
@@ -139,7 +132,6 @@ class StorageManager {
       researchCache: [path.join(root, 'research', 'cache')],
       thumbnails: [path.join(root, 'research', 'thumbnails')],
       logs: [path.join(root, 'logs')],
-      browserCache: this.browserCacheTargets(),
       publishedCache: [path.join(root, 'publish-cache')],
       buildArtifacts: [path.join(root, 'build-artifacts')]
     };
@@ -148,12 +140,8 @@ class StorageManager {
   protectedReferences() {
     const refs = [];
     const queue = this.automationStore.read();
-    for (const row of queue.rows || []) {
-      if (!['completed','skipped'].includes(row.status)) refs.push(row.referenceImage);
-    }
-    for (const project of this.projects.list({ includeArchived: true })) {
-      refs.push(project.referencePath, project.generatedImagePath, project.approvedImagePath, project.vectorPath, project.finalPngPath, project.redbubble?.reviewScreenshotPath);
-    }
+    for (const row of queue.rows || []) if (!['completed','skipped'].includes(row.status)) refs.push(row.referenceImage);
+    for (const project of this.projects.list({ includeArchived: true })) refs.push(project.referencePath, project.generatedImagePath, project.approvedImagePath, project.vectorPath, project.finalPngPath, project.redbubble?.reviewScreenshotPath);
     return unique(refs);
   }
 
@@ -167,89 +155,64 @@ class StorageManager {
   async usage() {
     const root = this.root();
     const targets = this.cacheTargets();
-    const browserDisposableCache = await this.sumTargets(targets.browserCache);
+    const browserDisposableCache = await this.sumTargets(this.browserCacheTargets());
+    const fullBrowserProfiles = await sizeOf(path.join(root, 'profiles'));
     const parts = {
       temporary: await this.sumTargets(targets.temporary),
       researchCache: await this.sumTargets(targets.researchCache),
       thumbnails: await this.sumTargets(targets.thumbnails),
       automationWorking: (await sizeOf(path.join(root, 'automation-inputs'))) + (await sizeOf(path.join(root, 'projects'))),
       browserDisposableCache,
-      browserProfilesProtected: Math.max(0, (await sizeOf(path.join(root, 'profiles'))) - browserDisposableCache),
+      browserProfilesProtected: Math.max(0, fullBrowserProfiles - browserDisposableCache),
+      browserTotalProtected: fullBrowserProfiles,
       logs: await this.sumTargets(targets.logs),
       publishedProjectCache: await this.sumTargets(targets.publishedCache),
+      buildArtifacts: await this.sumTargets(targets.buildArtifacts),
       researchDatabase: (await sizeOf(path.join(root, 'research', 'research.json'))) + (await sizeOf(path.join(root, 'research', 'research.json.bak'))),
-      appState: await this.sumTargets([
-        path.join(root, 'automation-list.json'), path.join(root, 'automation-list.json.bak'), path.join(root, 'connections.bin'), path.join(root, 'thread-state.json'), this.settingsFile()
-      ])
+      appState: await this.sumTargets([path.join(root, 'automation-list.json'), path.join(root, 'automation-list.json.bak'), path.join(root, 'connections.bin'), path.join(root, 'thread-state.json'), this.settingsFile()])
     };
     parts.total = Object.values(parts).reduce((sum, bytes) => sum + Number(bytes || 0), 0);
-    return { ...parts, settings: this.withSchedule(), busy: this.isBusy() };
+    return { ...parts, settings: this.withSchedule(), busy: this.isBusy(), browserCleanupProtected: true };
   }
 
   async sumTargets(targets) { let total = 0; for (const item of unique(targets || [])) total += await sizeOf(item); return total; }
-
   pathProtected(target, protectedRefs) {
     const resolved = path.resolve(target);
-    return protectedRefs.some((ref) => {
-      const p = path.resolve(ref);
-      return p === resolved || p.startsWith(`${resolved}${path.sep}`) || resolved.startsWith(`${p}${path.sep}`);
-    });
+    return protectedRefs.some((ref) => { const p = path.resolve(ref); return p === resolved || p.startsWith(`${resolved}${path.sep}`) || resolved.startsWith(`${p}${path.sep}`); });
   }
-
-  rememberFailure(target, result) {
-    result.failed += 1;
-    if (result.failedPaths.length < 12) result.failedPaths.push(target);
-  }
+  rememberFailure(target, result) { result.failed += 1; if (result.failedPaths.length < 12) result.failedPaths.push(target); }
 
   async removeDisposableTarget(target, protectedRefs, result) {
     if (this.pathProtected(target, protectedRefs)) { result.protectedSkipped += 1; return; }
     const bytes = await sizeOf(target);
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        await fsp.rm(target, { recursive: true, force: true, maxRetries: 2, retryDelay: 80 });
-        result.filesRemoved += 1;
-        result.bytesRecovered += bytes;
-        return;
-      } catch {
-        if (attempt < 2) await wait(120 * (attempt + 1));
-      }
+      try { await fsp.rm(target, { recursive: true, force: true, maxRetries: 2, retryDelay: 80 }); result.filesRemoved += 1; result.bytesRecovered += bytes; return; }
+      catch { if (attempt < 2) await wait(120 * (attempt + 1)); }
     }
-
-    // Chromium can lock one file while leaving the rest of a cache directory
-    // removable. Fall back to clearing children individually so one lock does
-    // not make the whole cache cleanup appear to do nothing.
     let stat = null;
     try { stat = await fsp.stat(target); } catch { return; }
-    if (stat.isDirectory()) {
-      await this.clearDirectoryContents(target, protectedRefs, result);
-      try { await fsp.rmdir(target); } catch {}
-      return;
-    }
+    if (stat.isDirectory()) { await this.clearDirectoryContents(target, protectedRefs, result); try { await fsp.rmdir(target); } catch {} return; }
     this.rememberFailure(target, result);
   }
 
   async clearDirectoryContents(dir, protectedRefs, result) {
     if (!(await exists(dir))) return;
     let entries = [];
-    try { entries = await fsp.readdir(dir, { withFileTypes: true }); }
-    catch { this.rememberFailure(dir, result); return; }
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { this.rememberFailure(dir, result); return; }
     for (const entry of entries) await this.removeDisposableTarget(path.join(dir, entry.name), protectedRefs, result);
   }
 
   async cleanup(categories = DEFAULT_CATEGORIES, options = {}) {
-    const chosen = [...new Set(categories || [])];
+    const requested = [...new Set(categories || [])];
+    const chosen = sanitizeCategories(requested, []);
     const result = { filesRemoved: 0, bytesRecovered: 0, protectedSkipped: 0, failed: 0, failedPaths: [], skippedCategories: [], ranAt: new Date().toISOString() };
+    for (const category of requested) if (!SAFE_CATEGORIES.includes(category)) result.skippedCategories.push(`${category} (protected / not a cleanup target)`);
     const targets = this.cacheTargets();
     const protectedRefs = this.protectedReferences();
-    const busy = this.isBusy();
-
     for (const category of chosen) {
-      if (!targets[category]) continue;
-      if (category === 'browserCache' && busy) { result.skippedCategories.push('browserCache (automation currently active)'); continue; }
       if (category === 'publishedCache' && !options.confirmPublishedCache) { result.skippedCategories.push('publishedCache (confirmation required)'); continue; }
-      for (const dir of unique(targets[category])) await this.clearDirectoryContents(dir, protectedRefs, result);
+      for (const dir of unique(targets[category] || [])) await this.clearDirectoryContents(dir, protectedRefs, result);
     }
-
     this.writeSettings({ lastCleanupAt: result.ranAt, lastCleanupRecoveredBytes: result.bytesRecovered, lastCleanupFilesRemoved: result.filesRemoved });
     return { ...result, settings: this.withSchedule() };
   }
