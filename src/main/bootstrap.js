@@ -109,4 +109,5 @@ require('./researchMerchVerificationPatch');
 require('./researchTrademarkFilterPatch');
 require('./researchIpcPatch');
 require('./flyingResearchIpc');
+require('./automateListIpc');
 require('./main');
