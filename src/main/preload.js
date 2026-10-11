@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     start: () => ipcRenderer.invoke('automate-list:start'),
     pause: () => ipcRenderer.invoke('automate-list:pause'),
     stop: () => ipcRenderer.invoke('automate-list:stop'),
+    retrySkipped: () => ipcRenderer.invoke('automate-list:retry-skipped'),
     clear: () => ipcRenderer.invoke('automate-list:clear')
   },
   research: {
