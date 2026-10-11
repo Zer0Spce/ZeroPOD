@@ -102,6 +102,7 @@ require('./redbubblePublishStateRecoveryPatch');
 require('./redbubbleDailyLimitPatch');
 require('./projectClearPatch');
 require('./automationFullAutoPatch');
+require('./redbubbleUploadLimitPausePatch');
 require('./workflowImageCheckDockPatch');
 require('./workspaceResearchBackupPatch');
 require('./researchPodSourcePatch');
