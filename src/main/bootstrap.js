@@ -99,6 +99,7 @@ require('./redbubbleSkipDescriptionBetaPatch');
 require('./redbubbleReviewCapturePatch');
 require('./redbubbleAgreementReliabilityPatch');
 require('./redbubblePublishStateRecoveryPatch');
+require('./redbubbleDailyLimitPatch');
 require('./automationFullAutoPatch');
 require('./workflowImageCheckDockPatch');
 require('./workspaceResearchBackupPatch');
