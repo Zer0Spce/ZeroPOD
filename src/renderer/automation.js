@@ -2,7 +2,7 @@ let automationPoll = null;
 let automationEnsuringFirstRow = false;
 const automationSeenStates = new Map();
 const automationLogLines = [];
-const AUTOMATION_MAX_ROWS = 15;
+const AUTOMATION_MAX_ROWS = 30;
 
 function automationEscape(value) {
   return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -45,13 +45,13 @@ function buildAutomationListV2() {
     <div class="az-shell">
       <div class="eyebrow">FULL AUTO BATCH · BETA</div>
       <div class="az-head">
-        <div><h2>Automation List</h2><p class="muted">Queue up to 15 image + source URL jobs. ZeroPOD runs the proven workflow from generation through verified Redbubble publish, one row at a time.</p></div>
+        <div><h2>Automation</h2><p class="muted">Queue up to 30 image + source URL jobs. ZeroPOD runs the proven workflow from generation through verified Redbubble publish, one row at a time.</p></div>
         <div class="az-head-actions"><span class="az-beta">AUTOMATE EVERYTHING · BETA</span><span id="automationStateV2" class="az-state">Stopped</span></div>
       </div>
       <div class="az-warning">Beta full automation skips both manual approval checks and publishes automatically. ZeroPOD cannot guarantee Redbubble placement, listing accuracy, or the final product result. Published product previews are shown below so you can review what went live.</div>
 
       <div class="az-panel">
-        <div class="heading-row"><div><h3>Jobs</h3><div class="last-seen">Runs strictly from row 1 → row 15. Add only the rows you need.</div></div><span id="automationRowCounter" class="last-seen">0 / 15</span></div>
+        <div class="heading-row"><div><h3>Jobs</h3><div class="last-seen">Runs strictly from row 1 → row 30. Add only the rows you need.</div></div><span id="automationRowCounter" class="last-seen">0 / 30</span></div>
         <div id="automationRowsV2" class="az-rows"></div>
         <div class="az-add-wrap"><button id="automationAddRowV2" class="az-add" title="Add another job">+</button></div>
         <div id="automationSummaryV2" class="az-summary"></div>
