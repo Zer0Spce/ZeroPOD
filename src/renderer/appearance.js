@@ -1,84 +1,89 @@
-const APPEARANCE_KEY = 'zeropod.appearance';
-const media = window.matchMedia('(prefers-color-scheme: light)');
+(() => {
+  if (window.__zeroPODAppearanceInitialized) return;
+  window.__zeroPODAppearanceInitialized = true;
 
-function getPreference() {
-  return localStorage.getItem(APPEARANCE_KEY) || 'system';
-}
+  const APPEARANCE_KEY = 'zeropod.appearance';
+  const media = window.matchMedia('(prefers-color-scheme: light)');
 
-function resolveTheme(preference) {
-  if (preference === 'light' || preference === 'dark') return preference;
-  return media.matches ? 'light' : 'dark';
-}
-
-function applyAppearance(preference = getPreference()) {
-  const resolved = resolveTheme(preference);
-  document.documentElement.dataset.theme = resolved;
-  document.documentElement.dataset.appearance = preference;
-  document.querySelectorAll('[data-appearance-option]').forEach((button) => {
-    button.classList.toggle('active-filter', button.dataset.appearanceOption === preference);
-  });
-  const label = document.getElementById('appearanceStatus');
-  if (label) label.textContent = preference === 'system' ? `System · currently ${resolved}` : preference[0].toUpperCase() + preference.slice(1);
-}
-
-function setAppearance(preference) {
-  if (!['system', 'light', 'dark'].includes(preference)) return;
-  localStorage.setItem(APPEARANCE_KEY, preference);
-  applyAppearance(preference);
-}
-
-function ensureAppearanceSettings() {
-  const settings = document.getElementById('settings');
-  if (!settings || document.getElementById('appearancePanel')) return;
-  const panel = document.createElement('div');
-  panel.id = 'appearancePanel';
-  panel.className = 'panel';
-  panel.innerHTML = `
-    <div class="heading-row"><div><h3>Appearance</h3><p class="muted">Choose how ZeroPOD looks. System follows your Windows light/dark preference automatically.</p></div><span id="appearanceStatus" class="stage-badge"></span></div>
-    <div class="button-row appearance-options">
-      <button data-appearance-option="system">System</button>
-      <button data-appearance-option="dark">Dark</button>
-      <button data-appearance-option="light">Light</button>
-    </div>`;
-  const anchor = settings.querySelector('.empty');
-  if (anchor) settings.insertBefore(panel, anchor);
-  else settings.appendChild(panel);
-  panel.querySelectorAll('[data-appearance-option]').forEach((button) => button.addEventListener('click', () => setAppearance(button.dataset.appearanceOption)));
-  applyAppearance();
-}
-
-function loadZeroPODFeatureScript(src, id, onload) {
-  const existing = document.getElementById(id);
-  if (existing) {
-    if (onload && existing.dataset.loaded === '1') onload();
-    else if (onload) existing.addEventListener('load', onload, { once: true });
-    return existing;
+  function getPreference() {
+    return localStorage.getItem(APPEARANCE_KEY) || 'system';
   }
-  const script = document.createElement('script');
-  script.id = id;
-  script.src = src;
-  script.defer = true;
-  script.addEventListener('load', () => {
-    script.dataset.loaded = '1';
-    if (onload) onload();
-  }, { once: true });
-  document.body.appendChild(script);
-  return script;
-}
 
-function loadResearchFeatures() {
-  try {
-    if (typeof serviceOrder !== 'undefined' && Array.isArray(serviceOrder) && !serviceOrder.includes('amazonResearch')) serviceOrder.push('amazonResearch');
-    if (typeof renderConnections === 'function') Promise.resolve(renderConnections()).catch(() => {});
-  } catch {}
-  loadZeroPODFeatureScript('research.js', 'researchFeatureScript', () => {
-    loadZeroPODFeatureScript('researchUxPatch.js', 'researchUxPatchScript');
-  });
-  loadZeroPODFeatureScript('storageSettings.js', 'storageSettingsFeatureScript');
-}
+  function resolveTheme(preference) {
+    if (preference === 'light' || preference === 'dark') return preference;
+    return media.matches ? 'light' : 'dark';
+  }
 
-media.addEventListener('change', () => { if (getPreference() === 'system') applyAppearance('system'); });
-applyAppearance();
-ensureAppearanceSettings();
-if (document.readyState === 'complete') loadResearchFeatures();
-else window.addEventListener('load', loadResearchFeatures, { once: true });
+  function applyAppearance(preference = getPreference()) {
+    const resolved = resolveTheme(preference);
+    document.documentElement.dataset.theme = resolved;
+    document.documentElement.dataset.appearance = preference;
+    document.querySelectorAll('[data-appearance-option]').forEach((button) => {
+      button.classList.toggle('active-filter', button.dataset.appearanceOption === preference);
+    });
+    const label = document.getElementById('appearanceStatus');
+    if (label) label.textContent = preference === 'system' ? `System · currently ${resolved}` : preference[0].toUpperCase() + preference.slice(1);
+  }
+
+  function setAppearance(preference) {
+    if (!['system', 'light', 'dark'].includes(preference)) return;
+    localStorage.setItem(APPEARANCE_KEY, preference);
+    applyAppearance(preference);
+  }
+
+  function ensureAppearanceSettings() {
+    const settings = document.getElementById('settings');
+    if (!settings || document.getElementById('appearancePanel')) return;
+    const panel = document.createElement('div');
+    panel.id = 'appearancePanel';
+    panel.className = 'panel';
+    panel.innerHTML = `
+      <div class="heading-row"><div><h3>Appearance</h3><p class="muted">Choose how ZeroPOD looks. System follows your Windows light/dark preference automatically.</p></div><span id="appearanceStatus" class="stage-badge"></span></div>
+      <div class="button-row appearance-options">
+        <button data-appearance-option="system">System</button>
+        <button data-appearance-option="dark">Dark</button>
+        <button data-appearance-option="light">Light</button>
+      </div>`;
+    const anchor = settings.querySelector('.empty');
+    if (anchor) settings.insertBefore(panel, anchor);
+    else settings.appendChild(panel);
+    panel.querySelectorAll('[data-appearance-option]').forEach((button) => button.addEventListener('click', () => setAppearance(button.dataset.appearanceOption)));
+    applyAppearance();
+  }
+
+  function loadZeroPODFeatureScript(src, id, onload) {
+    const existing = document.getElementById(id);
+    if (existing) {
+      if (onload && existing.dataset.loaded === '1') onload();
+      else if (onload) existing.addEventListener('load', onload, { once: true });
+      return existing;
+    }
+    const script = document.createElement('script');
+    script.id = id;
+    script.src = src;
+    script.defer = true;
+    script.addEventListener('load', () => {
+      script.dataset.loaded = '1';
+      if (onload) onload();
+    }, { once: true });
+    document.body.appendChild(script);
+    return script;
+  }
+
+  function loadResearchFeatures() {
+    try {
+      if (typeof serviceOrder !== 'undefined' && Array.isArray(serviceOrder) && !serviceOrder.includes('amazonResearch')) serviceOrder.push('amazonResearch');
+      if (typeof renderConnections === 'function') Promise.resolve(renderConnections()).catch(() => {});
+    } catch {}
+    loadZeroPODFeatureScript('research.js', 'researchFeatureScript', () => {
+      loadZeroPODFeatureScript('researchUxPatch.js', 'researchUxPatchScript');
+    });
+    loadZeroPODFeatureScript('storageSettings.js', 'storageSettingsFeatureScript');
+  }
+
+  media.addEventListener('change', () => { if (getPreference() === 'system') applyAppearance('system'); });
+  applyAppearance();
+  ensureAppearanceSettings();
+  if (document.readyState === 'complete') loadResearchFeatures();
+  else window.addEventListener('load', loadResearchFeatures, { once: true });
+})();
