@@ -150,6 +150,18 @@ function loadResearchFeatures() {
   // Research / Research BETA is intentionally hidden for now. Keep its files in
   // the codebase so we can fix and re-enable it later without affecting Flying Research BETA.
   hideResearchBeta();
+
+  // Automate List uses the existing Amazon Research browser profile to retrieve
+  // the product image from each Amazon link. Keep this connection visible even
+  // while the separate Research BETA tab remains hidden.
+  try {
+    if (typeof serviceOrder !== 'undefined' && Array.isArray(serviceOrder) && !serviceOrder.includes('amazonResearch')) {
+      serviceOrder.push('amazonResearch');
+      if (typeof renderConnections === 'function') Promise.resolve(renderConnections()).catch(() => {});
+    }
+  } catch {}
+
+  loadZeroPODFeatureScript('automateList.js', 'automateListFeatureScript');
   loadZeroPODFeatureScript('storageSettings.js', 'storageSettingsFeatureScript');
   loadZeroPODFeatureScript('redbubbleLimit.js', 'redbubbleLimitFeatureScript');
   setTimeout(() => {
