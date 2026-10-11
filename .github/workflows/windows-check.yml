@@ -9,6 +9,7 @@ on:
     branches:
       - main
       - feature/flying-research-beta
+      - feature/automate-list-file-import
 
 jobs:
   check:
