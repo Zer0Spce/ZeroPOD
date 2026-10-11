@@ -43,10 +43,6 @@ async function detectAndThrowLimit(page) {
   throw makeLimitError(detected);
 }
 
-// Redbubble can enforce the upload cap as soon as Copy Settings opens the
-// /duplicate page, before ZeroPOD ever reaches the final Publish button.
-// Detect that page while we are waiting for the copied-work editor so a real
-// upload-limit response is never misreported as a settings-circle failure.
 RedbubbleController.prototype.openFirstCopySettings = async function openFirstCopySettingsWithLimitDetection(page) {
   await detectAndThrowLimit(page);
   await this.clickFirstSettingsGear(page);
@@ -177,9 +173,24 @@ function pauseAutomationForLimit(controller, currentRow, message) {
   });
 }
 
-// automationFullAutoPatch replaces processRow, so this file must be required
-// after it. Convert the special Redbubble limit signal into a queue pause rather
-// than the generic runLoop failure path.
+const originalStart = AutomationQueueController.prototype.start;
+AutomationQueueController.prototype.start = function startWithPreviousRedbubbleFailureProbe() {
+  const data = this.store.read();
+  const hasRunnable = data.rows.some((row) => row.enabled && ['pending', 'ready'].includes(row.status));
+  if (!hasRunnable) {
+    const probeRow = data.rows.find((row) => row.enabled && looksLikePriorLimitMisclassification(row));
+    if (probeRow) {
+      this.store.updateRow(probeRow.id, {
+        status: 'ready',
+        step: 'Retrying Redbubble to verify previous failure',
+        checkpoint: 'redbubble-retry-probe',
+        lastError: null
+      });
+    }
+  }
+  return originalStart.call(this);
+};
+
 const originalProcessRow = AutomationQueueController.prototype.processRow;
 AutomationQueueController.prototype.processRow = async function processRowWithUploadLimitPause(row) {
   try {
