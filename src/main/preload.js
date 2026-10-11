@@ -69,6 +69,19 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     addToAutomation: (keys) => ipcRenderer.invoke('research:add-to-automation', keys),
     openAmazon: (url) => ipcRenderer.invoke('research:open-amazon', url)
   },
+  flyingResearch: {
+    options: () => ipcRenderer.invoke('flying:options'),
+    list: (filters) => ipcRenderer.invoke('flying:list', filters),
+    save: (payload) => ipcRenderer.invoke('flying:save', payload),
+    login: () => ipcRenderer.invoke('flying:login'),
+    test: () => ipcRenderer.invoke('flying:test'),
+    open: (tool) => ipcRenderer.invoke('flying:open', tool),
+    search: (payload) => ipcRenderer.invoke('flying:search', payload),
+    capture: () => ipcRenderer.invoke('flying:capture'),
+    workflow: (key) => ipcRenderer.invoke('flying:workflow', key),
+    addToAutomation: (payload) => ipcRenderer.invoke('flying:automation', payload),
+    openAmazon: (key) => ipcRenderer.invoke('flying:amazon', key)
+  },
   storage: {
     usage: () => ipcRenderer.invoke('storage:usage'),
     settings: () => ipcRenderer.invoke('storage:settings'),
