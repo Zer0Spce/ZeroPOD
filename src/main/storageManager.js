@@ -164,15 +164,14 @@ class StorageManager {
       automationWorking: (await sizeOf(path.join(root, 'automation-inputs'))) + (await sizeOf(path.join(root, 'projects'))),
       browserDisposableCache,
       browserProfilesProtected: Math.max(0, fullBrowserProfiles - browserDisposableCache),
-      browserTotalProtected: fullBrowserProfiles,
       logs: await this.sumTargets(targets.logs),
       publishedProjectCache: await this.sumTargets(targets.publishedCache),
       buildArtifacts: await this.sumTargets(targets.buildArtifacts),
       researchDatabase: (await sizeOf(path.join(root, 'research', 'research.json'))) + (await sizeOf(path.join(root, 'research', 'research.json.bak'))),
       appState: await this.sumTargets([path.join(root, 'automation-list.json'), path.join(root, 'automation-list.json.bak'), path.join(root, 'connections.bin'), path.join(root, 'thread-state.json'), this.settingsFile()])
     };
-    parts.total = Object.values(parts).reduce((sum, bytes) => sum + Number(bytes || 0), 0);
-    return { ...parts, settings: this.withSchedule(), busy: this.isBusy(), browserCleanupProtected: true };
+    const total = Object.values(parts).reduce((sum, bytes) => sum + Number(bytes || 0), 0);
+    return { ...parts, browserTotalProtected: fullBrowserProfiles, total, settings: this.withSchedule(), busy: this.isBusy(), browserCleanupProtected: true };
   }
 
   async sumTargets(targets) { let total = 0; for (const item of unique(targets || [])) total += await sizeOf(item); return total; }
