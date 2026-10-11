@@ -37,7 +37,7 @@
         <div class="heading-row">
           <div>
             <h2>Automate List</h2>
-            <p class="muted">Upload an Excel or text list of Amazon POD links. ZeroPOD checks each link, captures the product shirt image, and sends the image + original Amazon link into Automation. Dead or invalid links are skipped automatically.</p>
+            <p class="muted">Upload an Excel or text list of up to 30 Amazon POD links. ZeroPOD checks each link, captures the product shirt image, and sends the image + original Amazon link into Automation. Dead or invalid links are skipped automatically.</p>
           </div>
           <div id="automateListState" class="queue-state">Stopped</div>
         </div>
@@ -53,8 +53,8 @@
           <div id="automateListSource" class="automate-list-source">No list file loaded yet.</div>
           <div id="automateListSummary" class="automate-list-summary"></div>
           <div class="automate-list-capacity">
-            <div><strong>Automation capacity</strong><div class="muted">Automation holds up to 15 live rows. If it fills up, Automate List waits instead of dropping the rest of your file, then continues automatically after space is cleared.</div></div>
-            <strong id="automateListAutomationSpace">0 / 15 rows used</strong>
+            <div><strong>Automation capacity</strong><div class="muted">Automation holds up to 30 live rows. If it fills up, Automate List waits instead of dropping the rest of your file, then continues automatically after space is cleared.</div></div>
+            <strong id="automateListAutomationSpace">0 / 30 rows used</strong>
           </div>
         </div>
         <div class="automation-table-wrap">
@@ -127,7 +127,7 @@
     }
     if (source) source.textContent = snapshot.sourceFile || 'No list file loaded yet.';
     if (message) message.textContent = snapshot.lastMessage || 'Upload a list containing Amazon product links.';
-    if (automationSpace) automationSpace.textContent = `${snapshot.automation?.used || 0} / ${snapshot.automation?.limit || 15} rows used`;
+    if (automationSpace) automationSpace.textContent = `${snapshot.automation?.used || 0} / ${snapshot.automation?.limit || 30} rows used`;
 
     if (summary) {
       const stats = [
