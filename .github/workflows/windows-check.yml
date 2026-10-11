@@ -10,6 +10,7 @@ on:
       - main
       - feature/flying-research-beta
       - feature/automate-list-file-import
+      - feature/redbubble-limit-auto-pause
 
 jobs:
   check:
@@ -27,7 +28,9 @@ jobs:
         run: npm install
 
       - name: Syntax and release smoke checks
-        run: npm run check
+        run: |
+          node --check src/main/redbubbleUploadLimitPausePatch.js
+          npm run check
 
       - name: Build unpacked Windows package
         run: npm run package:win
