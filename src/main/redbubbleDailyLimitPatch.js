@@ -62,8 +62,7 @@ function getUsage(projects) {
     message: state.message,
     url: state.url,
     source: state.blocked ? 'redbubble-page' : 'none',
-    // These old fields remain for renderer compatibility, but they no longer
-    // represent an enforcement gate.
+    // Legacy fields retained for compatibility. They no longer enforce anything.
     remaining: null,
     nextSlotAt: null
   };
@@ -92,11 +91,12 @@ async function detectUploadLimitPage(page) {
 }
 
 function markLimitDetected(info = {}) {
+  const previous = readLimitState();
   return writeLimitState({
     blocked: true,
-    detectedAt: new Date().toISOString(),
+    detectedAt: previous.blocked && previous.detectedAt ? previous.detectedAt : new Date().toISOString(),
     message: info.message || "Redbubble reported that you've exceeded your upload limit.",
-    url: info.url || null
+    url: info.url || previous.url || null
   });
 }
 
@@ -113,9 +113,9 @@ RedbubbleController.prototype.getDailyUploadUsage = function getDailyUploadUsage
   return getUsage(this.projects);
 };
 
-// Replace the publish verifier with the same successful-publish checks used by
-// the controller, but give the real Redbubble upload-limit page priority. This
-// prevents a URL change to the limit page from being mistaken for success.
+// Use the controller's normal successful-publish signals, but give the real
+// Redbubble upload-limit page priority. A redirect to that error page must never
+// be mistaken for a successful publish.
 RedbubbleController.prototype.detectPublishSuccess = async function detectPublishSuccessWithLimit(page, beforeUrl) {
   const successText = /successfully published|your work has been published|work published|published successfully|work saved|saved successfully/i;
 
@@ -146,26 +146,22 @@ RedbubbleController.prototype.detectPublishSuccess = async function detectPublis
 
 const originalPublish = RedbubbleController.prototype.publish;
 RedbubbleController.prototype.publish = async function publishWithRealLimitDetection(projectId) {
-  const convertToLimitError = async () => {
+  const convertVisibleLimitToError = async () => {
     let page = null;
     try {
       ({ page } = await this.sessions.ensureService('redbubble'));
     } catch {}
 
     const detected = await detectUploadLimitPage(page).catch(() => ({ detected: false }));
-    const state = readLimitState();
-    if (!detected.detected && !state.blocked) return null;
+    if (!detected.detected) return null;
 
-    const info = detected.detected
-      ? { message: detected.message, url: detected.url }
-      : { message: state.message, url: state.url };
+    const info = { message: detected.message, url: detected.url };
     markLimitDetected(info);
 
     const current = this.projects.read(projectId);
     this.projects.update(projectId, {
-      // A Redbubble upload-limit page means the submission was NOT accepted.
-      // Return to review so a later retry clicks Save Work again instead of
-      // treating the rejected attempt as an unresolved publish.
+      // The limit page means Redbubble rejected this submission. Return to
+      // review so a later retry clicks Save Work again after the limit resets.
       status: 'redbubble-review',
       lastAutomationError: {
         service: 'Redbubble',
@@ -199,18 +195,20 @@ RedbubbleController.prototype.publish = async function publishWithRealLimitDetec
       this.projects.update(projectId, {
         redbubble: {
           ...(published.redbubble || {}),
-          uploadLimitClearedAt: previous.blocked ? new Date().toISOString() : (published.redbubble?.uploadLimitClearedAt || null)
+          uploadLimitClearedAt: previous.blocked
+            ? new Date().toISOString()
+            : (published.redbubble?.uploadLimitClearedAt || null)
         }
       });
       return result;
     }
 
-    const limitError = await convertToLimitError();
+    const limitError = await convertVisibleLimitToError();
     if (limitError) throw limitError;
     return result;
   } catch (error) {
     if (error?.code === 'REDBUBBLE_UPLOAD_LIMIT_DETECTED') throw error;
-    const limitError = await convertToLimitError();
+    const limitError = await convertVisibleLimitToError();
     if (limitError) throw limitError;
     throw error;
   }
