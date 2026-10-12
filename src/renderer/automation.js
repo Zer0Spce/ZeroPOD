@@ -1,5 +1,4 @@
 let automationPoll = null;
-let automationEnsuringFirstRow = false;
 const automationSeenStates = new Map();
 const automationLogLines = [];
 const AUTOMATION_MAX_ROWS = 30;
@@ -51,7 +50,7 @@ function buildAutomationListV2() {
       <div class="az-warning">Beta full automation skips both manual approval checks and publishes automatically. ZeroPOD cannot guarantee Redbubble placement, listing accuracy, or the final product result. Published product previews are shown below so you can review what went live.</div>
 
       <div class="az-panel">
-        <div class="heading-row"><div><h3>Jobs</h3><div class="last-seen">Runs strictly from row 1 → row 30. Add only the rows you need.</div></div><span id="automationRowCounter" class="last-seen">0 / 30</span></div>
+        <div class="heading-row"><div><h3>Jobs</h3><div class="last-seen">Starts empty. Press + to add only the rows you need, up to 30.</div></div><span id="automationRowCounter" class="last-seen">0 / 30</span></div>
         <div id="automationRowsV2" class="az-rows"></div>
         <div class="az-add-wrap"><button id="automationAddRowV2" class="az-add" title="Add another job">+</button></div>
         <div id="automationSummaryV2" class="az-summary"></div>
@@ -68,7 +67,7 @@ function buildAutomationListV2() {
   document.getElementById('automationStartV2').addEventListener('click', startAutomationV2);
   document.getElementById('automationPauseV2').addEventListener('click', async () => { await window.zeroPOD.automation.pause(); automationLog('Queue paused.', 'warn'); await refreshAutomationListV2(); });
   document.getElementById('automationStopV2').addEventListener('click', async () => { await window.zeroPOD.automation.stop(); automationLog('Queue stopped.', 'warn'); await refreshAutomationListV2(); });
-  document.getElementById('automationClearPublishedV2').addEventListener('click', async () => { await window.zeroPOD.automation.clearCompleted(); automationLog('Published rows cleared.'); await ensureFirstAutomationRow(); await refreshAutomationListV2(); });
+  document.getElementById('automationClearPublishedV2').addEventListener('click', async () => { await window.zeroPOD.automation.clearCompleted(); automationLog('Published rows cleared.'); await refreshAutomationListV2(); });
   document.getElementById('automationClearLogV2').addEventListener('click', () => { automationLogLines.length = 0; document.getElementById('automationLiveLog').innerHTML = ''; });
 }
 
@@ -114,23 +113,24 @@ function captureAutomationChanges(snapshot) {
   });
 }
 
-async function ensureFirstAutomationRow() {
-  if (automationEnsuringFirstRow) return;
-  automationEnsuringFirstRow = true;
-  try {
-    const snapshot = await window.zeroPOD.automation.list();
-    if (!snapshot.rows.length) await window.zeroPOD.automation.add([{ referenceImage: '', amazonLink: '', notes: '' }]);
-  } finally { automationEnsuringFirstRow = false; }
+async function removeEmptyAutomationPlaceholders() {
+  const snapshot = await window.zeroPOD.automation.list();
+  const emptyRows = snapshot.rows.filter((row) => {
+    if (row.projectId || row.status === 'running' || row.status === 'completed') return false;
+    return !String(row.referenceImage || '').trim()
+      && !String(row.amazonLink || '').trim()
+      && !String(row.notes || '').trim();
+  });
+  for (const row of emptyRows) {
+    await window.zeroPOD.automation.remove(row.id);
+    automationSeenStates.delete(row.id);
+  }
 }
 
 async function refreshAutomationListV2() {
   const root = document.getElementById('automationRowsV2');
   if (!root || !window.zeroPOD?.automation) return;
-  let snapshot = await window.zeroPOD.automation.list();
-  if (!snapshot.rows.length && !automationEnsuringFirstRow) {
-    await ensureFirstAutomationRow();
-    snapshot = await window.zeroPOD.automation.list();
-  }
+  const snapshot = await window.zeroPOD.automation.list();
 
   captureAutomationChanges(snapshot);
   const state = document.getElementById('automationStateV2');
@@ -148,7 +148,7 @@ async function refreshAutomationListV2() {
       <div class="az-file"><button class="az-browse" ${locked ? 'disabled' : ''}>Browse Image</button><input class="az-image" value="${automationEscape(row.referenceImage || '')}" readonly placeholder="Choose image…"></div>
       <input class="az-url" type="url" value="${automationEscape(row.amazonLink || '')}" ${locked ? 'disabled' : ''} placeholder="Amazon / source URL">
       <span class="az-status ${visual.cls}">${visual.label}</span>
-      <button class="az-remove danger" ${locked || rows.length <= 1 ? 'disabled' : ''} title="Remove row">−</button>
+      <button class="az-remove danger" ${locked ? 'disabled' : ''} title="Remove row">−</button>
       <div class="az-row-step">${automationEscape(row.step || 'Waiting')}</div>
       ${row.lastError ? `<div class="az-row-error">${automationEscape(row.lastError)}</div>` : ''}
     </div>`;
@@ -170,7 +170,6 @@ async function refreshAutomationListV2() {
     rowEl.querySelector('.az-remove').addEventListener('click', async () => {
       await window.zeroPOD.automation.remove(rowId);
       automationSeenStates.delete(rowId);
-      await ensureFirstAutomationRow();
       await refreshAutomationListV2();
     });
     if (row?.status === 'needs-attention') {
@@ -209,7 +208,10 @@ async function addAutomationRowV2() {
 async function startAutomationV2() {
   try {
     const snapshot = await window.zeroPOD.automation.list();
-    if (!snapshot.rows.length) return;
+    if (!snapshot.rows.length) {
+      automationLog('Add at least one job with the + button before starting.', 'warn');
+      return;
+    }
     const incomplete = snapshot.rows.findIndex((row) => !String(row.referenceImage || '').trim() || !String(row.amazonLink || '').trim());
     if (incomplete >= 0) {
       automationLog(`Row ${incomplete + 1} needs both an image and source URL before starting.`, 'error');
@@ -232,7 +234,7 @@ function startAutomationPollingV2() {
 }
 
 buildAutomationListV2();
-ensureFirstAutomationRow().then(refreshAutomationListV2).catch((error) => automationLog(error.message || error, 'error'));
+removeEmptyAutomationPlaceholders().then(refreshAutomationListV2).catch((error) => automationLog(error.message || error, 'error'));
 const automationNavV2 = document.querySelector('.nav[data-view="automation"]');
 if (automationNavV2) automationNavV2.addEventListener('click', () => refreshAutomationListV2().catch(() => {}));
 startAutomationPollingV2();
