@@ -3,43 +3,55 @@ const { readFlyingListCards } = require('./flyingResearchDom');
 
 const paginationState = new WeakMap();
 
-function readPaginationState() {
+function paginationRootAndActive() {
   const visible = (element) => {
     if (!element || element.closest?.('[hidden],[aria-hidden="true"]')) return false;
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) !== 0;
   };
-  const disabled = (element) => {
-    if (!element) return true;
-    const parent = element.closest?.('.disabled,[aria-disabled="true"]');
-    return Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true' || parent);
-  };
   const roots = [...document.querySelectorAll('ngb-pagination,.pagination,[class*="pagination"],nav[aria-label*="pagination" i]')].filter(visible);
   const root = roots[0] || document;
   const active = [...root.querySelectorAll('.active,[aria-current="page"]')].find(visible) || null;
-  const activeText = String(active?.textContent || '').trim();
+  const activeItem = active?.closest?.('li,.page-item') || active;
+  return { visible, root, active, activeItem };
+}
+
+function isDisabledPaginationControl(element) {
+  if (!element) return true;
+  const parent = element.closest?.('.disabled,[aria-disabled="true"]');
+  return Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true' || parent);
+}
+
+function findNextPaginationControl(root, activeItem, visible) {
+  const explicit = [
+    ...root.querySelectorAll('a[rel="next"],button[rel="next"],[aria-label*="next" i],[title*="next" i]')
+  ].find((el) => visible(el) && !isDisabledPaginationControl(el));
+  if (explicit) return explicit;
+
+  const sibling = activeItem?.nextElementSibling || null;
+  if (sibling) {
+    const candidate = sibling.matches?.('a,button') ? sibling : sibling.querySelector?.('a,button');
+    if (visible(candidate) && !isDisabledPaginationControl(candidate)) return candidate;
+  }
+
+  return [...root.querySelectorAll('a,button')].find((el) => {
+    if (!visible(el) || isDisabledPaginationControl(el)) return false;
+    const text = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.textContent || ''}`.replace(/\s+/g, ' ').trim();
+    return /^(?:next|next page|load more|show more|›|»|→)$/i.test(text);
+  }) || null;
+}
+
+function readPaginationState() {
+  const { visible, root, active, activeItem } = paginationRootAndActive();
+  const activeText = String(active?.textContent || activeItem?.textContent || '').trim();
   const currentPage = Number(activeText.match(/\d+/)?.[0]) || null;
   const numeric = [...root.querySelectorAll('a,button')]
     .filter(visible)
     .map((el) => Number(String(el.textContent || '').trim()))
     .filter((value) => Number.isFinite(value) && value > 0);
   const totalPages = numeric.length ? Math.max(...numeric) : null;
-  const explicit = [
-    ...root.querySelectorAll('a[rel="next"],button[rel="next"],[aria-label*="next" i],[title*="next" i]')
-  ].find((el) => visible(el) && !disabled(el));
-  let next = explicit || null;
-  if (!next && active?.parentElement?.nextElementSibling) {
-    const candidate = active.parentElement.nextElementSibling.querySelector?.('a,button') || active.parentElement.nextElementSibling;
-    if (visible(candidate) && !disabled(candidate)) next = candidate;
-  }
-  if (!next) {
-    next = [...root.querySelectorAll('a,button')].find((el) => {
-      if (!visible(el) || disabled(el)) return false;
-      const text = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.textContent || ''}`.replace(/\s+/g, ' ').trim();
-      return /^(?:next|next page|›|»|→)$/i.test(text);
-    }) || null;
-  }
+  const next = findNextPaginationControl(root, activeItem, visible);
   return {
     currentPage,
     totalPages,
@@ -49,33 +61,8 @@ function readPaginationState() {
 }
 
 function clickNextPageControl() {
-  const visible = (element) => {
-    if (!element || element.closest?.('[hidden],[aria-hidden="true"]')) return false;
-    const style = getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) !== 0;
-  };
-  const disabled = (element) => {
-    if (!element) return true;
-    const parent = element.closest?.('.disabled,[aria-disabled="true"]');
-    return Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true' || parent);
-  };
-  const roots = [...document.querySelectorAll('ngb-pagination,.pagination,[class*="pagination"],nav[aria-label*="pagination" i]')].filter(visible);
-  const root = roots[0] || document;
-  const active = [...root.querySelectorAll('.active,[aria-current="page"]')].find(visible) || null;
-  let next = [...root.querySelectorAll('a[rel="next"],button[rel="next"],[aria-label*="next" i],[title*="next" i]')]
-    .find((el) => visible(el) && !disabled(el)) || null;
-  if (!next && active?.parentElement?.nextElementSibling) {
-    const candidate = active.parentElement.nextElementSibling.querySelector?.('a,button') || active.parentElement.nextElementSibling;
-    if (visible(candidate) && !disabled(candidate)) next = candidate;
-  }
-  if (!next) {
-    next = [...root.querySelectorAll('a,button')].find((el) => {
-      if (!visible(el) || disabled(el)) return false;
-      const text = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.textContent || ''}`.replace(/\s+/g, ' ').trim();
-      return /^(?:next|next page|›|»|→)$/i.test(text);
-    }) || null;
-  }
+  const { visible, root, activeItem } = paginationRootAndActive();
+  const next = findNextPaginationControl(root, activeItem, visible);
   if (!next) return { clicked: false };
   next.scrollIntoView({ block: 'center', inline: 'center' });
   next.click();
