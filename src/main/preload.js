@@ -103,6 +103,9 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     addToAutomation: (payload) => ipcRenderer.invoke('flying:automation', payload),
     openAmazon: (key) => ipcRenderer.invoke('flying:amazon', key)
   },
+  sourceImage: {
+    resolve: (url) => ipcRenderer.invoke('source-image:resolve', { url })
+  },
   storage: {
     usage: () => ipcRenderer.invoke('storage:usage'),
     settings: () => ipcRenderer.invoke('storage:settings'),
