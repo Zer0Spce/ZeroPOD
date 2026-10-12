@@ -98,6 +98,7 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     open: (tool) => ipcRenderer.invoke('flying:open', tool),
     search: (payload) => ipcRenderer.invoke('flying:search', payload),
     capture: () => ipcRenderer.invoke('flying:capture'),
+    nextPage: () => ipcRenderer.invoke('flying:next-page'),
     workflow: (key) => ipcRenderer.invoke('flying:workflow', key),
     addToAutomation: (payload) => ipcRenderer.invoke('flying:automation', payload),
     openAmazon: (key) => ipcRenderer.invoke('flying:amazon', key)
