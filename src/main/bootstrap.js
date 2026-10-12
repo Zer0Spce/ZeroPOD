@@ -128,6 +128,8 @@ require('./spreadshirtJourneyReliabilityPatch');
 require('./spreadshirtUploadReliabilityPatch');
 require('./spreadshirtVideoFlowPatch');
 require('./spreadshirtAlphaIpc');
+require('./spreadshirtMarketplaceRoutePatch');
+require('./spreadshirtCardDetectionPatch');
 require('./spreadshirtAlphaUiPatch');
 require('./automateListReliabilityPatch');
 require('./automateListIpc');
