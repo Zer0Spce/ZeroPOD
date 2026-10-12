@@ -1,28 +1,41 @@
 const { app, BrowserWindow } = require('electron');
+const fs = require('fs');
+const path = require('path');
 
-function installAutomationNewChatScript(window) {
+function rendererScript(name) {
+  return fs.readFileSync(path.join(__dirname, '..', 'renderer', name), 'utf8');
+}
+
+function installZeroPODRendererPatches(window) {
   if (!window?.webContents) return;
 
-  const inject = () => {
+  const inject = async () => {
     const currentUrl = window.webContents.getURL();
     if (!currentUrl || !currentUrl.startsWith('file:')) return;
-    window.webContents.executeJavaScript(`(() => {
-      if (document.querySelector('script[data-zeropod-automation-new-chat]')) return;
-      const script = document.createElement('script');
-      script.src = 'automationNewChat.js';
-      script.dataset.zeropodAutomationNewChat = '1';
-      document.body.appendChild(script);
-    })()`).catch(() => {});
+
+    try {
+      await window.webContents.executeJavaScript(rendererScript('automationNewChat.js'));
+      await window.webContents.executeJavaScript(rendererScript('sourceImageAutofetch.js'));
+    } catch {}
   };
 
   if (window.webContents.isLoadingMainFrame()) window.webContents.once('did-finish-load', inject);
   else inject();
+
+  // One delayed verification handles slow renderer initialization without relying
+  // on a dynamically inserted script tag or relative file URL resolution.
+  setTimeout(() => {
+    if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+    window.webContents.executeJavaScript(`Boolean(document.getElementById('automationNewChatOption'))`)
+      .then((mounted) => { if (!mounted) inject(); })
+      .catch(() => {});
+  }, 2500);
 }
 
-app.on('browser-window-created', (_event, window) => installAutomationNewChatScript(window));
+app.on('browser-window-created', (_event, window) => installZeroPODRendererPatches(window));
 
 app.whenReady().then(() => {
-  for (const window of BrowserWindow.getAllWindows()) installAutomationNewChatScript(window);
+  for (const window of BrowserWindow.getAllWindows()) installZeroPODRendererPatches(window);
 });
 
-module.exports = { installAutomationNewChatScript };
+module.exports = { installZeroPODRendererPatches };
