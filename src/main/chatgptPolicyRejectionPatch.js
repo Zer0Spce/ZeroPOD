@@ -120,18 +120,20 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
       code: 'CHATGPT_POLICY_REJECTED',
       message,
       at,
-      recovery: 'This project was canceled because ChatGPT rejected the generation prompt. Review the reference/prompt before trying a new workflow.'
+      recovery: 'This work was canceled because ChatGPT rejected the generation prompt. Review the reference/prompt before starting a new workflow.'
     };
 
     try {
+      // Use the existing recovery terminal so the proven Workflow polling loop
+      // stops immediately instead of waiting for its normal image timeout.
       this.projects.update(projectId, {
-        status: 'chatgpt-policy-rejected',
+        status: 'chatgpt-recovery-needed',
         automationStep: 'Rejected by ChatGPT policy',
         chatgptError: note
       });
       this.projects.addActivity(projectId, {
         type: 'chatgpt-policy',
-        label: 'ChatGPT rejected the generation prompt; project canceled',
+        label: 'ChatGPT rejected the generation prompt; work canceled',
         details: message,
         at
       });
@@ -144,7 +146,7 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
 
 const previousMapProjectToRow = AutomationQueueController.prototype.mapProjectToRow;
 AutomationQueueController.prototype.mapProjectToRow = function mapProjectToRowWithPolicySkip(project) {
-  if (project?.status === 'chatgpt-policy-rejected') {
+  if (project?.chatgptError?.code === 'CHATGPT_POLICY_REJECTED' || project?.status === 'chatgpt-policy-rejected') {
     return {
       status: 'skipped',
       step: 'Skipped · ChatGPT rejected prompt',
