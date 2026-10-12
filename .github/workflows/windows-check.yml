@@ -12,6 +12,7 @@ on:
       - feature/automate-list-file-import
       - feature/redbubble-limit-auto-pause
       - feature/redbubble-manual-limit-check
+      - feature/auto-png-top-placement
 
 jobs:
   check:
@@ -32,6 +33,7 @@ jobs:
         run: |
           node --check src/main/redbubbleUploadLimitPausePatch.js
           node --check src/main/redbubbleLimitCheckPatch.js
+          node scripts/exportPlacementSmoke.js
           npm run check
 
       - name: Build unpacked Windows package
