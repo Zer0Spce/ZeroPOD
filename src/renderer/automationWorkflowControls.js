@@ -1,5 +1,6 @@
 (() => {
   const seenPolicyProjects = new Set();
+  const seenSkippedRows = new Set();
   let refreshTimer = null;
 
   function addAutomationLog(message, kind = 'warn') {
@@ -10,7 +11,11 @@
     if (!root) return;
     const line = document.createElement('div');
     line.className = `az-log-line az-${kind}`;
-    line.innerHTML = `<span>${new Date().toLocaleTimeString()}</span><b>${String(message || '')}</b>`;
+    const time = document.createElement('span');
+    time.textContent = new Date().toLocaleTimeString();
+    const text = document.createElement('b');
+    text.textContent = String(message || '');
+    line.append(time, text);
     root.appendChild(line);
     root.scrollTop = root.scrollHeight;
   }
@@ -145,17 +150,26 @@
     let snapshot;
     try { snapshot = await window.zeroPOD.automation.list(); } catch { return; }
 
-    for (const row of snapshot.rows || []) {
+    (snapshot.rows || []).forEach((row, index) => {
       const rowEl = root.querySelector(`[data-row-id="${CSS.escape(String(row.id))}"]`);
-      if (!rowEl) continue;
+      if (!rowEl) return;
       const badge = rowEl.querySelector('.az-status');
       if (row.status === 'skipped' && badge) {
         badge.textContent = 'Skipped';
         badge.classList.remove('working', 'published', 'failed', 'ready');
         badge.classList.add('skipped');
         badge.title = row.lastError || row.step || 'Skipped';
+
+        if (!seenSkippedRows.has(row.id)) {
+          seenSkippedRows.add(row.id);
+          const reason = row.lastError || row.step || 'ChatGPT rejected the prompt.';
+          addAutomationLog(`Row ${index + 1}: Skipped · ${reason}`, 'warn');
+        }
       }
-    }
+    });
+
+    const liveIds = new Set((snapshot.rows || []).map((row) => row.id));
+    for (const id of [...seenSkippedRows]) if (!liveIds.has(id)) seenSkippedRows.delete(id);
 
     const summary = document.getElementById('automationSummaryV2');
     if (summary) {
