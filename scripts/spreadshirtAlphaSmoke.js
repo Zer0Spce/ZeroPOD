@@ -13,6 +13,7 @@ const files = [
   'src/main/spreadshirtRegularExportPatch.js',
   'src/main/spreadshirtJourneyReliabilityPatch.js',
   'src/main/spreadshirtUploadReliabilityPatch.js',
+  'src/main/spreadshirtVideoFlowPatch.js',
   'src/main/flyingSpreadshirtPatch.js',
   'src/renderer/spreadshirtAlpha.js',
   'src/renderer/spreadshirtRegularExportUiPatch.js'
@@ -27,6 +28,7 @@ const feature = read('src/main/spreadshirtAlphaFeature.js');
 const standardExport = read('src/main/spreadshirtRegularExportPatch.js');
 const journey = read('src/main/spreadshirtJourneyReliabilityPatch.js');
 const upload = read('src/main/spreadshirtUploadReliabilityPatch.js');
+const videoFlow = read('src/main/spreadshirtVideoFlowPatch.js');
 const renderer = read('src/renderer/spreadshirtAlpha.js');
 const preload = read('src/main/preload.js');
 const bootstrap = read('src/main/bootstrap.js');
@@ -51,12 +53,23 @@ assert(/Visible actions:/.test(journey) && /Visible fields:/.test(journey), 'Spr
 assert(/reviewScreenshotPath/.test(journey), 'Spreadshirt final-review capture is missing.');
 
 assert(/ensureRightsConfirmation/.test(upload), 'Spreadshirt copyright/license checkbox automation is missing.');
-assert(/owner of the copyright/.test(upload) && /license rights/.test(upload), 'Spreadshirt rights confirmation matching is missing.');
-assert(/#listFileInput/.test(upload) && /#hiddenFileInput/.test(upload), 'Spreadshirt current file inputs must be supported.');
 assert(/UPLOAD_ERROR_PATTERN/.test(upload) && /Ooops/.test(upload) && /It didn/.test(upload), 'Spreadshirt upload error detection is missing.');
-assert(/attempt <= 3/.test(upload), 'Spreadshirt upload must retry transient failures.');
-assert(/waitForUploadProgress/.test(upload), 'Spreadshirt must wait for real upload progress before metadata.');
 assert(!/MAX_SPREADSHIRT_DIMENSION|MAX_SPREADSHIRT_BYTES/.test(upload), 'Upload reliability must not reject the user-tested 4500x5400 file.');
+
+assert(/Create New/i.test(videoFlow), 'Recorded Spreadshirt flow must click Create New.');
+assert(/Upload design/i.test(videoFlow), 'Recorded Spreadshirt Upload Design dialog is missing.');
+assert(/Select file/i.test(videoFlow), 'Recorded Spreadshirt Select file action is missing.');
+assert(/waitForEvent\('filechooser'/.test(videoFlow), 'Spreadshirt must prefer the real file chooser like the recorded manual flow.');
+assert(/Upload status/i.test(videoFlow) && /Upload successful/i.test(videoFlow), 'Spreadshirt Upload Status success detection is missing.');
+assert(/clickUploadedDesign/.test(videoFlow), 'Spreadshirt must open the newly uploaded design card after upload.');
+assert(/Design products/i.test(videoFlow), 'Spreadshirt must wait for the Design products editor.');
+assert(/products created/i.test(videoFlow), 'Spreadshirt must wait for product creation before final preparation.');
+assert(/Publish on Spreadshirt/i.test(videoFlow), 'Spreadshirt marketplace toggle handling is missing.');
+assert(/Save and publish/i.test(videoFlow), 'Spreadshirt Save and publish handling is missing.');
+assert(/Well done!/i.test(videoFlow) && /Woohoo/i.test(videoFlow), 'Spreadshirt post-publish confirmation handling is missing.');
+assert(/addActivity/.test(videoFlow), 'Spreadshirt long-running stages must report Activity progress.');
+assert(/attempt <= 2/.test(videoFlow), 'Recorded upload flow should use bounded retries and avoid long nested retry loops.');
+assert(/standard 4500×5400 PNG|regular 4500×5400 PNG/.test(videoFlow), 'Recorded flow must keep the regular 4500x5400 PNG.');
 
 assert(/Spreadshirt <strong class="ss-alpha-mark">\[ALPHA\]<\/strong>/.test(renderer), 'Spreadshirt nav must render bold [ALPHA].');
 assert(/Check 1 · Generated Image/.test(renderer), 'Spreadshirt image approval gate is missing.');
@@ -92,12 +105,13 @@ const flyingIpcIndex = bootstrap.indexOf("require('./flyingResearchIpc')");
 const exportPatchIndex = bootstrap.indexOf("require('./spreadshirtRegularExportPatch')");
 const journeyPatchIndex = bootstrap.indexOf("require('./spreadshirtJourneyReliabilityPatch')");
 const uploadPatchIndex = bootstrap.indexOf("require('./spreadshirtUploadReliabilityPatch')");
+const videoPatchIndex = bootstrap.indexOf("require('./spreadshirtVideoFlowPatch')");
 const ssIpcIndex = bootstrap.indexOf("require('./spreadshirtAlphaIpc')");
 const ssUiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
 const mainIndex = bootstrap.lastIndexOf("require('./main')");
 assert(flyingPatchIndex >= 0 && flyingPatchIndex < flyingIpcIndex, 'Flying Spreadshirt prototype patch must load before Flying Research IPC.');
-assert(exportPatchIndex >= 0 && exportPatchIndex < journeyPatchIndex && journeyPatchIndex < uploadPatchIndex && uploadPatchIndex < ssIpcIndex, 'Spreadshirt export/journey/upload reliability patches must load before Spreadshirt IPC.');
+assert(exportPatchIndex >= 0 && exportPatchIndex < journeyPatchIndex && journeyPatchIndex < uploadPatchIndex && uploadPatchIndex < videoPatchIndex && videoPatchIndex < ssIpcIndex, 'Recorded Spreadshirt flow patch must be the final Spreadshirt runtime override before IPC.');
 assert(ssIpcIndex >= 0 && ssIpcIndex < mainIndex, 'Spreadshirt IPC must load before main.');
 assert(ssUiIndex >= 0 && ssUiIndex < mainIndex, 'Spreadshirt renderer injector must load before main.');
 
-console.log('Spreadshirt Alpha streamlined workflow smoke checks passed.');
+console.log('Spreadshirt Alpha recorded-video workflow smoke checks passed.');
