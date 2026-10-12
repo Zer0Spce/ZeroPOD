@@ -12,6 +12,7 @@ const files = [
   'src/main/spreadshirtAlphaUiPatch.js',
   'src/main/spreadshirtRegularExportPatch.js',
   'src/main/spreadshirtJourneyReliabilityPatch.js',
+  'src/main/spreadshirtUploadReliabilityPatch.js',
   'src/main/flyingSpreadshirtPatch.js',
   'src/renderer/spreadshirtAlpha.js',
   'src/renderer/spreadshirtRegularExportUiPatch.js'
@@ -25,6 +26,7 @@ for (const file of files) {
 const feature = read('src/main/spreadshirtAlphaFeature.js');
 const standardExport = read('src/main/spreadshirtRegularExportPatch.js');
 const journey = read('src/main/spreadshirtJourneyReliabilityPatch.js');
+const upload = read('src/main/spreadshirtUploadReliabilityPatch.js');
 const renderer = read('src/renderer/spreadshirtAlpha.js');
 const preload = read('src/main/preload.js');
 const bootstrap = read('src/main/bootstrap.js');
@@ -40,13 +42,21 @@ assert(/could not verify Spreadshirt success/i.test(feature), 'Publish verificat
 assert(/new ExportController/.test(standardExport), 'Spreadshirt must reuse the standard ZeroPOD ExportController.');
 assert(/standard-zeropod-4500x5400/.test(standardExport), 'Spreadshirt standard 4500x5400 export marker is missing.');
 assert(/info\.width !== 4500 \|\| info\.height !== 5400/.test(standardExport), 'Spreadshirt should expect the normal 4500x5400 ZeroPOD PNG.');
-assert(!/10 MB or smaller/.test(standardExport), 'Spreadshirt standard export patch must not enforce the old 10 MB block.');
+assert(!/MAX_SPREADSHIRT_DIMENSION|10 MB or smaller|spreadshirt-upload\.png/.test(standardExport), 'Spreadshirt must upload the normal 4500x5400 file directly.');
 
 assert(/waitForMetadataEditor/.test(journey), 'Spreadshirt post-upload metadata navigator is missing.');
 assert(/page\.frames\(\)/.test(journey), 'Spreadshirt metadata discovery must inspect frames.');
 assert(/continue to details/i.test(journey) && /edit details/i.test(journey), 'Spreadshirt post-upload journey actions are missing.');
 assert(/Visible actions:/.test(journey) && /Visible fields:/.test(journey), 'Spreadshirt metadata failure diagnostics are missing.');
 assert(/reviewScreenshotPath/.test(journey), 'Spreadshirt final-review capture is missing.');
+
+assert(/ensureRightsConfirmation/.test(upload), 'Spreadshirt copyright/license checkbox automation is missing.');
+assert(/owner of the copyright/.test(upload) && /license rights/.test(upload), 'Spreadshirt rights confirmation matching is missing.');
+assert(/#listFileInput/.test(upload) && /#hiddenFileInput/.test(upload), 'Spreadshirt current file inputs must be supported.');
+assert(/Ooops!?\\s\*Snap/.test(upload) && /It didn/.test(upload), 'Spreadshirt upload error detection is missing.');
+assert(/attempt <= 3/.test(upload), 'Spreadshirt upload must retry transient failures.');
+assert(/waitForUploadProgress/.test(upload), 'Spreadshirt must wait for real upload progress before metadata.');
+assert(!/MAX_SPREADSHIRT_DIMENSION|MAX_SPREADSHIRT_BYTES/.test(upload), 'Upload reliability must not reject the user-tested 4500x5400 file.');
 
 assert(/Spreadshirt <strong class="ss-alpha-mark">\[ALPHA\]<\/strong>/.test(renderer), 'Spreadshirt nav must render bold [ALPHA].');
 assert(/Check 1 · Generated Image/.test(renderer), 'Spreadshirt image approval gate is missing.');
@@ -81,11 +91,12 @@ const flyingPatchIndex = bootstrap.indexOf("require('./flyingSpreadshirtPatch')"
 const flyingIpcIndex = bootstrap.indexOf("require('./flyingResearchIpc')");
 const exportPatchIndex = bootstrap.indexOf("require('./spreadshirtRegularExportPatch')");
 const journeyPatchIndex = bootstrap.indexOf("require('./spreadshirtJourneyReliabilityPatch')");
+const uploadPatchIndex = bootstrap.indexOf("require('./spreadshirtUploadReliabilityPatch')");
 const ssIpcIndex = bootstrap.indexOf("require('./spreadshirtAlphaIpc')");
 const ssUiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
 const mainIndex = bootstrap.lastIndexOf("require('./main')");
 assert(flyingPatchIndex >= 0 && flyingPatchIndex < flyingIpcIndex, 'Flying Spreadshirt prototype patch must load before Flying Research IPC.');
-assert(exportPatchIndex >= 0 && exportPatchIndex < journeyPatchIndex && journeyPatchIndex < ssIpcIndex, 'Spreadshirt export and journey reliability patches must load before Spreadshirt IPC.');
+assert(exportPatchIndex >= 0 && exportPatchIndex < journeyPatchIndex && journeyPatchIndex < uploadPatchIndex && uploadPatchIndex < ssIpcIndex, 'Spreadshirt export/journey/upload reliability patches must load before Spreadshirt IPC.');
 assert(ssIpcIndex >= 0 && ssIpcIndex < mainIndex, 'Spreadshirt IPC must load before main.');
 assert(ssUiIndex >= 0 && ssUiIndex < mainIndex, 'Spreadshirt renderer injector must load before main.');
 
