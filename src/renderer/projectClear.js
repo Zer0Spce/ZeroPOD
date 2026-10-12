@@ -1,13 +1,18 @@
 (() => {
-  const button = document.getElementById('clearProjects');
-  const api = window.zeroPOD?.projects;
-  if (!button || !api?.clearAll) return;
+  let clearing = false;
 
   function plural(value, singular, pluralForm = `${singular}s`) {
     return `${value} ${value === 1 ? singular : pluralForm}`;
   }
 
-  button.addEventListener('click', async () => {
+  async function handleClearProjects(button) {
+    if (clearing) return;
+    const api = window.zeroPOD?.projects;
+    if (!api?.clearAll) {
+      alert('Clear Projects is unavailable in this build. Restart ZeroPOD and try again.');
+      return;
+    }
+
     let usage = null;
     try { usage = await window.zeroPOD.redbubble?.dailyUsage?.(); } catch {}
 
@@ -20,17 +25,17 @@
       ? `Redbubble upload-limit status is currently DETECTED from Redbubble's own page. That detection state is stored separately from Projects and will not be erased by Clear Projects.`
       : `No Redbubble upload-limit page is currently marked as detected.`;
 
-    const accepted = confirm(
+    const accepted = window.confirm(
       `WARNING — CLEAR ALL PROJECTS\n\n` +
       `This permanently deletes every ZeroPOD project folder, including generated artwork, metadata, project history, archived projects, and published-project records.\n\n` +
       `${trackerLine}\n${detectedLine}\n\n` +
       `Clearing Projects will erase the local publish-history count shown on the dashboard, so that informational number may become inaccurate for the current 24-hour period. It does NOT reset Redbubble's real upload limit and it does NOT make ZeroPOD assume uploads are available. ZeroPOD determines the actual limit only from Redbubble's own “exceeded your upload limit” page/message.\n\n` +
-      `Paused/stopped Automation rows linked to Projects will be safely unlinked and reset so they can run again from their original image + Amazon/source URL. A currently running Automation/workflow step must finish or be paused first.\n\n` +
+      `Paused/stopped Automation rows linked to projects will be safely reset back to their original image + source URL so they are not left pointing at deleted project folders.\n\n` +
       `This action cannot be undone. Continue?`
     );
     if (!accepted) return;
 
-    const typed = prompt(
+    const typed = window.prompt(
       'FINAL CONFIRMATION\n\nType CLEAR PROJECTS exactly to permanently delete all ZeroPOD projects.'
     );
     if (typed !== 'CLEAR PROJECTS') {
@@ -39,6 +44,7 @@
     }
 
     const originalLabel = button.textContent;
+    clearing = true;
     button.disabled = true;
     button.textContent = 'Clearing…';
 
@@ -46,6 +52,7 @@
       const result = await api.clearAll({ confirmation: 'CLEAR PROJECTS' });
       try { currentProjectId = null; } catch {}
       try { projectFilter = 'all'; } catch {}
+      try { localStorage.removeItem('zeropod.unified.activeProject.v1'); } catch {}
 
       document.querySelectorAll('.project-filter').forEach((item) => {
         item.classList.toggle('active-filter', item.dataset.filter === 'all');
@@ -53,22 +60,38 @@
 
       if (typeof renderProjects === 'function') await renderProjects();
       if (typeof renderDashboard === 'function') await renderDashboard();
-      if (typeof renderAutomation === 'function') await renderAutomation();
-      if (typeof renderAutomationList === 'function') await renderAutomationList();
+      if (typeof refreshAutomationListV2 === 'function') await refreshAutomationListV2().catch(() => {});
       if (typeof window.refreshRedbubbleUsage === 'function') await window.refreshRedbubbleUsage();
 
-      const historyImpact = result.recentPublishedRecordsRemoved
-        ? ` ${plural(result.recentPublishedRecordsRemoved, 'publish record')} from the current 24-hour local history ${result.recentPublishedRecordsRemoved === 1 ? 'was' : 'were'} also removed. This affects only the informational count; Redbubble page detection remains the source of truth.`
-        : '';
-      const queueImpact = result.automationRowsReset
-        ? ` ${plural(result.automationRowsReset, 'Automation row')} ${result.automationRowsReset === 1 ? 'was' : 'were'} safely reset to use the original input again.`
-        : '';
-      alert(`Cleared ${plural(result.deleted, 'project')}.${queueImpact}${historyImpact}`);
+      const impacts = [];
+      if (result.recentPublishedRecordsRemoved) {
+        impacts.push(`${plural(result.recentPublishedRecordsRemoved, 'publish record')} from the current 24-hour local history removed`);
+      }
+      if (result.automationRowsReset) {
+        impacts.push(`${plural(result.automationRowsReset, 'Automation row')} reset to its original input`);
+      }
+      const suffix = impacts.length ? `\n\n${impacts.join('. ')}.` : '';
+      alert(`Cleared ${plural(result.deleted, 'project')}.${suffix}`);
     } catch (error) {
       alert(`Projects were not cleared: ${error.message || error}`);
     } finally {
+      clearing = false;
       button.disabled = false;
       button.textContent = originalLabel;
     }
+  }
+
+  // Delegated binding survives Projects view re-renders and any later DOM replacement.
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest?.('#clearProjects');
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    handleClearProjects(button).catch((error) => {
+      clearing = false;
+      button.disabled = false;
+      button.textContent = 'Clear Projects';
+      alert(`Projects were not cleared: ${error.message || error}`);
+    });
   });
 })();
