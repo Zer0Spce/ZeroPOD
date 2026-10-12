@@ -147,16 +147,15 @@ function hideResearchBeta() {
 }
 
 function loadResearchFeatures() {
-  // Research / Research BETA is intentionally hidden for now. Keep its files in
-  // the codebase so we can fix and re-enable it later without affecting Flying Research BETA.
   hideResearchBeta();
 
-  // Amazon Research remains available internally for Automate List / research
-  // retrieval, but it is intentionally not exposed as a Connections login card.
   loadZeroPODFeatureScript('automateList.js', 'automateListFeatureScript');
   loadZeroPODFeatureScript('storageSettings.js', 'storageSettingsFeatureScript');
   loadZeroPODFeatureScript('browserMaintenance.js', 'browserMaintenanceFeatureScript');
   loadZeroPODFeatureScript('redbubbleLimit.js', 'redbubbleLimitFeatureScript');
+  loadZeroPODFeatureScript('publishLedgerUI.js', 'publishLedgerUiFeatureScript');
+  loadZeroPODFeatureScript('automationWorkflowControls.js', 'automationWorkflowControlsFeatureScript');
+  loadZeroPODFeatureScript('flyingResearchPolish.js', 'flyingResearchPolishFeatureScript');
   setTimeout(() => {
     hideResearchBeta();
     installLateThemeOverrides();
