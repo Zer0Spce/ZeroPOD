@@ -4,11 +4,12 @@ const sharp = require('sharp');
 
 const OUTPUT_WIDTH = 4500;
 const OUTPUT_HEIGHT = 5400;
-const COMPACT_MAX_HEIGHT_RATIO = 0.40;
-const WIDE_CHEST_MAX_HEIGHT_RATIO = 0.60;
-const WIDE_CHEST_MIN_ASPECT_RATIO = 1.35;
-const TOP_PLACEMENT_RATIO = 0.05;
-const TRIM_THRESHOLD = 8;
+const COMPACT_MAX_HEIGHT_RATIO = 0.45;
+const WIDE_CHEST_MAX_HEIGHT_RATIO = 0.55;
+const WIDE_CHEST_MIN_ASPECT_RATIO = 1.25;
+const COMPACT_TOP_CLEARANCE_OF_ARTWORK = 0.05;
+const MIN_TOP_CLEARANCE_PX = 12;
+const TRIM_THRESHOLD = 16;
 
 function roundRatio(value) {
   return Math.round(value * 10000) / 10000;
@@ -22,17 +23,19 @@ function placementFromBounds(width, height) {
   const aspectRatio = safeHeight > 0 ? safeWidth / safeHeight : 0;
   const validBounds = safeWidth > 0 && safeHeight > 0 && safeWidth <= OUTPUT_WIDTH && safeHeight <= OUTPUT_HEIGHT;
 
+  // Only genuinely compact artwork is moved. Tall/full designs keep the exact
+  // historical centered export so Redbubble's working product settings are not touched.
   const compactByHeight = validBounds && heightRatio <= COMPACT_MAX_HEIGHT_RATIO;
-  const wideChestArtwork = validBounds
+  const wideCompactArtwork = validBounds
     && heightRatio <= WIDE_CHEST_MAX_HEIGHT_RATIO
     && aspectRatio >= WIDE_CHEST_MIN_ASPECT_RATIO;
 
   let reason = 'normal-full-artwork';
   if (compactByHeight) reason = 'compact-height';
-  else if (wideChestArtwork) reason = 'wide-chest-artwork';
+  else if (wideCompactArtwork) reason = 'compact-wide';
 
   return {
-    mode: compactByHeight || wideChestArtwork ? 'top' : 'center',
+    mode: compactByHeight || wideCompactArtwork ? 'top' : 'center',
     reason,
     width: safeWidth || null,
     height: safeHeight || null,
@@ -42,10 +45,11 @@ function placementFromBounds(width, height) {
   };
 }
 
-function topPlacementRatioFor(reason) {
-  return reason === 'compact-height' || reason === 'wide-chest-artwork'
-    ? TOP_PLACEMENT_RATIO
-    : null;
+function topClearancePxFor(visibleArtworkHeight) {
+  const safeHeight = Math.max(1, Number(visibleArtworkHeight) || 1);
+  // "5% clearance" is based on the compact artwork itself, not 5% of the full
+  // 5400px canvas. That keeps the visible design very close to the top edge.
+  return Math.max(MIN_TOP_CLEARANCE_PX, Math.round(safeHeight * COMPACT_TOP_CLEARANCE_OF_ARTWORK));
 }
 
 async function analyzeVisibleArtwork(renderedBuffer) {
@@ -65,10 +69,9 @@ async function analyzeVisibleArtwork(renderedBuffer) {
   };
 }
 
-async function writeTopPlacedArtwork(output, trimmedBuffer, info, reason) {
+async function writeTopPlacedArtwork(output, trimmedBuffer, info) {
   const left = Math.max(0, Math.round((OUTPUT_WIDTH - info.width) / 2));
-  const topRatio = topPlacementRatioFor(reason) || TOP_PLACEMENT_RATIO;
-  const desiredTop = Math.round(OUTPUT_HEIGHT * topRatio);
+  const desiredTop = topClearancePxFor(info.height);
   const top = Math.max(0, Math.min(desiredTop, OUTPUT_HEIGHT - info.height));
 
   await sharp({
@@ -83,7 +86,13 @@ async function writeTopPlacedArtwork(output, trimmedBuffer, info, reason) {
     .png({ compressionLevel: 9 })
     .toFile(output);
 
-  return { left, top, topRatio };
+  return {
+    left,
+    top,
+    topClearancePx: top,
+    clearanceBasis: 'visible-artwork-height',
+    clearanceRatio: COMPACT_TOP_CLEARANCE_OF_ARTWORK
+  };
 }
 
 class ExportController {
@@ -105,8 +114,8 @@ class ExportController {
     const output = path.join(this.projects.getProjectDir(projectId), 'final-4500x5400.png');
     const svgBuffer = fs.readFileSync(project.vectorPath);
 
-    // Preserve the proven 4500x5400 contain render as the baseline. Auto placement
-    // is applied only after we inspect the actual non-transparent artwork bounds.
+    // Preserve the proven 4500x5400 contain render as the baseline. Placement is
+    // changed only after measuring the actual visible/non-transparent artwork.
     const renderedBuffer = await sharp(svgBuffer, { density: 600 })
       .resize(OUTPUT_WIDTH, OUTPUT_HEIGHT, {
         fit: 'contain',
@@ -125,7 +134,9 @@ class ExportController {
       aspectRatio: null,
       left: null,
       top: null,
-      topRatio: null,
+      topClearancePx: null,
+      clearanceBasis: null,
+      clearanceRatio: null,
       automatic: true
     };
 
@@ -137,14 +148,11 @@ class ExportController {
         const position = await writeTopPlacedArtwork(
           output,
           analysis.data,
-          analysis.info,
-          analysis.placement.reason
+          analysis.info
         );
-        placement.left = position.left;
-        placement.top = position.top;
-        placement.topRatio = position.topRatio;
+        placement = { ...placement, ...position };
       } else {
-        // Normal/full designs remain on the exact existing export path.
+        // Normal/full designs remain on the exact existing centered export path.
         fs.writeFileSync(output, renderedBuffer);
       }
     } catch {
@@ -171,4 +179,10 @@ class ExportController {
   }
 }
 
-module.exports = { ExportController, placementFromBounds, topPlacementRatioFor };
+module.exports = {
+  ExportController,
+  placementFromBounds,
+  topClearancePxFor,
+  analyzeVisibleArtwork,
+  writeTopPlacedArtwork
+};
