@@ -9,9 +9,14 @@ const { ProjectStore } = require('./projectStore');
 const DAILY_LIMIT = 30;
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const LIMIT_STATE_FILE = 'redbubble-upload-limit-state.json';
+const PUBLISH_LEDGER_FILE = 'redbubble-publish-ledger.json';
 
 function statePath() {
   return path.join(app.getPath('userData'), LIMIT_STATE_FILE);
+}
+
+function ledgerPath() {
+  return path.join(app.getPath('userData'), PUBLISH_LEDGER_FILE);
 }
 
 function readLimitState() {
@@ -39,12 +44,33 @@ function writeLimitState(patch = {}) {
   return next;
 }
 
+function persistentPublishTimestamps() {
+  try {
+    const file = ledgerPath();
+    if (!fs.existsSync(file)) return [];
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return (Array.isArray(parsed.entries) ? parsed.entries : [])
+      .map((entry) => Date.parse(entry?.publishedAt || ''))
+      .filter(Number.isFinite);
+  } catch {
+    return [];
+  }
+}
+
 function localPublishHistory(projects) {
   const now = Date.now();
   const cutoff = now - WINDOW_MS;
-  return projects.list({ includeArchived: true })
-    .map((project) => Date.parse(project.redbubble?.publishedAt || ''))
-    .filter((value) => Number.isFinite(value) && value > cutoff && value <= now)
+  const values = new Set(persistentPublishTimestamps());
+
+  // Project records are still included so upgrading from an older build can show
+  // the correct count immediately before the publish ledger migration completes.
+  for (const project of projects.list({ includeArchived: true })) {
+    const value = Date.parse(project.redbubble?.publishedAt || '');
+    if (Number.isFinite(value)) values.add(value);
+  }
+
+  return [...values]
+    .filter((value) => value > cutoff && value <= now)
     .sort((a, b) => a - b);
 }
 
@@ -113,9 +139,6 @@ RedbubbleController.prototype.getDailyUploadUsage = function getDailyUploadUsage
   return getUsage(this.projects);
 };
 
-// Use the controller's normal successful-publish signals, but give the real
-// Redbubble upload-limit page priority. A redirect to that error page must never
-// be mistaken for a successful publish.
 RedbubbleController.prototype.detectPublishSuccess = async function detectPublishSuccessWithLimit(page, beforeUrl) {
   const successText = /successfully published|your work has been published|work published|published successfully|work saved|saved successfully/i;
 
@@ -160,8 +183,6 @@ RedbubbleController.prototype.publish = async function publishWithRealLimitDetec
 
     const current = this.projects.read(projectId);
     this.projects.update(projectId, {
-      // The limit page means Redbubble rejected this submission. Return to
-      // review so a later retry clicks Save Work again after the limit resets.
       status: 'redbubble-review',
       lastAutomationError: {
         service: 'Redbubble',
@@ -185,7 +206,6 @@ RedbubbleController.prototype.publish = async function publishWithRealLimitDetec
   };
 
   try {
-    // Never block before attempting publish based on local counts.
     const result = await originalPublish.call(this, projectId);
 
     if (result?.ok && result?.verified) {
