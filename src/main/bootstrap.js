@@ -81,7 +81,7 @@ require('./connectionReliabilityPatch');
 require('./chatgptUploadReadyPatch');
 require('./chatgptNetworkCapturePatch');
 require('./chatgptLiveReliabilityPatch');
-require('./chatgptGeneratedImageGuardPatch');
+require('./chatgptReferenceImageFilterPatch');
 require('./chatThreadPreferencePatch');
 require('./metadataVisibleJsonPatch');
 require('./metadataSingleWordTagsPatch');
