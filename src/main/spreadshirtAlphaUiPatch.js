@@ -1,3 +1,5 @@
+require('./spreadshirtMarketplaceRoutePatch');
+
 const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
