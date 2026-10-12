@@ -7,15 +7,6 @@ const projects = new ProjectStore();
 const automationStore = new AutomationQueueStore();
 const CONFIRMATION = 'CLEAR PROJECTS';
 const WINDOW_MS = 24 * 60 * 60 * 1000;
-const BUSY_STATUSES = new Set([
-  'generating',
-  'regenerating',
-  'metadata-generating',
-  'vectorizing',
-  'vectorizer-manual-download',
-  'redbubble-preparing',
-  'redbubble-publish-pending'
-]);
 
 function projectStats(allProjects) {
   const cutoff = Date.now() - WINDOW_MS;
@@ -93,16 +84,15 @@ app.whenReady().then(() => {
       throw new Error('Clear Projects confirmation was not accepted. No project data was deleted.');
     }
 
+    // Only a genuinely executing Automation row blocks deletion. Project.status is
+    // persisted workflow history and can legitimately remain on generating,
+    // vectorizing, or Redbubble preparation after an interrupted/restarted run.
+    // Treating those persisted labels as live locks caused Clear Projects to get
+    // stuck forever on stale projects.
     const queue = automationStore.read();
     const rows = Array.isArray(queue.rows) ? queue.rows : [];
     if (queue.state === 'running' || rows.some((row) => row.status === 'running')) {
-      throw new Error('Pause or stop Automation and wait for the current row to finish before clearing projects. No project data was deleted.');
-    }
-
-    const allProjects = projects.list({ includeArchived: true });
-    const busyProjects = allProjects.filter((project) => BUSY_STATUSES.has(project.status));
-    if (busyProjects.length) {
-      throw new Error(`Cannot clear projects while ${busyProjects.length} project${busyProjects.length === 1 ? ' is' : 's are'} actively processing. Wait for the current operation to finish first.`);
+      throw new Error('Automation is actively processing a row. Pause or stop Automation and wait for that row to finish, then Clear Projects again. No project data was deleted.');
     }
 
     return clearProjects();
