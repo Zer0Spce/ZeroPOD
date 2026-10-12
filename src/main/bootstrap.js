@@ -125,6 +125,7 @@ require('./flyingResearchInfiniteScrollPatch');
 require('./flyingSpreadshirtPatch');
 require('./flyingResearchIpc');
 require('./spreadshirtRegularExportPatch');
+require('./spreadshirtJourneyReliabilityPatch');
 require('./spreadshirtAlphaIpc');
 require('./spreadshirtAlphaUiPatch');
 require('./automateListReliabilityPatch');
