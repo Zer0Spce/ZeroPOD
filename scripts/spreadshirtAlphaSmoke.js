@@ -10,6 +10,7 @@ const files = [
   'src/main/spreadshirtAlphaFeature.js',
   'src/main/spreadshirtAlphaIpc.js',
   'src/main/spreadshirtAlphaUiPatch.js',
+  'src/main/spreadshirtMarketplaceRoutePatch.js',
   'src/main/spreadshirtRegularExportPatch.js',
   'src/main/spreadshirtJourneyReliabilityPatch.js',
   'src/main/spreadshirtUploadReliabilityPatch.js',
@@ -29,6 +30,8 @@ const standardExport = read('src/main/spreadshirtRegularExportPatch.js');
 const journey = read('src/main/spreadshirtJourneyReliabilityPatch.js');
 const upload = read('src/main/spreadshirtUploadReliabilityPatch.js');
 const videoFlow = read('src/main/spreadshirtVideoFlowPatch.js');
+const marketplaceRoute = read('src/main/spreadshirtMarketplaceRoutePatch.js');
+const uiPatch = read('src/main/spreadshirtAlphaUiPatch.js');
 const renderer = read('src/renderer/spreadshirtAlpha.js');
 const preload = read('src/main/preload.js');
 const bootstrap = read('src/main/bootstrap.js');
@@ -40,6 +43,12 @@ assert(/ACCOUNT_UPLOAD_LIMIT = 50/.test(feature), 'Spreadshirt account limit mus
 assert(/validateListingMetadata/.test(feature) && /35 characters or fewer/.test(feature) && /200 characters or fewer/.test(feature), 'Spreadshirt metadata gates are missing.');
 assert(/dailyBlocked/.test(feature) && /accountBlocked/.test(feature), 'Spreadshirt upload-limit gate checks are missing.');
 assert(/could not verify Spreadshirt success/i.test(feature), 'Publish verification guard is missing.');
+
+assert(/MARKETPLACE_DESIGNS_URL = 'https:\/\/partner\.spreadshirt\.com\/mp\/designs'/.test(marketplaceRoute), 'Spreadshirt must use the Marketplace /mp/designs page.');
+assert(/waitForMarketplaceDesigns/.test(marketplaceRoute) && /create\s\+new/i.test(marketplaceRoute), 'Spreadshirt Marketplace readiness must wait for Create New.');
+assert(/SERVICES\.spreadshirt\.url = MARKETPLACE_DESIGNS_URL/.test(marketplaceRoute), 'Spreadshirt session URL must be redirected to /mp/designs.');
+assert(/feature\.openDesigns/.test(marketplaceRoute) && /feature\.open =/.test(marketplaceRoute), 'Spreadshirt open actions must use Marketplace routing.');
+assert(/require\('\.\/spreadshirtMarketplaceRoutePatch'\)/.test(uiPatch), 'Spreadshirt Marketplace route patch must load after Spreadshirt IPC.');
 
 assert(/new ExportController/.test(standardExport), 'Spreadshirt must reuse the standard ZeroPOD ExportController.');
 assert(/standard-zeropod-4500x5400/.test(standardExport), 'Spreadshirt standard 4500x5400 export marker is missing.');
@@ -111,7 +120,6 @@ const ssUiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
 const mainIndex = bootstrap.lastIndexOf("require('./main')");
 assert(flyingPatchIndex >= 0 && flyingPatchIndex < flyingIpcIndex, 'Flying Spreadshirt prototype patch must load before Flying Research IPC.');
 assert(exportPatchIndex >= 0 && exportPatchIndex < journeyPatchIndex && journeyPatchIndex < uploadPatchIndex && uploadPatchIndex < videoPatchIndex && videoPatchIndex < ssIpcIndex, 'Recorded Spreadshirt flow patch must be the final Spreadshirt runtime override before IPC.');
-assert(ssIpcIndex >= 0 && ssIpcIndex < mainIndex, 'Spreadshirt IPC must load before main.');
-assert(ssUiIndex >= 0 && ssUiIndex < mainIndex, 'Spreadshirt renderer injector must load before main.');
+assert(ssIpcIndex >= 0 && ssIpcIndex < ssUiIndex && ssUiIndex < mainIndex, 'Spreadshirt IPC must load before UI/Marketplace route patch and before main.');
 
-console.log('Spreadshirt Alpha recorded-video workflow smoke checks passed.');
+console.log('Spreadshirt Alpha recorded-video + Marketplace /mp/designs workflow smoke checks passed.');
