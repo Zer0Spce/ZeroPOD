@@ -4,10 +4,7 @@ const sharp = require('sharp');
 
 const OUTPUT_WIDTH = 4500;
 const OUTPUT_HEIGHT = 5400;
-const COMPACT_MAX_HEIGHT_RATIO = 0.45;
-const WIDE_CHEST_MAX_HEIGHT_RATIO = 0.55;
-const WIDE_CHEST_MIN_ASPECT_RATIO = 1.25;
-const COMPACT_TOP_CLEARANCE_OF_ARTWORK = 0.05;
+const TOP_CLEARANCE_OF_ARTWORK = 0.05;
 const MIN_TOP_CLEARANCE_PX = 12;
 const TRIM_THRESHOLD = 16;
 
@@ -23,20 +20,12 @@ function placementFromBounds(width, height) {
   const aspectRatio = safeHeight > 0 ? safeWidth / safeHeight : 0;
   const validBounds = safeWidth > 0 && safeHeight > 0 && safeWidth <= OUTPUT_WIDTH && safeHeight <= OUTPUT_HEIGHT;
 
-  // Only genuinely compact artwork is moved. Tall/full designs keep the exact
-  // historical centered export so Redbubble's working product settings are not touched.
-  const compactByHeight = validBounds && heightRatio <= COMPACT_MAX_HEIGHT_RATIO;
-  const wideCompactArtwork = validBounds
-    && heightRatio <= WIDE_CHEST_MAX_HEIGHT_RATIO
-    && aspectRatio >= WIDE_CHEST_MIN_ASPECT_RATIO;
-
-  let reason = 'normal-full-artwork';
-  if (compactByHeight) reason = 'compact-height';
-  else if (wideCompactArtwork) reason = 'compact-wide';
-
   return {
-    mode: compactByHeight || wideCompactArtwork ? 'top' : 'center',
-    reason,
+    // Top placement is now the universal ZeroPOD export default. Every design is
+    // measured from its real visible alpha bounds and composed near the top of
+    // the same 4500x5400 transparent canvas. Redbubble settings stay untouched.
+    mode: validBounds ? 'top' : 'center',
+    reason: validBounds ? 'universal-top-default' : 'invalid-bounds-fallback',
     width: safeWidth || null,
     height: safeHeight || null,
     widthRatio: validBounds ? roundRatio(widthRatio) : null,
@@ -47,9 +36,10 @@ function placementFromBounds(width, height) {
 
 function topClearancePxFor(visibleArtworkHeight) {
   const safeHeight = Math.max(1, Number(visibleArtworkHeight) || 1);
-  // "5% clearance" is based on the compact artwork itself, not 5% of the full
-  // 5400px canvas. That keeps the visible design very close to the top edge.
-  return Math.max(MIN_TOP_CLEARANCE_PX, Math.round(safeHeight * COMPACT_TOP_CLEARANCE_OF_ARTWORK));
+  // The user-facing 5% clearance is based on the visible artwork itself rather
+  // than the whole 5400px canvas. This keeps all designs high while preserving
+  // a small safety gap from the top edge.
+  return Math.max(MIN_TOP_CLEARANCE_PX, Math.round(safeHeight * TOP_CLEARANCE_OF_ARTWORK));
 }
 
 async function analyzeVisibleArtwork(renderedBuffer) {
@@ -91,7 +81,7 @@ async function writeTopPlacedArtwork(output, trimmedBuffer, info) {
     top,
     topClearancePx: top,
     clearanceBasis: 'visible-artwork-height',
-    clearanceRatio: COMPACT_TOP_CLEARANCE_OF_ARTWORK
+    clearanceRatio: TOP_CLEARANCE_OF_ARTWORK
   };
 }
 
@@ -114,8 +104,8 @@ class ExportController {
     const output = path.join(this.projects.getProjectDir(projectId), 'final-4500x5400.png');
     const svgBuffer = fs.readFileSync(project.vectorPath);
 
-    // Preserve the proven 4500x5400 contain render as the baseline. Placement is
-    // changed only after measuring the actual visible/non-transparent artwork.
+    // Render exactly as before first, then measure the real visible alpha bounds.
+    // The measured/trimmed artwork is what gets positioned near the top.
     const renderedBuffer = await sharp(svgBuffer, { density: 600 })
       .resize(OUTPUT_WIDTH, OUTPUT_HEIGHT, {
         fit: 'contain',
@@ -137,7 +127,8 @@ class ExportController {
       topClearancePx: null,
       clearanceBasis: null,
       clearanceRatio: null,
-      automatic: true
+      automatic: true,
+      universalDefault: true
     };
 
     try {
@@ -145,19 +136,14 @@ class ExportController {
       placement = { ...placement, ...analysis.placement };
 
       if (analysis.placement.mode === 'top') {
-        const position = await writeTopPlacedArtwork(
-          output,
-          analysis.data,
-          analysis.info
-        );
+        const position = await writeTopPlacedArtwork(output, analysis.data, analysis.info);
         placement = { ...placement, ...position };
       } else {
-        // Normal/full designs remain on the exact existing centered export path.
         fs.writeFileSync(output, renderedBuffer);
       }
     } catch {
       // Bounds analysis must never make a previously working export fail. If the
-      // artwork cannot be measured safely, keep the original centered result.
+      // artwork cannot be measured safely, fall back to the original contain PNG.
       placement.mode = 'center';
       placement.reason = 'analysis-fallback';
       fs.writeFileSync(output, renderedBuffer);
