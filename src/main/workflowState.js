@@ -4,6 +4,7 @@ const STAGES = {
   regenerating: { order: 1, label: 'Regenerating', next: 'Wait for regenerated image', view: 'review', queue: 'active' },
   'chatgpt-human-verification': { order: 1, label: 'Human Verification Required', next: 'Complete ChatGPT verification manually, then retry', view: 'review', queue: 'attention' },
   'chatgpt-recovery-needed': { order: 1, label: 'ChatGPT Needs Attention', next: 'Retry ChatGPT generation/download', view: 'review', queue: 'attention' },
+  'chatgpt-policy-rejected': { order: 1, label: 'ChatGPT Rejected', next: 'Start a new workflow with a revised reference or prompt', view: 'review', queue: 'attention' },
   'awaiting-review': { order: 2, label: 'Image Review', next: 'Review image and Pass or Reject', view: 'review', queue: 'review' },
   'approved-image': { order: 3, label: 'Image Approved', next: 'Generate POD WINNER metadata', view: 'workflow', queue: 'active' },
   'metadata-generating': { order: 3, label: 'Generating Metadata', next: 'Wait for POD WINNER metadata', view: 'workflow', queue: 'active' },
