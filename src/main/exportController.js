@@ -5,6 +5,8 @@ const sharp = require('sharp');
 const OUTPUT_WIDTH = 4500;
 const OUTPUT_HEIGHT = 5400;
 const COMPACT_MAX_HEIGHT_RATIO = 0.40;
+const WIDE_CHEST_MAX_HEIGHT_RATIO = 0.60;
+const WIDE_CHEST_MIN_ASPECT_RATIO = 1.35;
 const TOP_PLACEMENT_RATIO = 0.17;
 const TRIM_THRESHOLD = 8;
 
@@ -17,14 +19,26 @@ function placementFromBounds(width, height) {
   const safeHeight = Number(height) || 0;
   const widthRatio = safeWidth / OUTPUT_WIDTH;
   const heightRatio = safeHeight / OUTPUT_HEIGHT;
+  const aspectRatio = safeHeight > 0 ? safeWidth / safeHeight : 0;
   const validBounds = safeWidth > 0 && safeHeight > 0 && safeWidth <= OUTPUT_WIDTH && safeHeight <= OUTPUT_HEIGHT;
 
+  const compactByHeight = validBounds && heightRatio <= COMPACT_MAX_HEIGHT_RATIO;
+  const wideChestArtwork = validBounds
+    && heightRatio <= WIDE_CHEST_MAX_HEIGHT_RATIO
+    && aspectRatio >= WIDE_CHEST_MIN_ASPECT_RATIO;
+
+  let reason = 'normal-full-artwork';
+  if (compactByHeight) reason = 'compact-height';
+  else if (wideChestArtwork) reason = 'wide-chest-artwork';
+
   return {
-    mode: validBounds && heightRatio <= COMPACT_MAX_HEIGHT_RATIO ? 'top' : 'center',
+    mode: compactByHeight || wideChestArtwork ? 'top' : 'center',
+    reason,
     width: safeWidth || null,
     height: safeHeight || null,
     widthRatio: validBounds ? roundRatio(widthRatio) : null,
-    heightRatio: validBounds ? roundRatio(heightRatio) : null
+    heightRatio: validBounds ? roundRatio(heightRatio) : null,
+    aspectRatio: validBounds ? roundRatio(aspectRatio) : null
   };
 }
 
@@ -96,10 +110,12 @@ class ExportController {
 
     let placement = {
       mode: 'center',
+      reason: 'analysis-fallback',
       width: null,
       height: null,
       widthRatio: null,
       heightRatio: null,
+      aspectRatio: null,
       left: null,
       top: null,
       automatic: true
@@ -121,6 +137,7 @@ class ExportController {
       // Bounds analysis must never make a previously working export fail. If the
       // artwork cannot be measured safely, keep the original centered result.
       placement.mode = 'center';
+      placement.reason = 'analysis-fallback';
       fs.writeFileSync(output, renderedBuffer);
     }
 
