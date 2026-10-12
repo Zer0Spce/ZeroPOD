@@ -3,7 +3,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const { execFile } = require('child_process');
-const { StorageManager, sizeOf } = require('./storageManager');
+const { StorageManager } = require('./storageManager');
 const { AutomationQueueStore } = require('./automationQueueStore');
 const { ProjectStore } = require('./projectStore');
 
@@ -12,9 +12,11 @@ const automationStore = new AutomationQueueStore();
 const projects = new ProjectStore();
 const storage = new StorageManager({ automationStore, projects });
 
-function assertIdle() {
-  if (storage.isBusy()) {
-    throw new Error('Pause Automation and wait for the current workflow step to finish before resetting the hidden browser or clearing browser cache.');
+function assertAutomationIdle() {
+  const queue = automationStore.read();
+  const rows = Array.isArray(queue.rows) ? queue.rows : [];
+  if (queue.state === 'running' || rows.some((row) => row.status === 'running')) {
+    throw new Error('Pause Automation and wait for the current row to finish before resetting the hidden browser or clearing browser cache.');
   }
 }
 
@@ -58,7 +60,7 @@ async function removeCacheTarget(target, failures) {
 }
 
 async function clearBrowserCacheOnly() {
-  assertIdle();
+  assertAutomationIdle();
   const before = await storage.sumTargets(storage.browserCacheTargets());
   const closed = await closeHiddenAutomationChrome();
   const failures = [];
@@ -81,7 +83,7 @@ async function clearBrowserCacheOnly() {
 }
 
 async function resetHiddenBrowser() {
-  assertIdle();
+  assertAutomationIdle();
   const result = await closeHiddenAutomationChrome();
   return {
     ok: true,
