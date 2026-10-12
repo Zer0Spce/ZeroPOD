@@ -14,12 +14,17 @@
     }
 
     let usage = null;
+    let publishStats = null;
     try { usage = await window.zeroPOD.redbubble?.dailyUsage?.(); } catch {}
+    try { publishStats = await window.zeroPOD.redbubble?.publishStats?.(); } catch {}
 
-    const localCount = Number(usage?.localCount ?? usage?.count ?? 0);
-    const trackerLine = usage
-      ? `ZeroPOD currently has ${localCount} successful Redbubble publishes recorded in the last 24 hours. This count is informational only.`
-      : 'ZeroPOD could not read the current local Redbubble publish history before this deletion.';
+    const localCount = Number(publishStats?.last24h ?? usage?.localCount ?? usage?.count ?? 0);
+    const totalPublished = Number(publishStats?.totalPublished ?? 0);
+    const trackerLine = publishStats
+      ? `ZeroPOD's persistent publish ledger currently records ${localCount} successful publishes in the last 24 hours and ${totalPublished} total published works.`
+      : usage
+        ? `ZeroPOD currently has ${localCount} successful Redbubble publishes recorded in the last 24 hours.`
+        : 'ZeroPOD could not read the current publish ledger before this deletion.';
 
     const detectedLine = usage?.blocked
       ? `Redbubble upload-limit status is currently DETECTED from Redbubble's own page. That detection state is stored separately from Projects and will not be erased by Clear Projects.`
@@ -27,20 +32,18 @@
 
     const accepted = window.confirm(
       `WARNING — CLEAR ALL PROJECTS\n\n` +
-      `This permanently deletes every ZeroPOD project folder, including generated artwork, metadata, project history, archived projects, and published-project records.\n\n` +
+      `This permanently deletes every ZeroPOD project folder, including generated artwork, metadata, project history, archived projects, and project-local published records.\n\n` +
       `${trackerLine}\n${detectedLine}\n\n` +
-      `Clearing Projects will erase the local publish-history count shown on the dashboard, so that informational number may become inaccurate for the current 24-hour period. It does NOT reset Redbubble's real upload limit and it does NOT make ZeroPOD assume uploads are available. ZeroPOD determines the actual limit only from Redbubble's own “exceeded your upload limit” page/message.\n\n` +
+      `IMPORTANT: ZeroPOD's independent Redbubble publish ledger is NOT deleted by Clear Projects. The dashboard's “successful ZeroPOD publishes in the last 24h” count and total Published number are preserved. Clearing Projects also does NOT reset Redbubble's real upload limit.\n\n` +
       `Paused/stopped Automation rows linked to projects will be safely reset back to their original image + source URL so they are not left pointing at deleted project folders.\n\n` +
       `This action cannot be undone. Continue?`
     );
     if (!accepted) return;
 
-    // Electron in this build does not support window.prompt(). Use a second native
-    // confirmation instead so Clear Projects cannot silently fail before IPC runs.
     const finalAccepted = window.confirm(
       `FINAL CONFIRMATION\n\n` +
-      `Permanently delete ALL ZeroPOD projects now?\n\n` +
-      `This cannot be undone. Choose OK only if you are sure.`
+      `Permanently delete ALL ZeroPOD project folders now?\n\n` +
+      `Publish history/counts are preserved separately. Project files themselves cannot be recovered unless you have a backup. Choose OK only if you are sure.`
     );
     if (!finalAccepted) {
       alert('Clear Projects canceled. Nothing was deleted.');
@@ -68,12 +71,10 @@
       if (typeof window.refreshRedbubbleUsage === 'function') await window.refreshRedbubbleUsage();
 
       const impacts = [];
-      if (result.recentPublishedRecordsRemoved) {
-        impacts.push(`${plural(result.recentPublishedRecordsRemoved, 'publish record')} from the current 24-hour local history removed`);
-      }
       if (result.automationRowsReset) {
         impacts.push(`${plural(result.automationRowsReset, 'Automation row')} reset to its original input`);
       }
+      impacts.push('Redbubble publish history and Published totals preserved');
       const suffix = impacts.length ? `\n\n${impacts.join('. ')}.` : '';
       alert(`Cleared ${plural(result.deleted, 'project')}.${suffix}`);
     } catch (error) {
@@ -85,7 +86,6 @@
     }
   }
 
-  // Delegated binding survives Projects view re-renders and any later DOM replacement.
   document.addEventListener('click', (event) => {
     const button = event.target.closest?.('#clearProjects');
     if (!button) return;
