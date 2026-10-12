@@ -21,13 +21,12 @@ async function fieldFromLabel(frame, patterns) {
     if (await visible(label)) {
       const forId = await label.getAttribute('for').catch(() => null);
       if (forId) {
-        const escaped = String(forId).replace(/([ #;.?+*~\':"!^$[\]()=>|/@])/g, '\\$1');
-        const target = frame.locator(`#${escaped}`).first();
+        const target = frame.locator(`[id=${JSON.stringify(String(forId))}]`).first();
         if (await visible(target)) return target;
       }
       const nested = label.locator('input, textarea, [contenteditable="true"]').first();
       if (await visible(nested)) return nested;
-      const nearby = label.locator('xpath=ancestor::*[self::div or self::section or self::fieldset][1]//input | xpath=ancestor::*[self::div or self::section or self::fieldset][1]//textarea | xpath=ancestor::*[self::div or self::section or self::fieldset][1]//*[@contenteditable="true"]').first();
+      const nearby = label.locator('xpath=ancestor::*[self::div or self::section or self::fieldset][1]//*[self::input or self::textarea or @contenteditable="true"]').first();
       if (await visible(nearby)) return nearby;
     }
   }
@@ -118,7 +117,7 @@ async function clickFirstJourneyAction(page) {
         if (!(await visible(candidate))) continue;
         const disabled = await candidate.isDisabled().catch(() => false);
         if (disabled) continue;
-        await candidate.click({ force: true }).catch(() => {});
+        await candidate.click({ force: true });
         return true;
       }
     }
@@ -132,7 +131,7 @@ async function selectMarketplaceIfExplicitlyRequired(page) {
     if (await visible(checkbox)) {
       const checked = await checkbox.isChecked().catch(() => true);
       if (!checked) {
-        await checkbox.check({ force: true }).catch(() => {});
+        await checkbox.check({ force: true });
         return true;
       }
     }
@@ -166,18 +165,18 @@ async function waitForMetadataEditor(page, timeoutMs = 45000) {
   }
 
   const diagnostics = await page.evaluate(() => {
-    const visible = (el) => {
+    const isVisible = (el) => {
       const r = el.getBoundingClientRect();
       const style = getComputedStyle(el);
       return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
     };
     const actions = [...document.querySelectorAll('button,a,[role="button"]')]
-      .filter(visible)
+      .filter(isVisible)
       .map((el) => String(el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim())
       .filter(Boolean)
       .slice(0, 30);
     const fields = [...document.querySelectorAll('input,textarea,[contenteditable="true"]')]
-      .filter(visible)
+      .filter(isVisible)
       .map((el) => [el.getAttribute('name'), el.getAttribute('id'), el.getAttribute('placeholder'), el.getAttribute('aria-label')].filter(Boolean).join(' / '))
       .filter(Boolean)
       .slice(0, 20);
