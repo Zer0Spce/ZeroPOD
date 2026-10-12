@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const Module = require('node:module');
+const { execFileSync } = require('node:child_process');
 
 async function run() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zeropod-performance-'));
@@ -43,14 +44,31 @@ async function run() {
     assert.match(exportSource, /4500/);
     assert.match(exportSource, /5400/);
 
+    const fastFieldsPath = path.join(__dirname, '../src/main/redbubbleFastFieldsPatch.js');
+    execFileSync(process.execPath, ['--check', fastFieldsPath], { stdio: 'pipe' });
+    const fastFieldsSource = fs.readFileSync(fastFieldsPath, 'utf8');
+    assert.match(fastFieldsSource, /fillListingFieldsFastFirst/);
+    assert.match(fastFieldsSource, /waitUntil/);
+    assert.match(fastFieldsSource, /supportAccepted/);
+    assert.match(fastFieldsSource, /previousFillListingFields\.call/);
+    assert.doesNotMatch(fastFieldsSource, /await wait\(110\)/);
+
     const bootstrap = fs.readFileSync(path.join(__dirname, '../src/main/bootstrap.js'), 'utf8');
+    assert(bootstrap.indexOf("require('./redbubbleSkipDescriptionBetaPatch')") < bootstrap.indexOf("require('./redbubbleFastFieldsPatch')"));
+    assert(bootstrap.indexOf("require('./redbubbleFastFieldsPatch')") < bootstrap.indexOf("require('./redbubbleReviewCapturePatch')"));
     assert(bootstrap.indexOf("require('./exportPerformancePatch')") < bootstrap.indexOf("require('./performanceOptimizationPatch')"));
     assert(bootstrap.indexOf("require('./performanceOptimizationPatch')") < bootstrap.indexOf("require('./main')"));
+
+    const dashboardSource = fs.readFileSync(path.join(__dirname, '../src/renderer/performanceDashboard.js'), 'utf8');
+    assert.match(dashboardSource, /performance-grid/);
+    assert.match(dashboardSource, /performance-card-value/);
+    assert.match(dashboardSource, /performance-footer-chip/);
+    assert.doesNotMatch(dashboardSource, /id="performanceStats" class="stat-grid"/);
 
     const preload = fs.readFileSync(path.join(__dirname, '../src/main/preload.js'), 'utf8');
     assert.match(preload, /performance:snapshot/);
 
-    console.log('Performance optimization smoke passed: persistent timings, warm-hit stats, fast queue cadence, optimized lossless PNG export, load order, and renderer API.');
+    console.log('Performance optimization smoke passed: persistent timings, warm-hit stats, fast queue cadence, optimized lossless PNG export, fast-first Redbubble fields with safe fallback, uniform performance UI, load order, and renderer API.');
   } finally {
     Module._load = originalLoad;
     fs.rmSync(root, { recursive: true, force: true });
