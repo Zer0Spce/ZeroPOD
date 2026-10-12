@@ -30,6 +30,7 @@ app.whenReady().then(() => {
   ipcMain.handle('flying:open', (_event, tool) => serialize(() => feature.open(tool)));
   ipcMain.handle('flying:search', (_event, payload) => serialize(() => feature.search(payload || {})));
   ipcMain.handle('flying:capture', () => serialize(() => feature.capture()));
+  ipcMain.handle('flying:next-page', () => serialize(() => feature.loadNextPage()));
   ipcMain.handle('flying:workflow', (_event, key) => serialize(() => feature.workflow(key)));
   ipcMain.handle('flying:automation', (_event, payload) => serialize(() => feature.addToAutomation(payload || {})));
   ipcMain.handle('flying:amazon', async (_event, key) => {
