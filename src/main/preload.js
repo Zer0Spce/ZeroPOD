@@ -100,7 +100,9 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     usage: () => ipcRenderer.invoke('storage:usage'),
     settings: () => ipcRenderer.invoke('storage:settings'),
     updateSettings: (patch) => ipcRenderer.invoke('storage:update-settings', patch),
-    cleanup: (payload) => ipcRenderer.invoke('storage:cleanup', payload)
+    cleanup: (payload) => ipcRenderer.invoke('storage:cleanup', payload),
+    clearBrowserCache: () => ipcRenderer.invoke('browser:clear-cache-only'),
+    resetHiddenBrowser: () => ipcRenderer.invoke('browser:reset-hidden')
   },
   files: {
     chooseReference: () => ipcRenderer.invoke('file:choose-reference'),
