@@ -122,6 +122,7 @@ require('./flyingResearchIpc');
 require('./automateListReliabilityPatch');
 require('./automateListIpc');
 require('./storeCachePatch');
+require('./interactionPerformancePatch');
 require('./exportPerformancePatch');
 require('./performanceOptimizationPatch');
 require('./performanceQueuePatch');
