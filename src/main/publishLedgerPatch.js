@@ -61,6 +61,7 @@ function writeLedger(ledger) {
 
 function samePublish(left, right) {
   if (left.projectId && right.projectId && left.projectId === right.projectId) return true;
+  if (left.queueRowId && right.queueRowId && left.queueRowId === right.queueRowId) return true;
   if (left.publishedUrl && right.publishedUrl && left.publishedUrl === right.publishedUrl) return true;
   if (left.id && right.id && left.id === right.id) return true;
   return false;
