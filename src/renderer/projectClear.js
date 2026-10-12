@@ -35,10 +35,14 @@
     );
     if (!accepted) return;
 
-    const typed = window.prompt(
-      'FINAL CONFIRMATION\n\nType CLEAR PROJECTS exactly to permanently delete all ZeroPOD projects.'
+    // Electron in this build does not support window.prompt(). Use a second native
+    // confirmation instead so Clear Projects cannot silently fail before IPC runs.
+    const finalAccepted = window.confirm(
+      `FINAL CONFIRMATION\n\n` +
+      `Permanently delete ALL ZeroPOD projects now?\n\n` +
+      `This cannot be undone. Choose OK only if you are sure.`
     );
-    if (typed !== 'CLEAR PROJECTS') {
+    if (!finalAccepted) {
       alert('Clear Projects canceled. Nothing was deleted.');
       return;
     }

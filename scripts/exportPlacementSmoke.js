@@ -2,13 +2,33 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const sharp = require('sharp');
-const { ExportController, placementFromBounds, topPlacementRatioFor } = require('../src/main/exportController');
+const {
+  ExportController,
+  placementFromBounds,
+  topClearancePxFor
+} = require('../src/main/exportController');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-async function runExportCase(name, svg, expectedMode, expectedReason = null, expectedTopRatio = null) {
+async function firstVisibleAlphaRow(filePath, scanHeight = 400) {
+  const { data, info } = await sharp(filePath)
+    .ensureAlpha()
+    .extract({ left: 0, top: 0, width: 4500, height: scanHeight })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  for (let y = 0; y < info.height; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      const alpha = data[(y * info.width + x) * info.channels + 3];
+      if (alpha > 16) return y;
+    }
+  }
+  return -1;
+}
+
+async function runExportCase(name, svg, expectedMode, expectedReason = null) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `zeropod-${name}-`));
   const vectorPath = path.join(root, 'vector.svg');
   fs.writeFileSync(vectorPath, svg, 'utf8');
@@ -34,16 +54,17 @@ async function runExportCase(name, svg, expectedMode, expectedReason = null, exp
     assert(Boolean(metadata.hasAlpha), `${name}: output lost transparency`);
 
     if (expectedMode === 'top') {
-      assert(expectedTopRatio !== null, `${name}: top case requires expectedTopRatio`);
-      assert(result.placement.topRatio === expectedTopRatio, `${name}: expected top ratio ${expectedTopRatio}, got ${result.placement.topRatio}`);
-      assert(result.placement.top === Math.round(5400 * expectedTopRatio), `${name}: unexpected top offset ${result.placement.top}`);
-      assert(
-        result.placement.reason === 'compact-height' || result.placement.reason === 'wide-chest-artwork',
-        `${name}: top placement did not come from a supported auto-placement rule`
-      );
+      const expectedTop = topClearancePxFor(result.placement.height);
+      assert(result.placement.top === expectedTop, `${name}: expected near-edge top ${expectedTop}, got ${result.placement.top}`);
+      assert(result.placement.clearanceBasis === 'visible-artwork-height', `${name}: wrong clearance basis`);
+      assert(result.placement.clearanceRatio === 0.05, `${name}: expected 5% visible-artwork clearance`);
+      const firstRow = await firstVisibleAlphaRow(result.path);
+      assert(firstRow >= 0, `${name}: no visible artwork found near top`);
+      assert(Math.abs(firstRow - expectedTop) <= 2, `${name}: visible art starts at ${firstRow}, expected ${expectedTop}`);
+      assert(firstRow < 180, `${name}: compact artwork is still too low at row ${firstRow}`);
     } else {
       assert(result.placement.top === null, `${name}: normal design should keep existing centered export`);
-      assert(result.placement.topRatio === null, `${name}: normal design should not have a top ratio`);
+      assert(result.placement.clearanceBasis === null, `${name}: normal design should not get compact clearance`);
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -54,29 +75,26 @@ async function runExportCase(name, svg, expectedMode, expectedReason = null, exp
   const compact = placementFromBounds(3200, 1800);
   assert(compact.mode === 'top', 'compact bounds should use top placement');
   assert(compact.reason === 'compact-height', 'compact bounds should use compact-height reason');
-  assert(topPlacementRatioFor(compact.reason) === 0.08, 'compact artwork should use the stronger 8% top offset');
+  assert(topClearancePxFor(1800) === 90, 'compact clearance should be 5% of visible artwork height');
 
-  const wideChest = placementFromBounds(3600, 2500);
-  assert(wideChest.mode === 'top', 'wide chest artwork should use top placement even above the compact-height cutoff');
-  assert(wideChest.reason === 'wide-chest-artwork', 'wide chest artwork should use the wide-chest reason');
-  assert(topPlacementRatioFor(wideChest.reason) === 0.05, 'wide chest artwork should use the stronger 5% top offset');
+  const wideCompact = placementFromBounds(3600, 2500);
+  assert(wideCompact.mode === 'top', 'wide compact chest artwork should use top placement');
+  assert(wideCompact.reason === 'compact-wide', 'wide compact artwork should use compact-wide reason');
+  assert(topClearancePxFor(2500) === 125, 'wide compact clearance should be 5% of visible artwork height');
 
-  assert(placementFromBounds(3200, 3000).mode === 'center', 'taller bounds should stay centered');
+  assert(placementFromBounds(3200, 3600).mode === 'center', 'tall/full bounds should stay centered');
 
   await runExportCase(
     'compact',
     '<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="600" viewBox="0 0 2000 600"><rect x="0" y="0" width="2000" height="600" rx="40" fill="#ef4444"/></svg>',
     'top',
-    'compact-height',
-    0.08
+    'compact-height'
   );
 
   await runExportCase(
-    'wide-chest',
+    'wide-compact',
     '<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000"><rect x="0" y="0" width="1800" height="1000" rx="40" fill="#f59e0b"/></svg>',
-    'top',
-    'wide-chest-artwork',
-    0.05
+    'top'
   );
 
   await runExportCase(
