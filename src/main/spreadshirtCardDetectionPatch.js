@@ -43,6 +43,20 @@ async function findSearchInput(page) {
   return null;
 }
 
+async function clearMarketplaceSearch(page) {
+  const input = await findSearchInput(page);
+  if (!input) return false;
+  const value = await input.inputValue().catch(() => '');
+  if (!value) return true;
+  await input.fill('').catch(async () => {
+    await input.click({ force: true }).catch(() => {});
+    await page.keyboard.press('Control+A').catch(() => {});
+    await page.keyboard.press('Backspace').catch(() => {});
+  });
+  await wait(500);
+  return true;
+}
+
 async function filterMarketplaceByTitle(page, title) {
   const input = await findSearchInput(page);
   if (!input) return false;
@@ -55,10 +69,9 @@ async function filterMarketplaceByTitle(page, title) {
   return true;
 }
 
-async function cardGeometryForTitle(page, title) {
-  return page.evaluate((wanted) => {
-    const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
-    const wantedNorm = norm(wanted);
+async function marketplaceCards(page) {
+  return page.evaluate(() => {
+    const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim();
     const visible = (el) => {
       if (!el) return false;
       const rect = el.getBoundingClientRect();
@@ -66,31 +79,52 @@ async function cardGeometryForTitle(page, title) {
       return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
     };
 
-    const all = [...document.querySelectorAll('body *')];
-    const exactTitles = all.filter((el) => visible(el) && norm(el.textContent) === wantedNorm);
-    for (const titleEl of exactTitles) {
-      let node = titleEl;
-      let best = null;
-      for (let depth = 0; node && depth < 9; depth += 1, node = node.parentElement) {
+    const cards = [];
+    const seen = new Set();
+    const statusNodes = [...document.querySelectorAll('body *')]
+      .filter((el) => visible(el) && /^(Draft|Published)$/i.test(norm(el.textContent)));
+
+    for (const status of statusNodes) {
+      let node = status;
+      let candidate = null;
+      for (let depth = 0; node && depth < 10; depth += 1, node = node.parentElement) {
         if (!visible(node)) continue;
         const rect = node.getBoundingClientRect();
+        if (rect.width < 150 || rect.width > 520 || rect.height < 220 || rect.height > 850) continue;
         const text = norm(node.innerText || node.textContent);
-        const image = node.querySelector('img,picture img,svg,[style*="background-image"]');
-        if (!text.includes(wantedNorm) || !image) continue;
-        if (rect.width < 140 || rect.height < 160 || rect.width > 700 || rect.height > 850) continue;
+        if (!text || !/\b(Draft|Published)\b/i.test(text)) continue;
+        const image = node.querySelector('img,picture img,svg,canvas,[style*="background-image"]');
+        if (!image || !visible(image)) continue;
         const imageRect = image.getBoundingClientRect();
-        if (!visible(image)) continue;
-        best = {
-          card: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-          image: { x: imageRect.x, y: imageRect.y, width: imageRect.width, height: imageRect.height },
-          text: String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 220)
+        candidate = {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          imageX: imageRect.x,
+          imageY: imageRect.y,
+          imageWidth: imageRect.width,
+          imageHeight: imageRect.height,
+          text,
+          status: /\bDraft\b/i.test(text) ? 'Draft' : 'Published'
         };
-        if (/\bdraft\b/i.test(text)) return best;
+        break;
       }
-      if (best) return best;
+      if (!candidate) continue;
+      const key = `${Math.round(candidate.x)}:${Math.round(candidate.y)}:${Math.round(candidate.width)}:${Math.round(candidate.height)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      cards.push(candidate);
     }
-    return null;
-  }, title).catch(() => null);
+
+    cards.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    return cards;
+  }).catch(() => []);
+}
+
+async function firstMarketplaceCard(page) {
+  const cards = await marketplaceCards(page);
+  return cards[0] || null;
 }
 
 async function editorOpened(page, beforeUrl) {
@@ -100,84 +134,90 @@ async function editorOpened(page, beforeUrl) {
   return false;
 }
 
-async function clickCardGeometry(page, geometry) {
-  if (!geometry) return false;
+async function clickMarketplaceCard(page, card) {
+  if (!card) return false;
   const beforeUrl = page.url();
-  const image = geometry.image || geometry.card;
-  const card = geometry.card || geometry.image;
-
   const points = [
-    { x: image.x + Math.max(4, image.width / 2), y: image.y + Math.max(4, image.height / 2) },
-    { x: card.x + Math.max(4, card.width / 2), y: card.y + Math.min(card.height - 8, Math.max(12, card.height * 0.38)) },
-    { x: card.x + Math.max(4, card.width / 2), y: card.y + Math.max(8, card.height / 2) }
+    {
+      x: card.imageX + Math.max(6, card.imageWidth / 2),
+      y: card.imageY + Math.max(6, card.imageHeight / 2)
+    },
+    {
+      x: card.x + Math.max(8, card.width / 2),
+      y: card.y + Math.min(card.height - 12, Math.max(18, card.height * 0.4))
+    },
+    {
+      x: card.x + Math.max(8, card.width / 2),
+      y: card.y + Math.max(12, card.height / 2)
+    }
   ];
 
   for (const point of points) {
     try {
       await page.mouse.click(point.x, point.y);
       const started = Date.now();
-      while (Date.now() - started < 3500) {
+      while (Date.now() - started < 4000) {
         if (await editorOpened(page, beforeUrl)) return true;
         await wait(200);
       }
     } catch {}
   }
-
-  try {
-    await page.mouse.dblclick(points[0].x, points[0].y, { delay: 80 });
-    const started = Date.now();
-    while (Date.now() - started < 3500) {
-      if (await editorOpened(page, beforeUrl)) return true;
-      await wait(200);
-    }
-  } catch {}
-
   return false;
 }
 
-async function openVisibleDraftCard(page, title) {
-  await filterMarketplaceByTitle(page, title).catch(() => false);
-  await wait(500);
-  const geometry = await cardGeometryForTitle(page, title);
-  if (!geometry) return { ok: false, reason: 'card-not-found' };
-  const clicked = await clickCardGeometry(page, geometry);
-  return { ok: clicked, geometry, reason: clicked ? null : 'card-click-did-not-open-editor' };
-}
-
-async function countVisibleDesignTitles(page, title) {
-  const geometry = await cardGeometryForTitle(page, title);
-  return geometry ? 1 : 0;
-}
-
-async function openUploadedDraftByTitle(page, title, options = {}) {
-  const timeoutMs = options.timeoutMs || 45000;
+async function openNewestCardIfExpected(page, title, timeoutMs = 30000) {
+  const expected = normalize(title);
   const started = Date.now();
-  let lastReloadAt = 0;
-  let lastReason = 'not-seen';
-
   while (Date.now() - started < timeoutMs) {
-    const body = await page.locator('body').innerText().catch(() => '');
-    if (HUMAN_CHECK_PATTERN.test(body)) {
-      throw new Error('Spreadshirt is showing a human-verification challenge. Complete it manually, then retry.');
-    }
-
-    const result = await openVisibleDraftCard(page, title);
-    if (result.ok) return { ok: true, title, visibleCount: 1, method: 'marketplace-search-card-click' };
-    lastReason = result.reason || lastReason;
-
-    if (Date.now() - lastReloadAt > 6500) {
-      lastReloadAt = Date.now();
-      if (!/\/mp\/designs(?:[/?#]|$)/i.test(page.url())) {
-        await page.goto(MARKETPLACE_DESIGNS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
-      } else {
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    await clearMarketplaceSearch(page).catch(() => {});
+    const card = await firstMarketplaceCard(page);
+    if (card) {
+      const text = normalize(card.text);
+      if (text.includes(expected)) {
+        const opened = await clickMarketplaceCard(page, card);
+        if (opened) return { ok: true, card, method: 'first-card' };
+        return { ok: false, card, reason: 'first-card-click-did-not-open-editor' };
       }
-      await waitForMarketplaceDesigns(page, 12000).catch(() => {});
+      return { ok: false, card, reason: 'first-card-title-mismatch' };
     }
-    await wait(450);
+    await wait(500);
   }
+  return { ok: false, card: null, reason: 'no-design-cards' };
+}
 
-  return { ok: false, title, visibleCount: 0, method: 'marketplace-search-card-click', reason: lastReason };
+async function verifyExpectedDraftExists(page, title, passes = 3) {
+  const expected = normalize(title);
+  let lastCard = null;
+  for (let pass = 1; pass <= passes; pass += 1) {
+    if (!/\/mp\/designs(?:[/?#]|$)/i.test(page.url())) {
+      await page.goto(MARKETPLACE_DESIGNS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    }
+    await waitForMarketplaceDesigns(page, 15000).catch(() => {});
+    await clearMarketplaceSearch(page).catch(() => {});
+    await wait(500);
+
+    const card = await firstMarketplaceCard(page);
+    lastCard = card;
+    if (card && normalize(card.text).includes(expected)) {
+      return { present: true, card, pass };
+    }
+
+    // Safety fallback: an older expected Draft may still exist if something newer was uploaded manually.
+    if (await filterMarketplaceByTitle(page, title).catch(() => false)) {
+      const filtered = await firstMarketplaceCard(page);
+      if (filtered && normalize(filtered.text).includes(expected)) {
+        return { present: true, card: filtered, pass, filtered: true };
+      }
+    }
+
+    if (pass < passes) {
+      await clearMarketplaceSearch(page).catch(() => {});
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+      await wait(700);
+    }
+  }
+  await clearMarketplaceSearch(page).catch(() => {});
+  return { present: false, card: lastCard, pass: passes };
 }
 
 async function returnToMarketplaceDesigns(page) {
@@ -185,6 +225,7 @@ async function returnToMarketplaceDesigns(page) {
     await page.goto(MARKETPLACE_DESIGNS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
   }
   await waitForMarketplaceDesigns(page, 20000);
+  await clearMarketplaceSearch(page).catch(() => {});
 }
 
 async function continueFromDesignEditor(page, projectId) {
@@ -194,7 +235,7 @@ async function continueFromDesignEditor(page, projectId) {
   return true;
 }
 
-feature.prepare = async function prepareWithDraftRecovery(projectId) {
+feature.prepare = async function prepareWithNewestCardRecovery(projectId) {
   const gate = await this.check(projectId);
   if (!gate.ok) throw new Error(`Spreadshirt gate check failed: ${gate.errors.join(' ')}`);
 
@@ -208,17 +249,31 @@ feature.prepare = async function prepareWithDraftRecovery(projectId) {
   try {
     await this.openDesigns(page);
 
-    if (project.spreadshirt?.uploadAcceptedAt || project.spreadshirt?.status === 'recovery-needed') {
-      activity(projectId, `Searching Spreadshirt Marketplace for the existing Draft “${designTitle}”…`);
-      const recovered = await openUploadedDraftByTitle(page, designTitle, {
-        timeoutMs: project.spreadshirt?.uploadAcceptedAt ? 30000 : 12000,
-        allowAnyExisting: true
-      });
-      if (recovered.ok) {
-        activity(projectId, `Opened existing Spreadshirt Draft “${designTitle}” through Marketplace search. Continuing without re-uploading.`, 'spreadshirt');
-        await continueFromDesignEditor(page, projectId);
-      } else if (project.spreadshirt?.uploadAcceptedAt) {
-        throw new Error(`Spreadshirt upload was already accepted, but ZeroPOD could not open Draft “${designTitle}” through Marketplace search/card click. The upload is preserved and will not be repeated.`);
+    // Resume safety: verify the accepted Draft still really exists before suppressing a re-upload.
+    if (project.spreadshirt?.uploadAcceptedAt) {
+      activity(projectId, `Checking whether the previously uploaded Spreadshirt Draft “${designTitle}” still exists…`);
+      const presence = await verifyExpectedDraftExists(page, designTitle, 3);
+      if (presence.present) {
+        activity(projectId, `Found existing Spreadshirt Draft “${designTitle}”. Opening it without re-uploading…`);
+        if (await clickMarketplaceCard(page, presence.card)) {
+          await continueFromDesignEditor(page, projectId);
+        } else {
+          throw new Error(`Spreadshirt Draft “${designTitle}” exists, but ZeroPOD could not open it. Upload remains protected from duplicates.`);
+        }
+      } else {
+        activity(projectId, `The saved Spreadshirt upload marker is stale: “${designTitle}” is no longer on the Designs page. Clearing it and uploading again normally.`, 'spreadshirt');
+        project = this.projects.read(projectId);
+        this.projects.update(projectId, {
+          spreadshirt: {
+            ...(project.spreadshirt || {}),
+            status: 'export-ready',
+            uploadAcceptedAt: null,
+            uploadDesignTitle: null,
+            uploadFileName: null,
+            lastError: null
+          }
+        });
+        project = this.projects.read(projectId);
       }
     }
 
@@ -245,7 +300,7 @@ feature.prepare = async function prepareWithDraftRecovery(projectId) {
           lastError: null
         }
       });
-      activity(projectId, `Spreadshirt reported “Upload successful” for “${designTitle}”. Searching for its Draft card…`, 'spreadshirt');
+      activity(projectId, `Spreadshirt reported “Upload successful” for “${designTitle}”. Opening the newest first design card…`, 'spreadshirt');
 
       const modal = page.getByRole('dialog').filter({ hasText: /Upload status/i }).first();
       if (await modal.count().catch(() => 0)) {
@@ -253,7 +308,16 @@ feature.prepare = async function prepareWithDraftRecovery(projectId) {
       }
       await returnToMarketplaceDesigns(page);
 
-      let opened = await openUploadedDraftByTitle(page, designTitle, { timeoutMs: 55000, allowAnyExisting: true });
+      let opened = await openNewestCardIfExpected(page, designTitle, 30000);
+      if (!opened.ok) {
+        // Give Spreadshirt a short refresh window if the list has not reordered yet.
+        for (let retry = 1; retry <= 2 && !opened.ok; retry += 1) {
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+          await waitForMarketplaceDesigns(page, 15000).catch(() => {});
+          await wait(700);
+          opened = await openNewestCardIfExpected(page, designTitle, 7000);
+        }
+      }
 
       if (!opened.ok) {
         try {
@@ -263,10 +327,10 @@ feature.prepare = async function prepareWithDraftRecovery(projectId) {
       }
 
       if (!opened.ok) {
-        throw new Error(`Spreadshirt upload succeeded, but ZeroPOD could not open Draft “${designTitle}” through Marketplace search/card click. The upload is preserved and will not be repeated.`);
+        throw new Error(`Spreadshirt upload succeeded, but the newest first card did not match/open “${designTitle}”. The upload is preserved and will not be repeated until ZeroPOD verifies the Draft is absent.`);
       }
 
-      activity(projectId, `Opened uploaded Spreadshirt Draft “${designTitle}”.`, 'spreadshirt');
+      activity(projectId, `Opened newest Spreadshirt design “${designTitle}”.`, 'spreadshirt');
       await continueFromDesignEditor(page, projectId);
     }
 
@@ -318,9 +382,11 @@ feature.prepare = async function prepareWithDraftRecovery(projectId) {
 module.exports = {
   designTitleFromFile,
   findSearchInput,
+  clearMarketplaceSearch,
   filterMarketplaceByTitle,
-  cardGeometryForTitle,
-  openVisibleDraftCard,
-  countVisibleDesignTitles,
-  openUploadedDraftByTitle
+  marketplaceCards,
+  firstMarketplaceCard,
+  clickMarketplaceCard,
+  openNewestCardIfExpected,
+  verifyExpectedDraftExists
 };
