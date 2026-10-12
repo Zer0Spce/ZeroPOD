@@ -11,6 +11,7 @@ const files = [
   'src/main/spreadshirtAlphaIpc.js',
   'src/main/spreadshirtAlphaUiPatch.js',
   'src/main/spreadshirtMarketplaceRoutePatch.js',
+  'src/main/spreadshirtCardDetectionPatch.js',
   'src/main/spreadshirtRegularExportPatch.js',
   'src/main/spreadshirtJourneyReliabilityPatch.js',
   'src/main/spreadshirtUploadReliabilityPatch.js',
@@ -31,7 +32,7 @@ const journey = read('src/main/spreadshirtJourneyReliabilityPatch.js');
 const upload = read('src/main/spreadshirtUploadReliabilityPatch.js');
 const videoFlow = read('src/main/spreadshirtVideoFlowPatch.js');
 const marketplaceRoute = read('src/main/spreadshirtMarketplaceRoutePatch.js');
-const uiPatch = read('src/main/spreadshirtAlphaUiPatch.js');
+const cardDetection = read('src/main/spreadshirtCardDetectionPatch.js');
 const renderer = read('src/renderer/spreadshirtAlpha.js');
 const preload = read('src/main/preload.js');
 const bootstrap = read('src/main/bootstrap.js');
@@ -48,7 +49,14 @@ assert(/MARKETPLACE_DESIGNS_URL = 'https:\/\/partner\.spreadshirt\.com\/mp\/desi
 assert(/waitForMarketplaceDesigns/.test(marketplaceRoute) && /create new/i.test(marketplaceRoute), 'Spreadshirt Marketplace readiness must wait for Create New.');
 assert(/SERVICES\.spreadshirt\.url = MARKETPLACE_DESIGNS_URL/.test(marketplaceRoute), 'Spreadshirt session URL must be redirected to /mp/designs.');
 assert(/feature\.openDesigns/.test(marketplaceRoute) && /feature\.open =/.test(marketplaceRoute), 'Spreadshirt open actions must use Marketplace routing.');
-assert(/require\('\.\/spreadshirtMarketplaceRoutePatch'\)/.test(uiPatch), 'Spreadshirt Marketplace route patch must load after Spreadshirt IPC.');
+
+assert(/designTitleFromFile/.test(cardDetection), 'Spreadshirt uploaded-card matching must derive the filename title.');
+assert(/openUploadedDraftByTitle/.test(cardDetection), 'Spreadshirt exact-title Draft recovery is missing.');
+assert(/getByText\(pattern\)/.test(cardDetection), 'Spreadshirt Draft recovery must locate the visible uploaded title.');
+assert(/uploadAcceptedAt/.test(cardDetection), 'Spreadshirt must persist upload acceptance before opening the Draft card.');
+assert(/Continuing without re-uploading/.test(cardDetection), 'Spreadshirt recovery must avoid duplicate uploads.');
+assert(/The upload is preserved and will not be repeated/.test(cardDetection), 'Spreadshirt post-upload failure must preserve the accepted upload.');
+assert(/minimumVisibleCount/.test(cardDetection) && /allowAnyExisting/.test(cardDetection), 'Spreadshirt Draft detection must handle new and virtualized card states.');
 
 assert(/new ExportController/.test(standardExport), 'Spreadshirt must reuse the standard ZeroPOD ExportController.');
 assert(/standard-zeropod-4500x5400/.test(standardExport), 'Spreadshirt standard 4500x5400 export marker is missing.');
@@ -70,7 +78,7 @@ assert(/Upload design/i.test(videoFlow), 'Recorded Spreadshirt Upload Design dia
 assert(/Select file/i.test(videoFlow), 'Recorded Spreadshirt Select file action is missing.');
 assert(/waitForEvent\('filechooser'/.test(videoFlow), 'Spreadshirt must prefer the real file chooser like the recorded manual flow.');
 assert(/Upload status/i.test(videoFlow) && /Upload successful/i.test(videoFlow), 'Spreadshirt Upload Status success detection is missing.');
-assert(/clickUploadedDesign/.test(videoFlow), 'Spreadshirt must open the newly uploaded design card after upload.');
+assert(/clickUploadedDesign/.test(videoFlow), 'Spreadshirt must retain legacy uploaded-card fallback detection.');
 assert(/Design products/i.test(videoFlow), 'Spreadshirt must wait for the Design products editor.');
 assert(/products created/i.test(videoFlow), 'Spreadshirt must wait for product creation before final preparation.');
 assert(/Publish on Spreadshirt/i.test(videoFlow), 'Spreadshirt marketplace toggle handling is missing.');
@@ -116,10 +124,12 @@ const journeyPatchIndex = bootstrap.indexOf("require('./spreadshirtJourneyReliab
 const uploadPatchIndex = bootstrap.indexOf("require('./spreadshirtUploadReliabilityPatch')");
 const videoPatchIndex = bootstrap.indexOf("require('./spreadshirtVideoFlowPatch')");
 const ssIpcIndex = bootstrap.indexOf("require('./spreadshirtAlphaIpc')");
+const marketplaceRouteIndex = bootstrap.indexOf("require('./spreadshirtMarketplaceRoutePatch')");
+const cardPatchIndex = bootstrap.indexOf("require('./spreadshirtCardDetectionPatch')");
 const ssUiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
 const mainIndex = bootstrap.lastIndexOf("require('./main')");
 assert(flyingPatchIndex >= 0 && flyingPatchIndex < flyingIpcIndex, 'Flying Spreadshirt prototype patch must load before Flying Research IPC.');
-assert(exportPatchIndex >= 0 && exportPatchIndex < journeyPatchIndex && journeyPatchIndex < uploadPatchIndex && uploadPatchIndex < videoPatchIndex && videoPatchIndex < ssIpcIndex, 'Recorded Spreadshirt flow patch must be the final Spreadshirt runtime override before IPC.');
-assert(ssIpcIndex >= 0 && ssIpcIndex < ssUiIndex && ssUiIndex < mainIndex, 'Spreadshirt IPC must load before UI/Marketplace route patch and before main.');
+assert(exportPatchIndex >= 0 && exportPatchIndex < journeyPatchIndex && journeyPatchIndex < uploadPatchIndex && uploadPatchIndex < videoPatchIndex && videoPatchIndex < ssIpcIndex, 'Recorded Spreadshirt flow patches must load before Spreadshirt IPC.');
+assert(ssIpcIndex >= 0 && ssIpcIndex < marketplaceRouteIndex && marketplaceRouteIndex < cardPatchIndex && cardPatchIndex < ssUiIndex && ssUiIndex < mainIndex, 'Spreadshirt Marketplace route and Draft recovery must load after IPC and before UI/main.');
 
-console.log('Spreadshirt Alpha recorded-video + Marketplace /mp/designs workflow smoke checks passed.');
+console.log('Spreadshirt Alpha recorded-video + Marketplace /mp/designs + Draft recovery smoke checks passed.');
