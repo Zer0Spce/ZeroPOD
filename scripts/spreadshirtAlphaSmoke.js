@@ -53,7 +53,7 @@ assert(/reviewScreenshotPath/.test(journey), 'Spreadshirt final-review capture i
 assert(/ensureRightsConfirmation/.test(upload), 'Spreadshirt copyright/license checkbox automation is missing.');
 assert(/owner of the copyright/.test(upload) && /license rights/.test(upload), 'Spreadshirt rights confirmation matching is missing.');
 assert(/#listFileInput/.test(upload) && /#hiddenFileInput/.test(upload), 'Spreadshirt current file inputs must be supported.');
-assert(/Ooops!?\\s\*Snap/.test(upload) && /It didn/.test(upload), 'Spreadshirt upload error detection is missing.');
+assert(/UPLOAD_ERROR_PATTERN/.test(upload) && /Ooops/.test(upload) && /It didn/.test(upload), 'Spreadshirt upload error detection is missing.');
 assert(/attempt <= 3/.test(upload), 'Spreadshirt upload must retry transient failures.');
 assert(/waitForUploadProgress/.test(upload), 'Spreadshirt must wait for real upload progress before metadata.');
 assert(!/MAX_SPREADSHIRT_DIMENSION|MAX_SPREADSHIRT_BYTES/.test(upload), 'Upload reliability must not reject the user-tested 4500x5400 file.');
