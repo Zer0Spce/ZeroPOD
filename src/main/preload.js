@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     start: (payload) => ipcRenderer.invoke('generation:start', payload),
     newChat: () => ipcRenderer.invoke('generation:new-chat')
   },
+  workflow: {
+    forceStop: (projectId) => ipcRenderer.invoke('workflow:force-stop', projectId)
+  },
   review: {
     reject: (payload) => ipcRenderer.invoke('review:reject', payload),
     pass: (payload) => ipcRenderer.invoke('review:pass', payload)
@@ -44,6 +47,7 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     prepare: (projectId) => ipcRenderer.invoke('redbubble:prepare', projectId),
     publish: (projectId) => ipcRenderer.invoke('redbubble:publish', projectId),
     dailyUsage: () => ipcRenderer.invoke('redbubble:daily-usage'),
+    publishStats: () => ipcRenderer.invoke('redbubble:publish-ledger-stats'),
     checkUploadLimit: () => ipcRenderer.invoke('redbubble:check-upload-limit'),
     limitCheckSettings: () => ipcRenderer.invoke('redbubble:limit-check-settings'),
     updateLimitCheckSettings: (patch) => ipcRenderer.invoke('redbubble:update-limit-check-settings', patch)
@@ -55,9 +59,11 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     move: (payload) => ipcRenderer.invoke('automation:move', payload),
     remove: (rowId) => ipcRenderer.invoke('automation:remove', rowId),
     clearCompleted: () => ipcRenderer.invoke('automation:clear-completed'),
+    clearFailed: () => ipcRenderer.invoke('automation:clear-failed'),
     start: () => ipcRenderer.invoke('automation:start'),
     pause: () => ipcRenderer.invoke('automation:pause'),
     stop: () => ipcRenderer.invoke('automation:stop'),
+    forceStop: () => ipcRenderer.invoke('automation:force-stop'),
     importCsv: () => ipcRenderer.invoke('automation:import-csv'),
     exportCsv: () => ipcRenderer.invoke('automation:export-csv'),
     importXlsx: () => ipcRenderer.invoke('automation:import-xlsx'),
