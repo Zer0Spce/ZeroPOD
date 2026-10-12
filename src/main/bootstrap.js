@@ -98,6 +98,7 @@ require('./redbubbleDescriptionRetryPatch');
 require('./redbubbleDescriptionPastePatch');
 require('./redbubbleDescriptionCoordinatePatch');
 require('./redbubbleSkipDescriptionBetaPatch');
+require('./redbubbleFastFieldsPatch');
 require('./redbubbleReviewCapturePatch');
 require('./redbubbleAgreementReliabilityPatch');
 require('./redbubblePublishStateRecoveryPatch');
