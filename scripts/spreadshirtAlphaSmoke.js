@@ -45,7 +45,7 @@ assert(/dailyBlocked/.test(feature) && /accountBlocked/.test(feature), 'Spreadsh
 assert(/could not verify Spreadshirt success/i.test(feature), 'Publish verification guard is missing.');
 
 assert(/MARKETPLACE_DESIGNS_URL = 'https:\/\/partner\.spreadshirt\.com\/mp\/designs'/.test(marketplaceRoute), 'Spreadshirt must use the Marketplace /mp/designs page.');
-assert(/waitForMarketplaceDesigns/.test(marketplaceRoute) && /create\s\+new/i.test(marketplaceRoute), 'Spreadshirt Marketplace readiness must wait for Create New.');
+assert(/waitForMarketplaceDesigns/.test(marketplaceRoute) && /create new/i.test(marketplaceRoute), 'Spreadshirt Marketplace readiness must wait for Create New.');
 assert(/SERVICES\.spreadshirt\.url = MARKETPLACE_DESIGNS_URL/.test(marketplaceRoute), 'Spreadshirt session URL must be redirected to /mp/designs.');
 assert(/feature\.openDesigns/.test(marketplaceRoute) && /feature\.open =/.test(marketplaceRoute), 'Spreadshirt open actions must use Marketplace routing.');
 assert(/require\('\.\/spreadshirtMarketplaceRoutePatch'\)/.test(uiPatch), 'Spreadshirt Marketplace route patch must load after Spreadshirt IPC.');
