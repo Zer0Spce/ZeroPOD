@@ -51,14 +51,17 @@ assert(/SERVICES\.spreadshirt\.url = MARKETPLACE_DESIGNS_URL/.test(marketplaceRo
 assert(/feature\.openDesigns/.test(marketplaceRoute) && /feature\.open =/.test(marketplaceRoute), 'Spreadshirt open actions must use Marketplace routing.');
 
 assert(/designTitleFromFile/.test(cardDetection), 'Spreadshirt uploaded-card matching must derive the filename title.');
-assert(/openUploadedDraftByTitle/.test(cardDetection), 'Spreadshirt Draft recovery is missing.');
-assert(/Name,\\s\*Id,\\s\*Tags/.test(cardDetection) && /filterMarketplaceByTitle/.test(cardDetection), 'Spreadshirt Draft recovery must use the Marketplace Search field.');
-assert(/cardGeometryForTitle/.test(cardDetection), 'Spreadshirt Draft recovery must derive the visible card geometry.');
-assert(/page\.mouse\.click/.test(cardDetection) && /page\.mouse\.dblclick/.test(cardDetection), 'Spreadshirt Draft recovery must click the visible card/image region directly.');
-assert(/uploadAcceptedAt/.test(cardDetection), 'Spreadshirt must persist upload acceptance before opening the Draft card.');
-assert(/Continuing without re-uploading/.test(cardDetection), 'Spreadshirt recovery must avoid duplicate uploads.');
-assert(/upload is preserved and will not be repeated/i.test(cardDetection), 'Spreadshirt post-upload failure must preserve the accepted upload.');
-assert(/marketplace-search-card-click/.test(cardDetection), 'Spreadshirt Draft recovery method marker is missing.');
+assert(/firstMarketplaceCard/.test(cardDetection), 'Spreadshirt newest-card detection is missing.');
+assert(/openNewestCardIfExpected/.test(cardDetection), 'Spreadshirt fresh-upload first-card opener is missing.');
+assert(/page\.mouse\.click/.test(cardDetection), 'Spreadshirt must click the visible first card/artwork region directly.');
+assert(/verifyExpectedDraftExists/.test(cardDetection), 'Spreadshirt stale upload-state verification is missing.');
+assert(/uploadAcceptedAt:\s*null/.test(cardDetection), 'Spreadshirt must clear stale uploadAcceptedAt state before re-uploading.');
+assert(/uploadDesignTitle:\s*null/.test(cardDetection) && /uploadFileName:\s*null/.test(cardDetection), 'Spreadshirt stale upload metadata must be cleared together.');
+assert(/saved Spreadshirt upload marker is stale/i.test(cardDetection), 'Spreadshirt stale-state Activity message is missing.');
+assert(/Opening the newest first design card/i.test(cardDetection), 'Fresh Spreadshirt upload must open the newest first card.');
+assert(/newest first card did not match\/open/i.test(cardDetection), 'Spreadshirt first-card mismatch guard is missing.');
+assert(/filterMarketplaceByTitle/.test(cardDetection), 'Spreadshirt should retain search fallback for non-first-card recovery.');
+assert(/legacy-href-fallback/.test(cardDetection), 'Spreadshirt legacy href fallback must remain available.');
 
 assert(/new ExportController/.test(standardExport), 'Spreadshirt must reuse the standard ZeroPOD ExportController.');
 assert(/standard-zeropod-4500x5400/.test(standardExport), 'Spreadshirt standard 4500x5400 export marker is missing.');
@@ -132,6 +135,6 @@ const ssUiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
 const mainIndex = bootstrap.lastIndexOf("require('./main')");
 assert(flyingPatchIndex >= 0 && flyingPatchIndex < flyingIpcIndex, 'Flying Spreadshirt prototype patch must load before Flying Research IPC.');
 assert(exportPatchIndex >= 0 && exportPatchIndex < journeyPatchIndex && journeyPatchIndex < uploadPatchIndex && uploadPatchIndex < videoPatchIndex && videoPatchIndex < ssIpcIndex, 'Recorded Spreadshirt flow patches must load before Spreadshirt IPC.');
-assert(ssIpcIndex >= 0 && ssIpcIndex < marketplaceRouteIndex && marketplaceRouteIndex < cardPatchIndex && cardPatchIndex < ssUiIndex && ssUiIndex < mainIndex, 'Spreadshirt Marketplace route and Draft recovery must load after IPC and before UI/main.');
+assert(ssIpcIndex >= 0 && ssIpcIndex < marketplaceRouteIndex && marketplaceRouteIndex < cardPatchIndex && cardPatchIndex < ssUiIndex && ssUiIndex < mainIndex, 'Spreadshirt Marketplace route and newest-card recovery must load after IPC and before UI/main.');
 
-console.log('Spreadshirt Alpha recorded-video + Marketplace search/card-click recovery smoke checks passed.');
+console.log('Spreadshirt Alpha recorded-video + newest-first-card + stale-upload recovery smoke checks passed.');
