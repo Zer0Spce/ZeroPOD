@@ -1,10 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
 const { SessionManager } = require('./sessionManager');
 
 function threadStatePath() {
-  return path.join(app.getPath('userData'), 'thread-state.json');
+  return path.join(require('electron').app.getPath('userData'), 'thread-state.json');
 }
 
 function readThreadState() {
@@ -127,6 +126,7 @@ require('./flyingResearchIpc');
 require('./spreadshirtRegularExportPatch');
 require('./spreadshirtJourneyReliabilityPatch');
 require('./spreadshirtUploadReliabilityPatch');
+require('./spreadshirtVideoFlowPatch');
 require('./spreadshirtAlphaIpc');
 require('./spreadshirtAlphaUiPatch');
 require('./automateListReliabilityPatch');
