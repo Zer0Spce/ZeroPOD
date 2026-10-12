@@ -7,8 +7,7 @@ const OUTPUT_HEIGHT = 5400;
 const COMPACT_MAX_HEIGHT_RATIO = 0.40;
 const WIDE_CHEST_MAX_HEIGHT_RATIO = 0.60;
 const WIDE_CHEST_MIN_ASPECT_RATIO = 1.35;
-const COMPACT_TOP_PLACEMENT_RATIO = 0.08;
-const WIDE_CHEST_TOP_PLACEMENT_RATIO = 0.05;
+const TOP_PLACEMENT_RATIO = 0.05;
 const TRIM_THRESHOLD = 8;
 
 function roundRatio(value) {
@@ -44,9 +43,9 @@ function placementFromBounds(width, height) {
 }
 
 function topPlacementRatioFor(reason) {
-  return reason === 'wide-chest-artwork'
-    ? WIDE_CHEST_TOP_PLACEMENT_RATIO
-    : COMPACT_TOP_PLACEMENT_RATIO;
+  return reason === 'compact-height' || reason === 'wide-chest-artwork'
+    ? TOP_PLACEMENT_RATIO
+    : null;
 }
 
 async function analyzeVisibleArtwork(renderedBuffer) {
@@ -68,7 +67,7 @@ async function analyzeVisibleArtwork(renderedBuffer) {
 
 async function writeTopPlacedArtwork(output, trimmedBuffer, info, reason) {
   const left = Math.max(0, Math.round((OUTPUT_WIDTH - info.width) / 2));
-  const topRatio = topPlacementRatioFor(reason);
+  const topRatio = topPlacementRatioFor(reason) || TOP_PLACEMENT_RATIO;
   const desiredTop = Math.round(OUTPUT_HEIGHT * topRatio);
   const top = Math.max(0, Math.min(desiredTop, OUTPUT_HEIGHT - info.height));
 

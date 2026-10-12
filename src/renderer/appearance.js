@@ -151,16 +151,8 @@ function loadResearchFeatures() {
   // the codebase so we can fix and re-enable it later without affecting Flying Research BETA.
   hideResearchBeta();
 
-  // Automate List uses the existing Amazon Research browser profile to retrieve
-  // the product image from each Amazon link. Keep this connection visible even
-  // while the separate Research BETA tab remains hidden.
-  try {
-    if (typeof serviceOrder !== 'undefined' && Array.isArray(serviceOrder) && !serviceOrder.includes('amazonResearch')) {
-      serviceOrder.push('amazonResearch');
-      if (typeof renderConnections === 'function') Promise.resolve(renderConnections()).catch(() => {});
-    }
-  } catch {}
-
+  // Amazon Research remains available internally for Automate List / research
+  // retrieval, but it is intentionally not exposed as a Connections login card.
   loadZeroPODFeatureScript('automateList.js', 'automateListFeatureScript');
   loadZeroPODFeatureScript('storageSettings.js', 'storageSettingsFeatureScript');
   loadZeroPODFeatureScript('browserMaintenance.js', 'browserMaintenanceFeatureScript');
