@@ -121,4 +121,7 @@ require('./flyingResearchInfiniteScrollPatch');
 require('./flyingResearchIpc');
 require('./automateListReliabilityPatch');
 require('./automateListIpc');
+require('./performanceOptimizationPatch');
+require('./performanceQueuePatch');
+require('./performanceIpc');
 require('./main');
