@@ -10,10 +10,24 @@ function paginationRootAndActive() {
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) !== 0;
   };
-  const roots = [...document.querySelectorAll('ngb-pagination,.pagination,[class*="pagination"],nav[aria-label*="pagination" i]')].filter(visible);
-  const root = roots[0] || document;
+  const selector = [
+    'ngb-pagination',
+    '.pagination',
+    '[class*="pagination"]',
+    'mat-paginator',
+    '.mat-mdc-paginator',
+    '.mat-paginator',
+    '[class*="paginator"]',
+    '[class*="pager"]',
+    'nav[aria-label*="page" i]',
+    '[role="navigation"][aria-label*="page" i]'
+  ].join(',');
+  const roots = [...document.querySelectorAll(selector)].filter(visible);
+  const root = roots.find((candidate) => [...candidate.querySelectorAll('.active,[aria-current="page"]')].some(visible))
+    || roots.find((candidate) => candidate.querySelector('a,button'))
+    || document;
   const active = [...root.querySelectorAll('.active,[aria-current="page"]')].find(visible) || null;
-  const activeItem = active?.closest?.('li,.page-item') || active;
+  const activeItem = active?.closest?.('li,.page-item,[role="listitem"]') || active;
   return { visible, root, active, activeItem };
 }
 
@@ -23,10 +37,34 @@ function isDisabledPaginationControl(element) {
   return Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true' || parent);
 }
 
+function paginationControlText(element) {
+  if (!element) return '';
+  const className = typeof element.className === 'string' ? element.className : element.className?.baseVal || '';
+  return [
+    element.getAttribute?.('aria-label') || '',
+    element.getAttribute?.('title') || '',
+    element.getAttribute?.('data-testid') || '',
+    element.getAttribute?.('data-test') || '',
+    className,
+    element.textContent || ''
+  ].join(' ').replace(/\s+/g, ' ').trim();
+}
+
 function findNextPaginationControl(root, activeItem, visible) {
-  const explicit = [
-    ...root.querySelectorAll('a[rel="next"],button[rel="next"],[aria-label*="next" i],[title*="next" i]')
-  ].find((el) => visible(el) && !isDisabledPaginationControl(el));
+  const explicitSelectors = [
+    'a[rel="next"]',
+    'button[rel="next"]',
+    '[aria-label*="next" i]',
+    '[title*="next" i]',
+    '[data-testid*="next" i]',
+    '[data-test*="next" i]',
+    'button[class*="next" i]',
+    'a[class*="next" i]',
+    '.mat-mdc-paginator-navigation-next',
+    '.mat-paginator-navigation-next'
+  ].join(',');
+  const explicit = [...root.querySelectorAll(explicitSelectors)]
+    .find((el) => visible(el) && !isDisabledPaginationControl(el));
   if (explicit) return explicit;
 
   const sibling = activeItem?.nextElementSibling || null;
@@ -35,11 +73,24 @@ function findNextPaginationControl(root, activeItem, visible) {
     if (visible(candidate) && !isDisabledPaginationControl(candidate)) return candidate;
   }
 
-  return [...root.querySelectorAll('a,button')].find((el) => {
+  const currentText = String(activeItem?.textContent || '').trim();
+  const currentPage = Number(currentText.match(/\d+/)?.[0]) || null;
+  if (currentPage) {
+    const numericNext = [...root.querySelectorAll('a,button')].find((el) => {
+      if (!visible(el) || isDisabledPaginationControl(el)) return false;
+      return Number(String(el.textContent || '').trim()) === currentPage + 1;
+    });
+    if (numericNext) return numericNext;
+  }
+
+  const byText = [...root.querySelectorAll('a,button')].find((el) => {
     if (!visible(el) || isDisabledPaginationControl(el)) return false;
-    const text = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.textContent || ''}`.replace(/\s+/g, ' ').trim();
-    return /^(?:next|next page|load more|show more|›|»|→)$/i.test(text);
-  }) || null;
+    const text = paginationControlText(el);
+    return /(?:^|\s)(?:next|next page|load more|show more|chevron[-_ ]?right|arrow[-_ ]?forward|keyboard[-_ ]?arrow[-_ ]?right|navigate[-_ ]?next)(?:\s|$)|^(?:›|»|→|>)$/i.test(text);
+  });
+  if (byText) return byText;
+
+  return null;
 }
 
 function readPaginationState() {
@@ -56,7 +107,7 @@ function readPaginationState() {
     currentPage,
     totalPages,
     hasNext: Boolean(next),
-    nextLabel: next ? String(next.getAttribute('aria-label') || next.getAttribute('title') || next.textContent || '').replace(/\s+/g, ' ').trim() : null
+    nextLabel: next ? paginationControlText(next) : null
   };
 }
 
@@ -66,7 +117,7 @@ function clickNextPageControl() {
   if (!next) return { clicked: false };
   next.scrollIntoView({ block: 'center', inline: 'center' });
   next.click();
-  return { clicked: true };
+  return { clicked: true, label: paginationControlText(next) };
 }
 
 function pageChangedSince(before) {
@@ -82,8 +133,20 @@ function pageChangedSince(before) {
     const text = String(card.textContent || '').replace(/\s+/g, ' ');
     return text.match(/ASIN\s*:\s*([A-Z0-9]{10})\b/i)?.[1] || text.slice(0, 120);
   }).join('|');
-  const roots = [...document.querySelectorAll('ngb-pagination,.pagination,[class*="pagination"],nav[aria-label*="pagination" i]')].filter(visible);
-  const root = roots[0] || document;
+  const selector = [
+    'ngb-pagination',
+    '.pagination',
+    '[class*="pagination"]',
+    'mat-paginator',
+    '.mat-mdc-paginator',
+    '.mat-paginator',
+    '[class*="paginator"]',
+    '[class*="pager"]',
+    'nav[aria-label*="page" i]',
+    '[role="navigation"][aria-label*="page" i]'
+  ].join(',');
+  const roots = [...document.querySelectorAll(selector)].filter(visible);
+  const root = roots.find((candidate) => [...candidate.querySelectorAll('.active,[aria-current="page"]')].some(visible)) || roots[0] || document;
   const active = [...root.querySelectorAll('.active,[aria-current="page"]')].find(visible) || null;
   const currentPage = Number(String(active?.textContent || '').match(/\d+/)?.[0]) || null;
   return (before.currentPage && currentPage && currentPage !== before.currentPage) || (signature && signature !== before.signature);
@@ -153,20 +216,30 @@ FlyingResearchFeature.prototype.loadNextPage = async function loadNextPage() {
     paginationState.set(this, state);
   }
 
-  const pageInfo = await page.evaluate(readPaginationState);
-  if (!pageInfo.hasNext) {
-    const pageLabel = pageInfo.currentPage ? ` after page ${pageInfo.currentPage}` : '';
-    throw new Error(`Flying Research does not show another results page${pageLabel}.`);
-  }
+  // Flying can render its paginator below a long result grid. Move to the
+  // bottom before resolving the live Next control so lazy/Angular controls
+  // are present and measurable.
+  await page.evaluate(() => {
+    const root = document.scrollingElement || document.documentElement || document.body;
+    window.scrollTo(0, root?.scrollHeight || document.body?.scrollHeight || 0);
+  }).catch(() => {});
+  await page.waitForTimeout(300);
 
+  const pageInfo = await page.evaluate(readPaginationState);
   const beforeCards = await page.evaluate(readFlyingListCards).catch(() => []);
   const before = {
     currentPage: pageInfo.currentPage,
     signature: beforeCards.map((card) => card.asin || String(card.title || '').slice(0, 120)).join('|')
   };
 
+  // Do not stop solely because the first state probe missed the Next button.
+  // The click probe uses the same selectors plus numeric-page and class-based
+  // fallbacks, which is more reliable on Flying's changing Angular markup.
   const clicked = await page.evaluate(clickNextPageControl);
-  if (!clicked?.clicked) throw new Error('Flying Research shows more results, but ZeroPOD could not activate the Next page control. Open Flying Tools and use Next manually, then Import Current Results.');
+  if (!clicked?.clicked) {
+    const pageLabel = pageInfo.currentPage ? ` after page ${pageInfo.currentPage}` : '';
+    throw new Error(`Flying Research does not show another usable results page${pageLabel}. Open Flying Tools to confirm the site's pagination controls.`);
+  }
 
   await page.waitForFunction(pageChangedSince, before, { timeout: 45000 }).catch(async (error) => {
     if (error?.name !== 'TimeoutError') throw error;
