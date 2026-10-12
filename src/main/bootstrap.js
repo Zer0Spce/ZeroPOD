@@ -77,6 +77,7 @@ SessionManager.prototype.isValidChatGPTThreadUrl = function isValidChatGPTThread
 require('./backgroundChromeLaunchPatch');
 require('./chatgptChromePatch');
 require('./chromeDockPatch');
+require('./connectionReliabilityPatch');
 require('./chatgptUploadReadyPatch');
 require('./chatgptNetworkCapturePatch');
 require('./chatgptLiveReliabilityPatch');
