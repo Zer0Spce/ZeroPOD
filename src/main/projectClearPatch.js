@@ -32,9 +32,46 @@ function projectStats(allProjects) {
   return { publishedRecords, recentPublishedRecords };
 }
 
+function resetLinkedAutomationRows() {
+  const data = automationStore.read();
+  let resetRows = 0;
+  let detachedCompletedRows = 0;
+
+  data.rows = (data.rows || []).map((row) => {
+    if (!row.projectId) return row;
+
+    if (['completed', 'skipped'].includes(row.status)) {
+      detachedCompletedRows += 1;
+      return {
+        ...row,
+        projectId: null,
+        checkpoint: null,
+        updatedAt: new Date().toISOString()
+      };
+    }
+
+    const completeInput = Boolean(String(row.referenceImage || '').trim() && String(row.amazonLink || '').trim());
+    resetRows += 1;
+    return {
+      ...row,
+      projectId: null,
+      status: completeInput ? 'pending' : 'draft',
+      step: completeInput ? 'Waiting' : 'Complete image + Amazon link',
+      checkpoint: completeInput ? 'input-ready' : 'draft',
+      lastError: null,
+      recoveredAt: null,
+      updatedAt: new Date().toISOString()
+    };
+  });
+
+  if (resetRows || detachedCompletedRows) automationStore.write(data);
+  return { resetRows, detachedCompletedRows };
+}
+
 function clearProjects() {
   const allProjects = projects.list({ includeArchived: true });
   const stats = projectStats(allProjects);
+  const queueImpact = resetLinkedAutomationRows();
   const root = projects.getRoot();
 
   if (fs.existsSync(root)) fs.rmSync(root, { recursive: true, force: true });
@@ -44,7 +81,9 @@ function clearProjects() {
     ok: true,
     deleted: allProjects.length,
     publishedRecordsRemoved: stats.publishedRecords,
-    recentPublishedRecordsRemoved: stats.recentPublishedRecords
+    recentPublishedRecordsRemoved: stats.recentPublishedRecords,
+    automationRowsReset: queueImpact.resetRows,
+    completedRowsDetached: queueImpact.detachedCompletedRows
   };
 }
 
@@ -56,12 +95,8 @@ app.whenReady().then(() => {
 
     const queue = automationStore.read();
     const rows = Array.isArray(queue.rows) ? queue.rows : [];
-    const liveRows = rows.filter((row) => row.projectId && !['completed', 'skipped'].includes(row.status));
     if (queue.state === 'running' || rows.some((row) => row.status === 'running')) {
-      throw new Error('Pause or stop the Automation List before clearing projects. No project data was deleted.');
-    }
-    if (liveRows.length) {
-      throw new Error(`Cannot clear projects while ${liveRows.length} active Automation List row${liveRows.length === 1 ? '' : 's'} still reference project data. Complete, skip, or remove those rows first.`);
+      throw new Error('Pause or stop Automation and wait for the current row to finish before clearing projects. No project data was deleted.');
     }
 
     const allProjects = projects.list({ includeArchived: true });
@@ -74,4 +109,4 @@ app.whenReady().then(() => {
   });
 });
 
-module.exports = { CONFIRMATION, clearProjects };
+module.exports = { CONFIRMATION, clearProjects, resetLinkedAutomationRows };
