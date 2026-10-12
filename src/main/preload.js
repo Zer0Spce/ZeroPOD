@@ -111,6 +111,9 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     clearBrowserCache: () => ipcRenderer.invoke('browser:clear-cache-only'),
     resetHiddenBrowser: () => ipcRenderer.invoke('browser:reset-hidden')
   },
+  performance: {
+    snapshot: () => ipcRenderer.invoke('performance:snapshot')
+  },
   files: {
     chooseReference: () => ipcRenderer.invoke('file:choose-reference'),
     chooseMultipleReferences: () => ipcRenderer.invoke('file:choose-multiple-references')
