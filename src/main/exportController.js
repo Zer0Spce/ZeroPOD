@@ -7,7 +7,8 @@ const OUTPUT_HEIGHT = 5400;
 const COMPACT_MAX_HEIGHT_RATIO = 0.40;
 const WIDE_CHEST_MAX_HEIGHT_RATIO = 0.60;
 const WIDE_CHEST_MIN_ASPECT_RATIO = 1.35;
-const TOP_PLACEMENT_RATIO = 0.17;
+const COMPACT_TOP_PLACEMENT_RATIO = 0.08;
+const WIDE_CHEST_TOP_PLACEMENT_RATIO = 0.05;
 const TRIM_THRESHOLD = 8;
 
 function roundRatio(value) {
@@ -42,6 +43,12 @@ function placementFromBounds(width, height) {
   };
 }
 
+function topPlacementRatioFor(reason) {
+  return reason === 'wide-chest-artwork'
+    ? WIDE_CHEST_TOP_PLACEMENT_RATIO
+    : COMPACT_TOP_PLACEMENT_RATIO;
+}
+
 async function analyzeVisibleArtwork(renderedBuffer) {
   const { data, info } = await sharp(renderedBuffer)
     .ensureAlpha()
@@ -59,9 +66,10 @@ async function analyzeVisibleArtwork(renderedBuffer) {
   };
 }
 
-async function writeTopPlacedArtwork(output, trimmedBuffer, info) {
+async function writeTopPlacedArtwork(output, trimmedBuffer, info, reason) {
   const left = Math.max(0, Math.round((OUTPUT_WIDTH - info.width) / 2));
-  const desiredTop = Math.round(OUTPUT_HEIGHT * TOP_PLACEMENT_RATIO);
+  const topRatio = topPlacementRatioFor(reason);
+  const desiredTop = Math.round(OUTPUT_HEIGHT * topRatio);
   const top = Math.max(0, Math.min(desiredTop, OUTPUT_HEIGHT - info.height));
 
   await sharp({
@@ -76,7 +84,7 @@ async function writeTopPlacedArtwork(output, trimmedBuffer, info) {
     .png({ compressionLevel: 9 })
     .toFile(output);
 
-  return { left, top };
+  return { left, top, topRatio };
 }
 
 class ExportController {
@@ -118,6 +126,7 @@ class ExportController {
       aspectRatio: null,
       left: null,
       top: null,
+      topRatio: null,
       automatic: true
     };
 
@@ -126,9 +135,15 @@ class ExportController {
       placement = { ...placement, ...analysis.placement };
 
       if (analysis.placement.mode === 'top') {
-        const position = await writeTopPlacedArtwork(output, analysis.data, analysis.info);
+        const position = await writeTopPlacedArtwork(
+          output,
+          analysis.data,
+          analysis.info,
+          analysis.placement.reason
+        );
         placement.left = position.left;
         placement.top = position.top;
+        placement.topRatio = position.topRatio;
       } else {
         // Normal/full designs remain on the exact existing export path.
         fs.writeFileSync(output, renderedBuffer);
@@ -157,4 +172,4 @@ class ExportController {
   }
 }
 
-module.exports = { ExportController, placementFromBounds };
+module.exports = { ExportController, placementFromBounds, topPlacementRatioFor };
