@@ -20,8 +20,31 @@
       .az-new-chat-option input{width:18px;height:18px;margin:1px 0 0;accent-color:var(--accent,#6875ff)}
       .az-new-chat-option strong{display:block;font-size:13px;color:var(--text,#f5f7fa)}
       .az-new-chat-option span{display:block;margin-top:3px;font-size:11px;line-height:1.45;color:var(--muted,#98a3b2);font-weight:400}
+      .az-source-hint{margin-top:8px;font-size:11px;color:var(--muted,#98a3b2)}
     `;
     document.head.appendChild(style);
+  }
+
+  async function ensureSourceReferences(snapshot) {
+    if (!window.zeroPOD?.sourceImage?.resolve) return snapshot;
+    let current = snapshot;
+    const missing = current.rows.filter((row) => !String(row.referenceImage || '').trim());
+    if (!missing.length) return current;
+
+    for (const row of missing) {
+      const sourceUrl = String(row.amazonLink || '').trim();
+      if (!sourceUrl) throw new Error('Every Automation row needs a source URL when no reference image is attached.');
+      const index = current.rows.findIndex((item) => item.id === row.id) + 1;
+      log(`Row ${index}: no reference image attached · fetching from source URL…`);
+      const result = await window.zeroPOD.sourceImage.resolve(sourceUrl);
+      if (!result?.path) throw new Error(`Row ${index}: source URL did not return a usable reference image.`);
+      await window.zeroPOD.automation.update({ rowId: row.id, patch: { referenceImage: result.path } });
+      log(`Row ${index}: reference image ${result.cached ? 'loaded from cache' : 'fetched'} successfully.`, 'ok');
+      current = await window.zeroPOD.automation.list();
+    }
+
+    if (typeof window.refreshAutomationListV2 === 'function') await window.refreshAutomationListV2();
+    return current;
   }
 
   async function invokeNormalStart(button) {
@@ -36,7 +59,7 @@
     }
     const incomplete = snapshot.rows.findIndex((row) => !String(row.referenceImage || '').trim() || !String(row.amazonLink || '').trim());
     if (incomplete >= 0) {
-      log(`Row ${incomplete + 1} needs both an image and source URL before starting.`, 'error');
+      log(`Row ${incomplete + 1} could not prepare its reference image/source URL before starting.`, 'error');
       return;
     }
     log(`Starting full automation for ${snapshot.rows.length} job${snapshot.rows.length === 1 ? '' : 's'} · 1 → ${snapshot.rows.length}.`, 'warn');
@@ -52,22 +75,24 @@
     button.disabled = true;
 
     try {
-      const snapshot = await window.zeroPOD.automation.list();
+      let snapshot = await window.zeroPOD.automation.list();
 
       if (!snapshot.rows.length) {
         await invokeNormalStart(button);
         return;
       }
 
-      const incomplete = snapshot.rows.findIndex((row) => !String(row.referenceImage || '').trim() || !String(row.amazonLink || '').trim());
-      if (incomplete >= 0) {
-        await invokeNormalStart(button);
+      const missingUrl = snapshot.rows.findIndex((row) => !String(row.amazonLink || '').trim());
+      if (missingUrl >= 0) {
+        log(`Row ${missingUrl + 1} needs a source URL before starting. A reference image is optional because ZeroPOD can fetch it from the URL.`, 'error');
         return;
       }
 
-      if (snapshot.state === 'running') {
-        return;
-      }
+      if (snapshot.state === 'running') return;
+
+      snapshot = await ensureSourceReferences(snapshot);
+      const unresolved = snapshot.rows.findIndex((row) => !String(row.referenceImage || '').trim());
+      if (unresolved >= 0) throw new Error(`Row ${unresolved + 1} does not have a usable reference image after source fetching.`);
 
       // A paused queue is the same Automation run. Do not create another chat when
       // resuming it. A fresh chat is prepared only when starting from stopped.
@@ -102,7 +127,8 @@
       <label>
         <input id="automationNewChatV2" type="checkbox" ${checked ? 'checked' : ''} />
         <span><strong>New Chat</strong><span>Start this Automation run in one fresh ChatGPT conversation. All rows reuse that same new chat; ZeroPOD does not create a new chat for every row.</span></span>
-      </label>`;
+      </label>
+      <div class="az-source-hint">Reference image is optional. If a row has only an Amazon/source URL, ZeroPOD fetches the reference image automatically before the queue starts.</div>`;
     controls.insertAdjacentElement('beforebegin', wrapper);
 
     const checkbox = document.getElementById('automationNewChatV2');
@@ -122,7 +148,7 @@
     let attempts = 0;
     const timer = setInterval(() => {
       attempts += 1;
-      if (mount() || attempts >= 25) clearInterval(timer);
+      if (mount() || attempts >= 40) clearInterval(timer);
     }, 200);
   }
 
