@@ -52,6 +52,21 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     limitCheckSettings: () => ipcRenderer.invoke('redbubble:limit-check-settings'),
     updateLimitCheckSettings: (patch) => ipcRenderer.invoke('redbubble:update-limit-check-settings', patch)
   },
+  spreadshirt: {
+    login: () => ipcRenderer.invoke('spreadshirt:login'),
+    test: () => ipcRenderer.invoke('spreadshirt:test'),
+    open: () => ipcRenderer.invoke('spreadshirt:open'),
+    markProject: (payload) => ipcRenderer.invoke('spreadshirt:mark-project', payload),
+    deriveMetadata: (projectId) => ipcRenderer.invoke('spreadshirt:derive-metadata', projectId),
+    saveMetadata: (payload) => ipcRenderer.invoke('spreadshirt:save-metadata', payload),
+    exportPng: (projectId) => ipcRenderer.invoke('spreadshirt:export-png', projectId),
+    check: (projectId) => ipcRenderer.invoke('spreadshirt:check', projectId),
+    prepare: (projectId) => ipcRenderer.invoke('spreadshirt:prepare', projectId),
+    publish: (projectId) => ipcRenderer.invoke('spreadshirt:publish', projectId),
+    usage: () => ipcRenderer.invoke('spreadshirt:usage'),
+    settings: () => ipcRenderer.invoke('spreadshirt:settings'),
+    updateSettings: (patch) => ipcRenderer.invoke('spreadshirt:update-settings', patch)
+  },
   automation: {
     list: () => ipcRenderer.invoke('automation:list'),
     add: (rows) => ipcRenderer.invoke('automation:add', rows),
@@ -100,6 +115,7 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     capture: () => ipcRenderer.invoke('flying:capture'),
     nextPage: () => ipcRenderer.invoke('flying:next-page'),
     workflow: (key) => ipcRenderer.invoke('flying:workflow', key),
+    spreadshirt: (key) => ipcRenderer.invoke('flying:spreadshirt', key),
     addToAutomation: (payload) => ipcRenderer.invoke('flying:automation', payload),
     openAmazon: (key) => ipcRenderer.invoke('flying:amazon', key)
   },
