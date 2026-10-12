@@ -58,6 +58,15 @@
       </article>`;
   }
 
+  function placePanel(panel, stats) {
+    const uploadLimit = document.getElementById('redbubbleDailyLimit');
+    if (uploadLimit) {
+      if (uploadLimit.nextElementSibling !== panel) uploadLimit.insertAdjacentElement('afterend', panel);
+      return;
+    }
+    if (stats.nextElementSibling !== panel) stats.insertAdjacentElement('afterend', panel);
+  }
+
   function mount() {
     ensureStyles();
     const dashboard = document.getElementById('dashboard');
@@ -65,7 +74,10 @@
     if (!dashboard || !stats) return null;
 
     let panel = document.getElementById('performancePanel');
-    if (panel) return panel;
+    if (panel) {
+      placePanel(panel, stats);
+      return panel;
+    }
 
     panel = document.createElement('section');
     panel.id = 'performancePanel';
@@ -80,7 +92,7 @@
       </div>
       <div id="performanceStats" class="performance-grid"></div>
       <div id="performanceHint" class="performance-footer"></div>`;
-    stats.insertAdjacentElement('afterend', panel);
+    placePanel(panel, stats);
     return panel;
   }
 
