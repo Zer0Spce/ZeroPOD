@@ -1,36 +1,64 @@
-#flyingResearch .fr-tools,#flyingResearch .fr-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-#flyingResearch .fr-tools{margin:16px 0}
-#flyingResearch .fr-tools .active{background:#6875ff;color:white}
-#flyingResearch .fr-controls{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px}
-#flyingResearch .fr-filters{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0;align-items:end}
-#flyingResearch .fr-filters label{min-width:100px;font-size:12px}
-#flyingResearch .fr-filters input[type=number]{width:110px}
-#flyingResearch input[type=checkbox]{width:20px;height:20px;accent-color:#6875ff;flex:none;cursor:pointer}
+#flyingResearch{max-width:1280px}
+#flyingResearch .fr-page-heading{margin-bottom:14px}
+#flyingResearch .fr-page-heading h2{margin-bottom:5px}
+#flyingResearch .panel{background:var(--surface,#171b21);border:1px solid var(--border,#2a313c);border-radius:14px;padding:16px;margin:14px 0}
+#flyingResearch .fr-section-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+#flyingResearch .fr-section-title strong{display:block;font-size:14px;color:var(--text,#dce2ec)}
+#flyingResearch .fr-section-title span{display:block;margin-top:3px;font-size:11px;color:var(--muted,#9fa8b6);font-weight:400}
+#flyingResearch .fr-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#flyingResearch .fr-connection-panel>.fr-actions{margin:0}
+#flyingResearch .fr-connection-panel>.fr-small{display:block;margin:10px 0 0;line-height:1.45}
+#flyingResearch .fr-tools-panel{padding-bottom:12px}
+#flyingResearch .fr-tools{display:flex;gap:8px;overflow-x:auto;flex-wrap:nowrap;padding:2px 0 6px;margin:0;scrollbar-width:thin}
+#flyingResearch .fr-tools button{white-space:nowrap;flex:0 0 auto}
+#flyingResearch .fr-tools .active{background:linear-gradient(135deg,var(--accent,#ff922e),var(--accent-2,#ffb45e));color:var(--accent-ink,#111);border-color:transparent}
+#flyingResearch .fr-controls{display:grid;grid-template-columns:minmax(260px,2fr) minmax(150px,1fr) minmax(150px,1fr);gap:12px}
+#flyingResearch .fr-controls label,#flyingResearch .fr-filters label{display:grid;gap:6px;font-size:11px;color:var(--muted,#9fa8b6)}
+#flyingResearch .fr-controls input,#flyingResearch .fr-controls select,#flyingResearch .fr-filters input,#flyingResearch .fr-filters select{width:100%;min-width:0}
+#flyingResearch .fr-search-panel>.fr-actions{margin-top:12px!important;padding-top:12px;border-top:1px solid var(--border,#2a313c)}
+#flyingResearch .fr-advanced{margin-top:12px;border-top:1px solid var(--border,#2a313c);padding-top:4px}
+#flyingResearch .fr-advanced summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:none;padding:10px 2px;color:var(--text,#dce2ec);font-size:12px;font-weight:700}
+#flyingResearch .fr-advanced summary::-webkit-details-marker{display:none}
+#flyingResearch .fr-advanced summary::after{content:'＋';font-size:16px;color:var(--muted,#9fa8b6)}
+#flyingResearch .fr-advanced[open] summary::after{content:'−'}
+#flyingResearch .fr-advanced summary small{margin-left:auto;color:var(--muted,#9fa8b6);font-weight:400;font-size:10px}
+#flyingResearch .fr-filters{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px;margin:6px 0 4px;align-items:end}
+#flyingResearch .fr-filters .fr-check{display:flex;align-items:center;gap:8px;min-height:38px}
+#flyingResearch .fr-filters button{align-self:end}
+#flyingResearch input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent,#ff922e);flex:none;cursor:pointer}
 #flyingResearch .fr-check{display:inline-flex;align-items:center;gap:8px}
-#flyingResearch .fr-notice{padding:12px;margin:12px 0;border:1px solid #394251;border-radius:10px;white-space:pre-line;font-size:12px}
-#flyingResearch .fr-notice.error{border-color:#ba555f;color:#ef8992}
-#flyingResearch .fr-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:18px 0}
-#flyingResearch .fr-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
-#flyingResearch .fr-card{border:1px solid #394251;border-radius:12px;overflow:hidden;background:var(--panel,#171b21);position:relative}
-#flyingResearch .fr-card.selected{border-color:#6875ff;box-shadow:0 0 0 2px #6875ff44}
+#flyingResearch .fr-notice{padding:11px 13px;margin:12px 0;border:1px solid var(--border,#394251);border-radius:10px;white-space:pre-line;font-size:11px;line-height:1.45;background:var(--bg-elevated,#101419);color:var(--muted,#9fa8b6)}
+#flyingResearch .fr-notice.error{border-color:#ba555f;color:#ef8992;background:rgba(186,85,95,.08)}
+#flyingResearch .fr-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0 12px}
+#flyingResearch .fr-results-head{padding:0 2px}
+#flyingResearch .fr-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+#flyingResearch .fr-card{border:1px solid var(--border,#394251);border-radius:13px;overflow:hidden;background:var(--surface,#171b21);position:relative;transition:border-color .16s ease,transform .16s ease,box-shadow .16s ease}
+#flyingResearch .fr-card:hover{transform:translateY(-1px);border-color:var(--border-strong,#46505f)}
+#flyingResearch .fr-card.selected{border-color:var(--accent,#6875ff);box-shadow:0 0 0 2px var(--accent-soft,#6875ff33)}
 #flyingResearch .fr-card>input{position:absolute;left:12px;top:12px;z-index:1}
-#flyingResearch .fr-card>img{width:100%;height:240px;object-fit:contain;background:#f7f7f7}
-#flyingResearch .fr-body{padding:14px}
-#flyingResearch .fr-body h3{font-size:13px;line-height:1.4;margin:7px 0}
-#flyingResearch .fr-data{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin:12px 0}
-#flyingResearch .fr-data span{color:var(--muted,#9fa8b6)}
-#flyingResearch .fr-data b{display:block;color:var(--text,#dce2ec);margin-top:2px}
-#flyingResearch .fr-body button{font-size:11px;padding:7px}
+#flyingResearch .fr-card>img{width:100%;height:235px;object-fit:contain;background:#f7f7f7}
+#flyingResearch .fr-body{padding:13px}
+#flyingResearch .fr-body h3{font-size:13px;line-height:1.4;margin:7px 0 10px;min-height:36px}
+#flyingResearch .fr-data{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;font-size:10px;margin:10px 0 12px}
+#flyingResearch .fr-data span{padding:7px 8px;border-radius:8px;background:var(--bg-elevated,#101419);color:var(--muted,#9fa8b6);min-width:0}
+#flyingResearch .fr-data b{display:block;color:var(--text,#dce2ec);margin-top:2px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#flyingResearch .fr-body>.fr-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;border-top:1px solid var(--border,#2a313c);padding-top:11px}
+#flyingResearch .fr-body button{font-size:10px;padding:7px 8px;width:100%}
 #flyingResearch .fr-list{grid-template-columns:1fr}
-#flyingResearch .fr-list .fr-card{display:grid;grid-template-columns:160px 1fr}
-#flyingResearch .fr-list .fr-card>img{height:190px}
-#flyingResearch .fr-list .fr-data{grid-template-columns:repeat(4,1fr)}
-#flyingResearch .fr-selection{position:sticky;bottom:12px;background:var(--panel,#171b21);border:1px solid #6875ff;border-radius:12px;padding:14px;margin-top:18px;z-index:5;display:flex;gap:12px;justify-content:space-between;flex-wrap:wrap}
-#flyingResearch .fr-empty{padding:36px;border:1px dashed #394251;border-radius:12px;text-align:center;color:var(--muted,#9fa8b6)}
-#flyingResearch .fr-detail{margin-top:18px;padding:18px;border:1px solid #394251;border-radius:12px}
+#flyingResearch .fr-list .fr-card{display:grid;grid-template-columns:170px minmax(0,1fr)}
+#flyingResearch .fr-list .fr-card>img{height:100%;min-height:195px}
+#flyingResearch .fr-list .fr-data{grid-template-columns:repeat(6,minmax(0,1fr))}
+#flyingResearch .fr-list .fr-body>.fr-actions{display:flex;flex-wrap:wrap}
+#flyingResearch .fr-list .fr-body button{width:auto}
+#flyingResearch .fr-selection{position:sticky;bottom:12px;background:var(--surface,#171b21);border:1px solid var(--accent,#6875ff);border-radius:12px;padding:12px 14px;margin-top:16px;z-index:5;display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+#flyingResearch .fr-empty{padding:34px;border:1px dashed var(--border,#394251);border-radius:12px;text-align:center;color:var(--muted,#9fa8b6)}
+#flyingResearch .fr-detail{margin-top:16px;padding:16px;border:1px solid var(--border,#394251);border-radius:12px;background:var(--surface,#171b21)}
 #flyingResearch .fr-detail[hidden]{display:none}
-#flyingResearch .fr-small{font-size:11px;color:var(--muted,#9fa8b6)}
-@media(max-width:950px){#flyingResearch .fr-controls{grid-template-columns:1fr}#flyingResearch .fr-list .fr-card{grid-template-columns:1fr}#flyingResearch .fr-list .fr-card>img{height:240px}}
-html[data-theme="light"] #flyingResearch .fr-card,html[data-theme="light"] #flyingResearch .fr-selection{background:#fff;border-color:#d3d9e3;color:#151922}
+#flyingResearch .fr-small{font-size:10px;color:var(--muted,#9fa8b6)}
+@media(max-width:1050px){#flyingResearch .fr-filters{grid-template-columns:repeat(2,minmax(150px,1fr))}#flyingResearch .fr-list .fr-data{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:850px){#flyingResearch .fr-controls{grid-template-columns:1fr}#flyingResearch .fr-filters{grid-template-columns:1fr 1fr}#flyingResearch .fr-list .fr-card{grid-template-columns:1fr}#flyingResearch .fr-list .fr-card>img{height:235px}#flyingResearch .fr-advanced summary small{display:none}}
+@media(max-width:560px){#flyingResearch .fr-filters{grid-template-columns:1fr}#flyingResearch .fr-results{grid-template-columns:1fr}}
+html[data-theme="light"] #flyingResearch .fr-card,html[data-theme="light"] #flyingResearch .fr-selection,html[data-theme="light"] #flyingResearch .fr-detail{background:#fff;border-color:#d3d9e3;color:#151922}
+html[data-theme="light"] #flyingResearch .fr-data span{background:#f3f5f8}
 html[data-theme="light"] #flyingResearch .fr-data b{color:#151922}
 html[data-theme="light"] #flyingResearch .fr-data span,html[data-theme="light"] #flyingResearch .fr-small{color:#626d7b}
