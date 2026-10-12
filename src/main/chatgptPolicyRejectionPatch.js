@@ -40,6 +40,8 @@ async function collectPolicyMessages(page) {
     const seen = new Set();
     const selectors = [
       '[data-message-author-role="assistant"]',
+      '[data-testid^="conversation-turn-"]',
+      'article',
       '[role="alert"]',
       '[data-testid*="error" i]'
     ];
@@ -48,7 +50,12 @@ async function collectPolicyMessages(page) {
       const text = normalize(node.innerText || node.textContent || '');
       if (!text || !patterns.some((pattern) => pattern.test(text))) return;
       const messageNode = node.closest('[data-message-id]');
-      const id = node.getAttribute('data-message-id') || messageNode?.getAttribute('data-message-id') || `${node.getAttribute('data-message-author-role') || 'node'}-${index}`;
+      const turnNode = node.closest('[data-testid^="conversation-turn-"]');
+      const id = node.getAttribute('data-message-id')
+        || messageNode?.getAttribute('data-message-id')
+        || turnNode?.getAttribute('data-testid')
+        || node.getAttribute('data-testid')
+        || `${node.getAttribute('data-message-author-role') || node.tagName || 'node'}-${index}`;
       const key = `${id}|${text.slice(0, 700)}`;
       if (seen.has(key)) return;
       seen.add(key);
@@ -57,12 +64,23 @@ async function collectPolicyMessages(page) {
 
     if (!matches.length) {
       const body = normalize(document.body?.innerText || '');
+      const bodyLower = body.toLowerCase();
       const phrase = [
         'prompt may violate our content policies',
         'prompt may violate our content policy',
         'please retry or edit your prompt'
-      ].find((value) => body.toLowerCase().includes(value));
-      if (phrase) matches.push({ key: `body|${phrase}`, text: phrase });
+      ].find((value) => bodyLower.includes(value));
+      if (phrase) {
+        let count = 0;
+        let cursor = 0;
+        while (true) {
+          const found = bodyLower.indexOf(phrase, cursor);
+          if (found < 0) break;
+          count += 1;
+          cursor = found + phrase.length;
+        }
+        matches.push({ key: `body|${phrase}|${count}`, text: phrase });
+      }
     }
     return matches;
   }).catch(() => []);
