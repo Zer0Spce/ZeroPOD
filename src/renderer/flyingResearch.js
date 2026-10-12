@@ -3,6 +3,7 @@
   if (!api) return;
   const selected = new Set();
   let items = [], tools = {}, busy = false, tool = 'best', savedOnly = false, loadedOnce = false;
+  let pagination = { page: 1, totalPages: null, hasNext: false };
   let view = localStorage.getItem('zeropod.flying.view') || 'grid';
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
   const fmt = (v) => v === null || v === undefined ? '—' : Number(v).toLocaleString();
@@ -37,7 +38,7 @@
       <button id="frReset">Reset Filters</button>
     </div></div>
     <div id="frNotice" class="fr-notice" role="status">Best Sellers loads automatically when this tab opens. Select another results tab to load its designs.</div>
-    <div class="fr-head"><strong id="frCount">0 designs</strong><div class="fr-actions"><label class="fr-check"><input id="frSelectAll" type="checkbox" /> Select all visible</label><button id="frClear">Clear Selection</button></div></div>
+    <div class="fr-head"><strong id="frCount">0 designs</strong><div class="fr-actions"><button id="frNextPage" class="secondary" disabled>Load Next Page</button><label class="fr-check"><input id="frSelectAll" type="checkbox" /> Select all visible</label><button id="frClear">Clear Selection</button></div></div>
     <div id="frResults" class="fr-results"></div>
     <div class="fr-selection"><strong id="frSelected">0 selected</strong><div class="fr-actions"><button id="frWorkflow">Send to Workflow</button><button class="primary" id="frAutomation">Send to Automations</button></div></div>
     <p class="fr-small">Flying sales figures are estimates. Flying Best Sellers results are source data; they do not imply an independently verified Amazon Best Sellers position. Workflow takes one design; Automations accepts multiple designs within its existing 15-row limit.</p>
@@ -92,6 +93,14 @@
     byId('frWorkflow').disabled = busy || selected.size !== 1;
     byId('frAutomation').disabled = busy || !selected.size;
     for (const id of ['frLogin','frTest','frOpen','frSearch','frCapture','frLoad']) byId(id).disabled = busy;
+    const next = byId('frNextPage');
+    if (next) {
+      next.disabled = busy || !loadedOnce || !pagination.hasNext;
+      next.textContent = pagination.hasNext
+        ? `Load Page ${Number(pagination.page || 1) + 1}`
+        : loadedOnce ? 'No More Pages' : 'Load Next Page';
+      next.title = pagination.totalPages ? `Current page ${pagination.page || 1} of ${pagination.totalPages}` : 'Load the next Flying Research results page';
+    }
     byId('frSelectAll').disabled = busy;
     byId('frTools').querySelectorAll('button').forEach((button) => { button.disabled = busy; button.classList.toggle('active', button.dataset.tool === tool); });
     byId('frResults').innerHTML = visible.length ? visible.map((item) => `<article class="fr-card ${selected.has(item.key)?'selected':''}" data-key="${esc(item.key)}">
@@ -107,13 +116,23 @@
     } else if (tool === 'deleted') {
       await api.open(tool); await accept(await api.capture());
     } else {
+      pagination = { page: 1, totalPages: null, hasNext: false };
       await api.open(tool);
       notice(tool === 'live' ? 'Enter a keyword, then Search Flying for live results.' : `${tools[tool].label} is open in Flying. Run its analysis there; import designs when a results list is available.`);
     }
   }
-  async function accept(result) {
-    items = result.items || []; selected.clear(); savedOnly = false; loadedOnce = true;
-    notice(`${result.count} designs imported from Flying Research. ${new Date(result.capturedAt).toLocaleString()}${result.skippedItems?.length ? `\n${result.skippedItems.length} rows skipped because their identity was incomplete.` : ''}`);
+  async function accept(result, appended = false) {
+    items = result.items || [];
+    selected.clear(); savedOnly = false; loadedOnce = true;
+    pagination = {
+      page: Number(result.page) || 1,
+      totalPages: Number(result.totalPages) || null,
+      hasNext: Boolean(result.hasNext)
+    };
+    const pageLabel = pagination.totalPages ? `Page ${pagination.page} of ${pagination.totalPages}.` : `Page ${pagination.page}.`;
+    const addedLabel = appended && Number.isFinite(Number(result.added)) ? ` ${result.added} new design${Number(result.added) === 1 ? '' : 's'} added.` : '';
+    const moreLabel = pagination.hasNext ? ' More results are available.' : ' This is the last available page.';
+    notice(`${result.count} designs loaded from Flying Research. ${pageLabel}${addedLabel}${moreLabel} ${new Date(result.capturedAt).toLocaleString()}${result.skippedItems?.length ? `\n${result.skippedItems.length} rows skipped because their identity was incomplete.` : ''}`);
   }
   async function sendWorkflow(key) {
     if (document.getElementById('uwStart')?.disabled) throw new Error('Workflow is busy. Wait for the active workflow before sending another design.');
@@ -164,7 +183,8 @@
   byId('frOpen').onclick = () => action(async()=>{ await api.open(tool); notice('Flying Tools is open. Set filters or use analysis tools, then Import Current Results.'); });
   byId('frCapture').onclick = () => action(async()=>accept(await api.capture()), 'Importing the currently loaded Flying designs…');
   byId('frSearch').onclick = () => action(async()=>{ await accept(await api.search({tool,query:byId('frQuery').value,marketplace:byId('frMarketplace').value,productType:byId('frProduct').value})); }, 'Searching Flying Research…');
-  byId('frLoad').onclick = () => action(async()=>{ savedOnly=false; await load(); notice('Showing previously imported Flying designs.'); });
+  byId('frNextPage').onclick = () => action(async()=>{ await accept(await api.nextPage(), true); }, `Loading the next ${tools[tool]?.label || 'Flying Research'} page…`);
+  byId('frLoad').onclick = () => action(async()=>{ savedOnly=false; pagination={page:1,totalPages:null,hasNext:false}; await load(); notice('Showing previously imported Flying designs. Run a fresh search to use Load Next Page.'); });
   byId('frSaved').onclick = () => { savedOnly=!savedOnly; load().catch(showError); };
   byId('frGrid').onclick = () => { view='grid';localStorage.setItem('zeropod.flying.view',view);render(); };
   byId('frList').onclick = () => { view='list';localStorage.setItem('zeropod.flying.view',view);render(); };
@@ -179,7 +199,7 @@
     byId('frTools').innerHTML=Object.entries(tools).map(([key,value])=>`<button data-tool="${esc(key)}">${esc(value.label)}</button>`).join('');
     byId('frMarketplace').insertAdjacentHTML('beforeend',Object.entries(options.marketplaces).map(([key,value])=>`<option value="${esc(key)}">${esc(value.label)}</option>`).join(''));
     byId('frProduct').innerHTML=Object.entries(options.products).map(([key,value])=>`<option value="${esc(key)}">${esc(value)}</option>`).join('');
-    byId('frTools').onclick=(event)=>{ const button=event.target.closest('button[data-tool]');if(!button||busy)return;tool=button.dataset.tool;items=[];selected.clear();loadedOnce=false;render();action(loadTool,`Loading ${tools[tool].label}…`); };
+    byId('frTools').onclick=(event)=>{ const button=event.target.closest('button[data-tool]');if(!button||busy)return;tool=button.dataset.tool;items=[];selected.clear();loadedOnce=false;pagination={page:1,totalPages:null,hasNext:false};render();action(loadTool,`Loading ${tools[tool].label}…`); };
     render();
   }).catch(showError);
   render();

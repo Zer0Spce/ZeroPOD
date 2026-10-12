@@ -116,6 +116,7 @@ require('./researchPodSourcePatch');
 require('./researchMerchVerificationPatch');
 require('./researchTrademarkFilterPatch');
 require('./researchIpcPatch');
+require('./flyingResearchPaginationPatch');
 require('./flyingResearchIpc');
 require('./automateListReliabilityPatch');
 require('./automateListIpc');
