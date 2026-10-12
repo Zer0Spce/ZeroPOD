@@ -6,10 +6,10 @@
       const title = step.querySelector('strong')?.textContent || '';
       if (!/Spreadshirt PNG/i.test(title)) return;
       const copy = step.querySelector('.ss-small');
-      if (copy) copy.textContent = 'Uses the same proven transparent 4500×5400 ZeroPOD export as the regular Workflow.';
+      if (copy) copy.textContent = 'Keeps the normal transparent 4500×5400 ZeroPOD export, then automatically makes a Spreadshirt-ready upload copy (max 4000×4000, 10 MB, 200 dpi).';
     });
     const artwork = document.getElementById('ssArtworkInfo');
-    if (artwork && /No Spreadshirt PNG/i.test(artwork.textContent || '')) artwork.textContent = 'No 4500×5400 ZeroPOD PNG exported yet.';
+    if (artwork && /No Spreadshirt PNG/i.test(artwork.textContent || '')) artwork.textContent = 'No Spreadshirt-ready upload copy exported yet.';
     return true;
   }
 
