@@ -78,4 +78,5 @@ assert(bootstrap.indexOf("require('./automationControlPatch')") < bootstrap.inde
 assert(bootstrap.indexOf("require('./automationNewChatUiPatch')") < bootstrap.indexOf("require('./sourceImageIpc')"));
 assert(bootstrap.indexOf("require('./sourceImageIpc')") < bootstrap.indexOf("require('./main')"));
 
+require('./sourceImageAutofetchSmoke');
 console.log('Generation prompt + Automation New Chat + source-image autofetch smoke passed.');
