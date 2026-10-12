@@ -110,6 +110,7 @@ require('./automationFullAutoPatch');
 require('./chatgptPolicyRejectionPatch');
 require('./automationControlPatch');
 require('./automationNewChatUiPatch');
+require('./sourceImageIpc');
 require('./redbubbleUploadLimitPausePatch');
 require('./redbubbleLimitCheckPatch');
 require('./publishLedgerPatch');
