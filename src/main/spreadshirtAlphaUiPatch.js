@@ -13,6 +13,7 @@ function installSpreadshirtAlpha(window) {
     if (!currentUrl || !currentUrl.startsWith('file:')) return;
     try {
       await window.webContents.executeJavaScript(rendererScript('spreadshirtAlpha.js'));
+      await window.webContents.executeJavaScript(rendererScript('spreadshirtRegularExportUiPatch.js'));
     } catch {}
   };
 
