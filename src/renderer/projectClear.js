@@ -25,7 +25,7 @@
       `This permanently deletes every ZeroPOD project folder, including generated artwork, metadata, project history, archived projects, and published-project records.\n\n` +
       `${trackerLine}\n${detectedLine}\n\n` +
       `Clearing Projects will erase the local publish-history count shown on the dashboard, so that informational number may become inaccurate for the current 24-hour period. It does NOT reset Redbubble's real upload limit and it does NOT make ZeroPOD assume uploads are available. ZeroPOD determines the actual limit only from Redbubble's own “exceeded your upload limit” page/message.\n\n` +
-      `Automation rows that still depend on project data must be completed, skipped, or removed first.\n\n` +
+      `Paused/stopped Automation rows linked to Projects will be safely unlinked and reset so they can run again from their original image + Amazon/source URL. A currently running Automation/workflow step must finish or be paused first.\n\n` +
       `This action cannot be undone. Continue?`
     );
     if (!accepted) return;
@@ -53,12 +53,17 @@
 
       if (typeof renderProjects === 'function') await renderProjects();
       if (typeof renderDashboard === 'function') await renderDashboard();
+      if (typeof renderAutomation === 'function') await renderAutomation();
+      if (typeof renderAutomationList === 'function') await renderAutomationList();
       if (typeof window.refreshRedbubbleUsage === 'function') await window.refreshRedbubbleUsage();
 
       const historyImpact = result.recentPublishedRecordsRemoved
         ? ` ${plural(result.recentPublishedRecordsRemoved, 'publish record')} from the current 24-hour local history ${result.recentPublishedRecordsRemoved === 1 ? 'was' : 'were'} also removed. This affects only the informational count; Redbubble page detection remains the source of truth.`
         : '';
-      alert(`Cleared ${plural(result.deleted, 'project')}.${historyImpact}`);
+      const queueImpact = result.automationRowsReset
+        ? ` ${plural(result.automationRowsReset, 'Automation row')} ${result.automationRowsReset === 1 ? 'was' : 'were'} safely reset to use the original input again.`
+        : '';
+      alert(`Cleared ${plural(result.deleted, 'project')}.${queueImpact}${historyImpact}`);
     } catch (error) {
       alert(`Projects were not cleared: ${error.message || error}`);
     } finally {

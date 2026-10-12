@@ -163,6 +163,7 @@ function loadResearchFeatures() {
 
   loadZeroPODFeatureScript('automateList.js', 'automateListFeatureScript');
   loadZeroPODFeatureScript('storageSettings.js', 'storageSettingsFeatureScript');
+  loadZeroPODFeatureScript('browserMaintenance.js', 'browserMaintenanceFeatureScript');
   loadZeroPODFeatureScript('redbubbleLimit.js', 'redbubbleLimitFeatureScript');
   setTimeout(() => {
     hideResearchBeta();

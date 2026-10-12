@@ -101,6 +101,7 @@ require('./redbubbleAgreementReliabilityPatch');
 require('./redbubblePublishStateRecoveryPatch');
 require('./redbubbleDailyLimitPatch');
 require('./projectClearPatch');
+require('./browserMaintenancePatch');
 require('./automationFullAutoPatch');
 require('./redbubbleUploadLimitPausePatch');
 require('./redbubbleLimitCheckPatch');
