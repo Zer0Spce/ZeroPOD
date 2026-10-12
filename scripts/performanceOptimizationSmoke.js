@@ -63,12 +63,15 @@ async function run() {
     assert.match(dashboardSource, /performance-grid/);
     assert.match(dashboardSource, /performance-card-value/);
     assert.match(dashboardSource, /performance-footer-chip/);
+    assert.match(dashboardSource, /getElementById\('redbubbleDailyLimit'\)/);
+    assert.match(dashboardSource, /uploadLimit\.insertAdjacentElement\('afterend', panel\)/);
+    assert.match(dashboardSource, /placePanel\(panel, stats\)/);
     assert.doesNotMatch(dashboardSource, /id="performanceStats" class="stat-grid"/);
 
     const preload = fs.readFileSync(path.join(__dirname, '../src/main/preload.js'), 'utf8');
     assert.match(preload, /performance:snapshot/);
 
-    console.log('Performance optimization smoke passed: persistent timings, warm-hit stats, fast queue cadence, optimized lossless PNG export, fast-first Redbubble fields with safe fallback, uniform performance UI, load order, and renderer API.');
+    console.log('Performance optimization smoke passed: persistent timings, warm-hit stats, fast queue cadence, optimized lossless PNG export, fast-first Redbubble fields with safe fallback, upload limit above Performance, uniform performance UI, load order, and renderer API.');
   } finally {
     Module._load = originalLoad;
     fs.rmSync(root, { recursive: true, force: true });
