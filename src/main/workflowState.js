@@ -4,6 +4,7 @@ const STAGES = {
   regenerating: { order: 1, label: 'Regenerating', next: 'Wait for regenerated image', view: 'review', queue: 'active' },
   'chatgpt-human-verification': { order: 1, label: 'Human Verification Required', next: 'Complete ChatGPT verification manually, then retry', view: 'review', queue: 'attention' },
   'chatgpt-recovery-needed': { order: 1, label: 'ChatGPT Needs Attention', next: 'Retry ChatGPT generation/download', view: 'review', queue: 'attention' },
+  'chatgpt-policy-rejected': { order: 1, label: 'ChatGPT Rejected', next: 'Start a new workflow with a revised reference or prompt', view: 'review', queue: 'attention' },
   'awaiting-review': { order: 2, label: 'Image Review', next: 'Review image and Pass or Reject', view: 'review', queue: 'review' },
   'approved-image': { order: 3, label: 'Image Approved', next: 'Generate POD WINNER metadata', view: 'workflow', queue: 'active' },
   'metadata-generating': { order: 3, label: 'Generating Metadata', next: 'Wait for POD WINNER metadata', view: 'workflow', queue: 'active' },
@@ -22,7 +23,13 @@ const STAGES = {
 };
 
 const MAX_ORDER = 10;
-function describe(project) { const status = project?.status || 'created'; const stage = STAGES[status] || { order: -1, label: 'Unknown', next: 'Open project and review status', view: 'projects', queue: 'attention' }; const progress = stage.order < 0 ? 0 : Math.max(0, Math.min(100, Math.round((stage.order / MAX_ORDER) * 100))); return { status, ...stage, progress }; }
+function describe(project) {
+  const policyRejected = project?.chatgptError?.code === 'CHATGPT_POLICY_REJECTED';
+  const status = policyRejected ? 'chatgpt-policy-rejected' : (project?.status || 'created');
+  const stage = STAGES[status] || { order: -1, label: 'Unknown', next: 'Open project and review status', view: 'projects', queue: 'attention' };
+  const progress = stage.order < 0 ? 0 : Math.max(0, Math.min(100, Math.round((stage.order / MAX_ORDER) * 100)));
+  return { status, ...stage, progress };
+}
 function assertStatus(project, allowed, actionLabel) { if (!allowed.includes(project.status)) { const current = describe(project); throw new Error(`${actionLabel} is not available while status is "${project.status}". Next action: ${current.next}.`); } }
 function assertReviewable(project) { assertStatus(project, ['awaiting-review'], 'Review action'); if (!project.generatedImagePath) throw new Error('Generated image is missing. Retry ChatGPT generation/download first.'); }
 function assertMetadata(project) { assertStatus(project, ['approved-image', 'metadata-recovery-needed', 'metadata-ready'], 'Metadata generation'); if (project.review?.decision !== 'passed') throw new Error('Image must pass review before metadata generation.'); }

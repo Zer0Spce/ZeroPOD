@@ -7,10 +7,10 @@ const originalAddRows = AutomationQueueController.prototype.addRows;
 const originalMapProjectToRow = AutomationQueueController.prototype.mapProjectToRow;
 const originalProcessRow = AutomationQueueController.prototype.processRow;
 
-AutomationQueueController.prototype.addRows = function addRowsMax15(rows = []) {
+AutomationQueueController.prototype.addRows = function addRowsMax30(rows = []) {
   const current = this.store.read().rows.length;
-  if (current + rows.length > 15) {
-    throw new Error(`Automation List supports a maximum of 15 rows. You currently have ${current}.`);
+  if (current + rows.length > 30) {
+    throw new Error(`Automation supports a maximum of 30 rows. You currently have ${current}.`);
   }
   return originalAddRows.call(this, rows);
 };
@@ -61,7 +61,7 @@ AutomationQueueController.prototype.mapProjectToRow = function mapProjectToFullA
 async function autoApproveGeneratedProject(controller, project) {
   if (project.status !== 'awaiting-review') return project;
   if (!project.generatedImagePath || !fs.existsSync(project.generatedImagePath)) {
-    throw new Error('Generated image is missing, so Automation List could not auto-approve it.');
+    throw new Error('Generated image is missing, so Automation could not auto-approve it.');
   }
 
   const approvedImagePath = path.join(controller.projects.getProjectDir(project.id), 'approved.png');
@@ -71,7 +71,7 @@ async function autoApproveGeneratedProject(controller, project) {
     approvedImagePath,
     review: { ...(project.review || {}), decision: 'passed', automatic: true, passedAt: new Date().toISOString() }
   });
-  controller.projects.addActivity(project.id, { type: 'automation', label: 'Automation List auto-approved generated image' });
+  controller.projects.addActivity(project.id, { type: 'automation', label: 'Automation auto-approved generated image' });
   return updated;
 }
 

@@ -8,6 +8,13 @@ on:
   push:
     branches:
       - main
+      - feature/flying-research-beta
+      - feature/automate-list-file-import
+      - feature/redbubble-limit-auto-pause
+      - feature/redbubble-manual-limit-check
+      - feature/auto-png-top-placement
+      - feature/wide-top-placement-fix
+      - feature/strong-top-placement
 
 jobs:
   check:
@@ -25,7 +32,11 @@ jobs:
         run: npm install
 
       - name: Syntax and release smoke checks
-        run: npm run check
+        run: |
+          node --check src/main/redbubbleUploadLimitPausePatch.js
+          node --check src/main/redbubbleLimitCheckPatch.js
+          node scripts/exportPlacementSmoke.js
+          npm run check
 
       - name: Build unpacked Windows package
         run: npm run package:win
@@ -35,6 +46,6 @@ jobs:
       - name: Upload unpacked fast-start artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ZeroPOD-Windows-Unpacked
+          name: ${{ github.ref_name == 'feature/flying-research-beta' && 'ZeroPOD-Flying-Research-BETA-Windows-Unpacked' || 'ZeroPOD-Windows-Unpacked' }}
           path: dist/win-unpacked/**
           if-no-files-found: error
