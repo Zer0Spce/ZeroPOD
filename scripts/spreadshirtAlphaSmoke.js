@@ -71,7 +71,7 @@ assert(/marketplaceState/.test(marketplaceToggle), 'Spreadshirt custom marketpla
 assert(/clickMarketplaceVisibleControl/.test(marketplaceToggle), 'Spreadshirt visible marketplace-toggle click path is missing.');
 assert(/HTMLInputElement\.prototype/.test(marketplaceToggle), 'Spreadshirt hidden-checkbox native state fallback is missing.');
 assert(/locator\\\.click: Element is not visible|locator\\\.check/.test(marketplaceToggle), 'Spreadshirt hidden-toggle failure recovery detector is missing.');
-assert(/real browser mouse/i.test(marketplaceToggle), 'Spreadshirt trusted visible-toggle recovery Activity message is missing.');
+assert(/exact visible switch wrapper|native checkbox events|real browser mouse/i.test(marketplaceToggle), 'Spreadshirt trusted visible-toggle recovery Activity message is missing.');
 assert(/status:\s*'review'/.test(marketplaceToggle), 'Spreadshirt toggle recovery must restore final-review state without re-uploading.');
 
 assert(/visibleActions/.test(finalPublish), 'Spreadshirt final publish action discovery is missing.');
