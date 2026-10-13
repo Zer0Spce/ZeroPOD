@@ -11,7 +11,7 @@ const source = fs.readFileSync(file, 'utf8');
 const assert = (value, message) => { if (!value) throw new Error(message); };
 
 assert(/restoreDesignEditorForPublish/.test(source), 'Final publish must restore the design editor before opening Products.');
-assert(/project\.spreadshirt\.editorUrl/.test(source), 'Final publish must prefer the saved editor URL.');
+assert(/project\.spreadshirt\?\.editorUrl/.test(source), 'Final publish must prefer the saved editor URL.');
 assert(/waitForDesignEditor/.test(source), 'Final publish must wait for the editor shell to render.');
 assert(/verifyExpectedDraftExists/.test(source), 'Final publish must recover an existing Draft if the saved editor URL is stale.');
 assert(/clickMarketplaceCard/.test(source), 'Final publish Draft recovery must reopen the existing card without re-uploading.');
