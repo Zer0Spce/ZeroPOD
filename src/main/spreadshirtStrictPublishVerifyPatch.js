@@ -29,6 +29,20 @@ function designIdFromEditorUrl(value) {
   }
 }
 
+function statusResult(designId, status, extra = {}) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'published') {
+    return { verified: true, published: true, underReview: false, status: 'Published', designId, ...extra };
+  }
+  if (normalized === 'in review') {
+    return { verified: true, published: true, underReview: true, status: 'In review', designId, ...extra };
+  }
+  if (normalized === 'draft') {
+    return { verified: true, published: false, draft: true, status: 'Draft', designId, ...extra };
+  }
+  return null;
+}
+
 async function allFramesText(page) {
   const chunks = [];
   for (const frame of page.frames()) {
@@ -38,6 +52,129 @@ async function allFramesText(page) {
     } catch {}
   }
   return chunks.join('\n');
+}
+
+async function readEditorPublishStatus(page, designId) {
+  if (designIdFromEditorUrl(page.url()) !== designId) return null;
+
+  for (const frame of page.frames()) {
+    const result = await frame.evaluate(() => {
+      const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+      const visible = (el) => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0;
+      };
+
+      const headings = [...document.querySelectorAll('body *')]
+        .filter((el) => visible(el) && /^Publish on Spreadshirt$/i.test(norm(el.textContent)));
+
+      for (const heading of headings) {
+        let node = heading;
+        for (let depth = 0; node && depth < 10; depth += 1, node = node.parentElement) {
+          if (!visible(node)) continue;
+          const text = norm(node.innerText || node.textContent || '');
+          if (!/Sell your products on the Spreadshirt marketplace/i.test(text)) continue;
+          if (!/Design status/i.test(text)) continue;
+
+          const statuses = [...node.querySelectorAll('*')]
+            .filter((el) => visible(el) && /^(Draft|In review|Published)$/i.test(norm(el.textContent)));
+          const exact = statuses.find((el) => {
+            const textValue = norm(el.textContent);
+            return textValue && ![...el.children].some((child) => norm(child.textContent) === textValue);
+          }) || statuses[0];
+          if (!exact) continue;
+
+          return {
+            status: norm(exact.textContent),
+            cardText: text.slice(0, 700),
+            source: 'exact-editor-publish-card'
+          };
+        }
+      }
+      return null;
+    }).catch(() => null);
+
+    if (result?.status) return result;
+  }
+  return null;
+}
+
+async function revealEditorMetadata(page) {
+  for (const frame of page.frames()) {
+    const candidates = [
+      frame.getByRole('tab', { name: /^Metadata$/i }).first(),
+      frame.getByRole('button', { name: /^Metadata$/i }).first(),
+      frame.getByRole('link', { name: /^Metadata$/i }).first(),
+      frame.getByText(/^Metadata$/i, { exact: true }).first()
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (!(await candidate.count()) || !(await candidate.isVisible()) || await candidate.isDisabled()) continue;
+        await candidate.click({ force: true, timeout: 3000 });
+        await wait(350);
+        return true;
+      } catch {}
+    }
+  }
+  return false;
+}
+
+async function waitForEditorPublishStatus(page, designId, timeoutMs = 7000) {
+  const started = Date.now();
+  let metadataTried = false;
+  while (Date.now() - started < timeoutMs) {
+    const found = await readEditorPublishStatus(page, designId);
+    if (found?.status) return found;
+    if (!metadataTried && Date.now() - started > 1200) {
+      metadataTried = true;
+      await revealEditorMetadata(page).catch(() => {});
+    }
+    await wait(250);
+  }
+  return null;
+}
+
+async function readMarketplaceCardByDesignId(page, designId) {
+  return page.evaluate((wantedId) => {
+    const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const visible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0;
+    };
+    const attrContainsId = (el) => {
+      if (!el?.getAttributeNames) return false;
+      return el.getAttributeNames().some((name) => String(el.getAttribute(name) || '').includes(wantedId));
+    };
+
+    const identityNodes = [...document.querySelectorAll('a[href],button,[role="button"],[data-id],[data-design-id],[data-testid],[id]')]
+      .filter((el) => visible(el) && attrContainsId(el));
+
+    for (const identity of identityNodes) {
+      let node = identity;
+      for (let depth = 0; node && depth < 12; depth += 1, node = node.parentElement) {
+        if (!visible(node)) continue;
+        const rect = node.getBoundingClientRect();
+        if (rect.width < 140 || rect.width > 700 || rect.height < 160 || rect.height > 950) continue;
+        const statusNode = [...node.querySelectorAll('*')]
+          .find((el) => visible(el) && /^(Draft|In review|Published)$/i.test(norm(el.textContent)));
+        if (!statusNode) continue;
+        const image = node.querySelector('img,picture img,svg,canvas,[style*="background-image"]');
+        if (!image || !visible(image)) continue;
+        return {
+          status: norm(statusNode.textContent),
+          text: norm(node.innerText || node.textContent || '').slice(0, 700),
+          source: 'marketplace-exact-design-id-dom',
+          identityTag: identity.tagName,
+          identityHref: identity.getAttribute('href') || null
+        };
+      }
+    }
+    return null;
+  }, designId).catch(() => null);
 }
 
 async function readFilteredMarketplaceCards(page) {
@@ -97,46 +234,80 @@ async function strictMarketplaceStatus(page, project) {
   const designId = designIdFromEditorUrl(editorUrl);
   if (!designId) return { verified: false, reason: 'missing-design-id' };
 
+  if (designIdFromEditorUrl(page.url()) === designId) {
+    const currentEditor = await waitForEditorPublishStatus(page, designId, 2500);
+    const currentResult = statusResult(designId, currentEditor?.status, {
+      source: currentEditor?.source || 'current-editor',
+      editorUrl: page.url(),
+      editorCard: currentEditor || null
+    });
+    if (currentResult) return currentResult;
+  }
+
   const context = page.context();
   let verifyPage = null;
   try {
     verifyPage = await context.newPage();
+
+    await verifyPage.goto(editorUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    const directEditor = await waitForEditorPublishStatus(verifyPage, designId, 8000);
+    const directResult = statusResult(designId, directEditor?.status, {
+      source: directEditor?.source || 'direct-editor-url',
+      editorUrl,
+      editorCard: directEditor || null
+    });
+    if (directResult) return directResult;
+
     await verifyPage.goto(MARKETPLACE_DESIGNS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await waitForMarketplaceDesigns(verifyPage, 20000).catch(() => {});
 
+    let exactCard = await readMarketplaceCardByDesignId(verifyPage, designId);
+    if (exactCard?.status) {
+      const exactResult = statusResult(designId, exactCard.status, { source: exactCard.source, card: exactCard });
+      if (exactResult) return exactResult;
+    }
+
     const search = verifyPage.getByPlaceholder(/Name,\s*Id,\s*Tags/i).first();
-    if (!(await search.count().catch(() => 0)) || !(await search.isVisible().catch(() => false))) {
-      return { verified: false, reason: 'marketplace-id-search-not-found', designId };
-    }
+    if (await search.count().catch(() => 0) && await search.isVisible().catch(() => false)) {
+      await search.fill(designId).catch(() => {});
+      await wait(900);
+      exactCard = await readMarketplaceCardByDesignId(verifyPage, designId);
+      if (exactCard?.status) {
+        const exactResult = statusResult(designId, exactCard.status, { source: exactCard.source, card: exactCard });
+        if (exactResult) return exactResult;
+      }
 
-    await search.fill(designId);
-    await wait(900);
-
-    let cards = await readFilteredMarketplaceCards(verifyPage);
-    if (cards.length !== 1) {
-      await wait(1000);
+      let cards = await readFilteredMarketplaceCards(verifyPage);
+      if (cards.length === 1) {
+        const filteredResult = statusResult(designId, cards[0].status, {
+          source: 'single-card-after-exact-id-search',
+          card: cards[0]
+        });
+        if (filteredResult) return filteredResult;
+      }
+      await wait(900);
       cards = await readFilteredMarketplaceCards(verifyPage);
-    }
-    if (cards.length !== 1) {
-      return { verified: false, reason: `exact-id-search-returned-${cards.length}-cards`, designId, cards };
+      if (cards.length === 1) {
+        const filteredResult = statusResult(designId, cards[0].status, {
+          source: 'single-card-after-exact-id-search-retry',
+          card: cards[0]
+        });
+        if (filteredResult) return filteredResult;
+      }
+      return {
+        verified: false,
+        reason: `exact-design-id-dom-not-found-search-returned-${cards.length}-cards`,
+        designId,
+        cards
+      };
     }
 
-    const card = cards[0];
-    const status = String(card.status || '').trim().toLowerCase();
-    if (status === 'published') {
-      return { verified: true, published: true, underReview: false, status: 'Published', designId, card };
-    }
-    if (status === 'in review') {
-      return { verified: true, published: true, underReview: true, status: 'In review', designId, card };
-    }
-    if (status === 'draft') {
-      return { verified: true, published: false, draft: true, status: 'Draft', designId, card };
-    }
-    return { verified: false, reason: 'unknown-exact-design-status', designId, card };
+    return { verified: false, reason: 'exact-design-id-status-not-found', designId };
   } catch (error) {
     return { verified: false, reason: error?.message || String(error), designId };
   } finally {
     if (verifyPage) await verifyPage.close().catch(() => {});
+    await page.bringToFront().catch(() => {});
   }
 }
 
@@ -207,6 +378,7 @@ function markStrictPublished(projectId, page, strict) {
       publishVerification: 'exact-design-id',
       publishVerificationDesignId: strict.designId,
       publishVerificationStatus: strict.status,
+      publishVerificationSource: strict.source || null,
       lastError: null
     }
   });
@@ -241,7 +413,7 @@ feature.publish = async function publishWithStrictDesignIdentity(projectId) {
     throw new Error(`Spreadshirt “Save and publish” could not be clicked.${labels}`);
   }
 
-  activity(projectId, 'Clicked Spreadshirt “Save and publish”. Waiting for the exact design ID to leave Draft…');
+  activity(projectId, 'Clicked Spreadshirt “Save and publish”. Waiting for this exact design editor to become In review/Published…');
   const started = Date.now();
   let lastStrict = strict;
   while (Date.now() - started < 45000) {
@@ -252,7 +424,7 @@ feature.publish = async function publishWithStrictDesignIdentity(projectId) {
     if (lastStrict.verified && lastStrict.published) {
       return markStrictPublished(projectId, page, lastStrict);
     }
-    await wait(1800);
+    await wait(1400);
   }
 
   if (lastStrict?.verified && lastStrict?.draft) {
@@ -287,7 +459,10 @@ feature.usage = function usageWithFalsePublishRepair() {
     setTimeout(async () => {
       try {
         const status = feature.sessions.getStatuses().spreadshirt || {};
-        if (status.authStatus !== 'verified') return;
+        if (status.authStatus !== 'verified') {
+          reconcileScheduled = false;
+          return;
+        }
         const published = feature.projects.list({ includeArchived: true })
           .filter((project) => project.spreadshirt?.publishedAt && designIdFromEditorUrl(project.spreadshirt?.editorUrl || project.spreadshirt?.publishedUrl || ''));
         if (!published.length) {
@@ -310,6 +485,10 @@ feature.usage = function usageWithFalsePublishRepair() {
 
 module.exports = {
   designIdFromEditorUrl,
+  statusResult,
+  readEditorPublishStatus,
+  waitForEditorPublishStatus,
+  readMarketplaceCardByDesignId,
   strictMarketplaceStatus,
   readFilteredMarketplaceCards,
   clickSaveAndPublishTrusted,
