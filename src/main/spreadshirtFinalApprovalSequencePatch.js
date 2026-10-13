@@ -1,6 +1,7 @@
 const { feature } = require('./spreadshirtAlphaIpc');
 const { marketplaceState, clickMarketplaceVisibleControl } = require('./spreadshirtMarketplaceTogglePatch');
 const { verifyMarketplacePublished } = require('./spreadshirtFinalPublishPatch');
+const { ensureFullFrontPlacement } = require('./spreadshirtRecordedPlacementPatch');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const PUBLISHED_UNDER_REVIEW = /Your design has been published, but is still under review|Design status\s*In review/i;
@@ -21,6 +22,76 @@ async function allFramesText(page) {
   return chunks.join('\n');
 }
 
+async function visible(locator) {
+  try { return Boolean(await locator.count()) && await locator.isVisible(); } catch { return false; }
+}
+
+async function clickEditorNavigation(page, label) {
+  const pattern = new RegExp(`^${String(label).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+  for (const frame of page.frames()) {
+    const candidates = [
+      frame.getByRole('tab', { name: pattern }).first(),
+      frame.getByRole('button', { name: pattern }).first(),
+      frame.getByRole('link', { name: pattern }).first(),
+      frame.getByText(pattern, { exact: true }).first()
+    ];
+    for (const candidate of candidates) {
+      if (!(await visible(candidate))) continue;
+      if (await candidate.isDisabled().catch(() => false)) continue;
+      try {
+        await candidate.scrollIntoViewIfNeeded().catch(() => {});
+        await candidate.click({ force: true, timeout: 5000 });
+        return true;
+      } catch {}
+    }
+  }
+  return false;
+}
+
+async function waitForText(page, pattern, timeoutMs = 15000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const text = await allFramesText(page);
+    if (pattern.test(text)) return true;
+    await wait(250);
+  }
+  return false;
+}
+
+async function openProductsAndSetFullFront(page, projectId) {
+  activity(projectId, 'Opening Spreadshirt Products so Standard placement can be set to Full front…');
+  const clickedProducts = await clickEditorNavigation(page, 'Products');
+  if (!clickedProducts) {
+    const current = await allFramesText(page);
+    if (!/Design products|Change settings|Standard placement/i.test(current)) {
+      throw new Error('Spreadshirt Products tab was not found before Full front placement.');
+    }
+  }
+
+  const productsReady = await waitForText(page, /Design products|Change settings|Standard placement/i, 15000);
+  if (!productsReady) throw new Error('Spreadshirt Products did not become ready.');
+
+  activity(projectId, 'Opening Change settings → Standard placement → Full front…');
+  const placement = await ensureFullFrontPlacement(page);
+  activity(projectId, placement.changed
+    ? 'Spreadshirt Standard placement saved as Full front.'
+    : 'Spreadshirt Standard placement is already Full front.');
+  return placement;
+}
+
+async function returnToMetadata(page, projectId) {
+  activity(projectId, 'Returning to Spreadshirt Metadata before marketplace publishing…');
+  const clicked = await clickEditorNavigation(page, 'Metadata');
+  if (!clicked) {
+    const text = await allFramesText(page);
+    if (/Publish on Spreadshirt|Spreadshirt marketplace/i.test(text)) return true;
+    throw new Error('Spreadshirt Metadata tab was not found after saving Full front placement.');
+  }
+  const ready = await waitForText(page, /Publish on Spreadshirt|Spreadshirt marketplace/i, 15000);
+  if (!ready) throw new Error('Spreadshirt Metadata did not show the Publish on Spreadshirt section.');
+  return true;
+}
+
 async function findMarketplaceState(page) {
   for (const frame of page.frames()) {
     const state = await marketplaceState(frame);
@@ -37,14 +108,14 @@ async function ensurePublishSwitchOn(page, projectId) {
     if (found) break;
     await wait(250);
   }
-  if (!found) throw new Error('Spreadshirt “Publish on Spreadshirt” control was not found on the final review page.');
+  if (!found) throw new Error('Spreadshirt “Publish on Spreadshirt” control was not found on Metadata.');
 
   if (found.state.checked === true) {
     activity(projectId, 'Publish on Spreadshirt is already ON. Waiting for Save and publish…');
     return true;
   }
 
-  activity(projectId, 'Clicking Publish on Spreadshirt first so the final Save and publish action becomes available…');
+  activity(projectId, 'Clicking Publish on Spreadshirt first so Save and publish becomes available…');
   const click = await clickMarketplaceVisibleControl(found.frame);
   if (!click?.clicked && !click?.alreadyChecked) {
     throw new Error('Spreadshirt “Publish on Spreadshirt” control could not be activated.');
@@ -145,8 +216,11 @@ feature.publish = async function publishWithExactFinalApprovalSequence(projectId
   }
   await page.bringToFront();
 
-  // Important: Full-front placement is a Prepare-stage responsibility. Do not reopen
-  // Product settings here; live final-review pages may not expose Change settings.
+  // Exact user-confirmed order:
+  // Products -> Change settings -> Standard placement -> Full front -> Save
+  // -> Metadata -> Publish on Spreadshirt -> Save and publish.
+  await openProductsAndSetFullFront(page, projectId);
+  await returnToMetadata(page, projectId);
   await ensurePublishSwitchOn(page, projectId);
 
   activity(projectId, 'Waiting for Spreadshirt “Save and publish”…');
@@ -172,6 +246,8 @@ feature.publish = async function publishWithExactFinalApprovalSequence(projectId
 };
 
 module.exports = {
+  openProductsAndSetFullFront,
+  returnToMetadata,
   ensurePublishSwitchOn,
   clickSaveAndPublish,
   PUBLISHED_UNDER_REVIEW
