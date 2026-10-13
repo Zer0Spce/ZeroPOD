@@ -1,6 +1,7 @@
 const { feature } = require('./spreadshirtAlphaIpc');
 const { enableMarketplaceCustomToggle } = require('./spreadshirtMarketplaceTogglePatch');
 const { verifyMarketplacePublished } = require('./spreadshirtFinalPublishPatch');
+const { ensureFullFrontPlacement } = require('./spreadshirtRecordedPlacementPatch');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const PUBLISHED_UNDER_REVIEW = /Your design has been published, but is still under review/i;
@@ -140,6 +141,15 @@ feature.publish = async function publishFollowingRecordedVideo(projectId) {
     await page.goto(project.spreadshirt.editorUrl, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
   }
   await page.bringToFront();
+
+  // The recorded manual flow changes Product settings first. Enforce Full front here
+  // too so an already-prepared project from an older Alpha build is corrected without
+  // restarting generation/upload.
+  activity(projectId, 'Verifying Spreadshirt standard placement is Full front…');
+  const placement = await ensureFullFrontPlacement(page);
+  activity(projectId, placement.changed
+    ? 'Spreadshirt standard placement changed and saved as Full front.'
+    : 'Spreadshirt standard placement is already Full front.');
 
   activity(projectId, 'Verifying “Publish on Spreadshirt” is enabled before final publish…');
   const toggle = await enableMarketplaceCustomToggle(page);
