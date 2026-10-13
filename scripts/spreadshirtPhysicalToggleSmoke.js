@@ -3,11 +3,16 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const root = path.join(__dirname, '..');
-const file = path.join(root, 'src/main/spreadshirtMarketplaceTogglePatch.js');
-const syntax = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
-if (syntax.status !== 0) throw new Error(syntax.stderr || syntax.stdout || 'Marketplace toggle patch syntax failed.');
+const toggleFile = path.join(root, 'src/main/spreadshirtMarketplaceTogglePatch.js');
+const strictFile = path.join(root, 'src/main/spreadshirtStrictPublishVerifyPatch.js');
+for (const file of [toggleFile, strictFile]) {
+  const syntax = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+  if (syntax.status !== 0) throw new Error(syntax.stderr || syntax.stdout || `${path.basename(file)} syntax failed.`);
+}
 
-const source = fs.readFileSync(file, 'utf8');
+const source = fs.readFileSync(toggleFile, 'utf8');
+const strict = fs.readFileSync(strictFile, 'utf8');
+const bootstrap = fs.readFileSync(path.join(root, 'src/main/bootstrap.js'), 'utf8');
 const assert = (value, message) => { if (!value) throw new Error(message); };
 
 assert(/playwright-native-mouse/.test(source), 'Spreadshirt marketplace toggle must retain the trusted browser-mouse path.');
@@ -26,4 +31,19 @@ assert(/Final Review will continue/.test(source), 'Prepare must not be blocked w
 assert(/marketplaceSwitchPrepared/.test(source), 'Prepare must persist whether marketplace activation succeeded without blocking Final Review.');
 assert(!/visible-control-unverified/.test(source), 'Old unverified toggle success fallback must not return.');
 
-console.log('Spreadshirt exact checkbox-wrapper + trusted mouse + native checkbox activation smoke checks passed.');
+assert(/designIdFromEditorUrl/.test(strict), 'Strict publish verification must derive a unique Spreadshirt design ID from the editor URL.');
+assert(/Name,\\s\*Id,\\s\*Tags/.test(strict), 'Strict publish verification must search Marketplace by exact design ID.');
+assert(/cards\.length !== 1/.test(strict), 'Strict publish verification must reject ambiguous Marketplace search results.');
+assert(/status === 'in review'/.test(strict) && /status === 'published'/.test(strict) && /status === 'draft'/.test(strict), 'Strict publish verification must distinguish Draft, In review and Published.');
+assert(/trusted-playwright-button/.test(strict), 'Save and publish must use a trusted Playwright button click first.');
+assert(/still shows Draft/.test(strict), 'Exact Draft status must block local Published state.');
+assert(/removePublishLedgerEntry/.test(strict) && /reverted-false-positive/.test(strict), 'False local publishes must repair the ledger and return to Final Review.');
+assert(/publishVerification:\s*'exact-design-id'/.test(strict), 'Successful publishes must persist exact-design-ID verification.');
+assert(!/PUBLISHED_UNDER_REVIEW/.test(strict), 'Strict final layer must not trust generic page-text success banners by themselves.');
+
+const finalIndex = bootstrap.indexOf("require('./spreadshirtFinalApprovalSequencePatch')");
+const strictIndex = bootstrap.indexOf("require('./spreadshirtStrictPublishVerifyPatch')");
+const uiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
+assert(finalIndex >= 0 && strictIndex > finalIndex && uiIndex > strictIndex, 'Strict publish verifier must load after every older publish wrapper and before Spreadshirt UI injection.');
+
+console.log('Spreadshirt exact switch + strict design-ID publish verification smoke checks passed.');
