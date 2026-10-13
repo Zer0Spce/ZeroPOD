@@ -1,5 +1,8 @@
 const { feature } = require('./spreadshirtAlphaIpc');
-const { enableMarketplaceCustomToggle } = require('./spreadshirtMarketplaceTogglePatch');
+const {
+  enableMarketplaceCustomToggle,
+  marketplaceState
+} = require('./spreadshirtMarketplaceTogglePatch');
 const { verifyMarketplacePublished } = require('./spreadshirtFinalPublishPatch');
 const { ensureFullFrontPlacement } = require('./spreadshirtRecordedPlacementPatch');
 
@@ -44,7 +47,30 @@ async function visibleActions(page) {
   return [...new Set(labels)].slice(0, 50);
 }
 
-async function clickExactSaveAndPublish(page, timeoutMs = 20000) {
+async function marketplacePublishingState(page) {
+  let sawControl = false;
+  for (const frame of page.frames()) {
+    const state = await marketplaceState(frame).catch(() => null);
+    if (!state) continue;
+    sawControl = true;
+    if (state.checked === true) return { verified: true, enabled: true, state };
+    if (state.checked === false) return { verified: true, enabled: false, state };
+  }
+  return { verified: false, enabled: false, sawControl };
+}
+
+async function waitForMarketplacePublishingEnabled(page, timeoutMs = 7000) {
+  const started = Date.now();
+  let last = null;
+  while (Date.now() - started < timeoutMs) {
+    last = await marketplacePublishingState(page);
+    if (last.verified && last.enabled) return last;
+    await wait(180);
+  }
+  return last || { verified: false, enabled: false, sawControl: false };
+}
+
+async function clickExactSaveAndPublish(page, timeoutMs = 6000) {
   const started = Date.now();
   let lastActions = [];
   while (Date.now() - started < timeoutMs) {
@@ -58,7 +84,7 @@ async function clickExactSaveAndPublish(page, timeoutMs = 20000) {
           if (!(await candidate.count()) || !(await candidate.isVisible()) || await candidate.isDisabled()) continue;
           await candidate.scrollIntoViewIfNeeded().catch(() => {});
           await candidate.click({ force: true, timeout: 5000 });
-          return { ok: true, method: 'locator' };
+          return { ok: true, method: 'save-and-publish-locator', label: 'Save and publish' };
         } catch {}
       }
 
@@ -81,13 +107,53 @@ async function clickExactSaveAndPublish(page, timeoutMs = 20000) {
         target.click();
         return true;
       }).catch(() => false);
-      if (clicked) return { ok: true, method: 'dom-exact-text' };
+      if (clicked) return { ok: true, method: 'save-and-publish-dom', label: 'Save and publish' };
     }
 
     lastActions = await visibleActions(page);
     await wait(250);
   }
   return { ok: false, visibleActions: lastActions };
+}
+
+async function clickVerifiedEditorSave(page) {
+  const text = await allFramesText(page);
+  if (!/Design products/i.test(text) || !/Publish on Spreadshirt/i.test(text) || /Product settings[\s\S]{0,400}Standard placement/i.test(text)) {
+    return { ok: false, reason: 'not-design-products-editor' };
+  }
+
+  const state = await marketplacePublishingState(page);
+  if (!state.verified || !state.enabled) {
+    return { ok: false, reason: 'marketplace-not-verified-enabled' };
+  }
+
+  for (const frame of page.frames()) {
+    const result = await frame.evaluate(() => {
+      const visible = (el) => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const label = (el) => String(el.innerText || el.textContent || el.value || el.getAttribute?.('aria-label') || '')
+        .replace(/\s+/g, ' ').trim();
+      const candidates = [...document.querySelectorAll('button,[role="button"],input[type="submit"],input[type="button"]')]
+        .filter((el) => visible(el) && /^Save$/i.test(label(el)) && !el.disabled && el.getAttribute('aria-disabled') !== 'true')
+        .map((el) => ({ el, rect: el.getBoundingClientRect() }))
+        .sort((a, b) => (a.rect.y - b.rect.y) || (b.rect.x - a.rect.x));
+      const target = candidates[0]?.el;
+      if (!target) return { clicked: false };
+      const rect = target.getBoundingClientRect();
+      target.scrollIntoView({ block: 'center', inline: 'center' });
+      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      target.click();
+      return { clicked: true, x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    }).catch(() => ({ clicked: false }));
+    if (result?.clicked) return { ok: true, method: 'verified-marketplace-save', label: 'Save', geometry: result };
+  }
+
+  return { ok: false, reason: 'enabled-save-not-found' };
 }
 
 function markPublished(featureInstance, projectId, page, options = {}) {
@@ -129,8 +195,6 @@ feature.publish = async function publishFollowingRecordedVideo(projectId) {
     return markPublished(this, projectId, page, { underReview: true });
   }
 
-  // If a previous attempt silently succeeded, honor the real Marketplace status and
-  // do not click publish again.
   const before = await verifyMarketplacePublished(page, project).catch(() => null);
   if (before?.verified && before.published) {
     activity(projectId, 'Marketplace Designs already shows this design as Published. No extra publish click needed.');
@@ -142,9 +206,6 @@ feature.publish = async function publishFollowingRecordedVideo(projectId) {
   }
   await page.bringToFront();
 
-  // The recorded manual flow changes Product settings first. Enforce Full front here
-  // too so an already-prepared project from an older Alpha build is corrected without
-  // restarting generation/upload.
   activity(projectId, 'Verifying Spreadshirt standard placement is Full front…');
   const placement = await ensureFullFrontPlacement(page);
   activity(projectId, placement.changed
@@ -157,21 +218,30 @@ feature.publish = async function publishFollowingRecordedVideo(projectId) {
     throw new Error('Spreadshirt final publish could not enable the “Publish on Spreadshirt” switch.');
   }
 
-  // The recorded UI changes the top-right button from “Save” to “Save and publish”
-  // only after the marketplace switch is really enabled. Never fall back to plain Save.
-  activity(projectId, 'Waiting for the recorded top-right “Save and publish” button…');
-  const action = await clickExactSaveAndPublish(page, 20000);
-  if (!action.ok) {
-    const labels = action.visibleActions?.length ? ` Visible actions: ${action.visibleActions.join(' | ')}` : '';
-    throw new Error(`Spreadshirt “Save and publish” did not become available after enabling marketplace publishing.${labels}`);
+  const enabled = await waitForMarketplacePublishingEnabled(page, 7000);
+  if (!enabled.verified || !enabled.enabled) {
+    const labels = await visibleActions(page);
+    throw new Error(`Spreadshirt could not verify that “Publish on Spreadshirt” is ON before saving.${labels.length ? ` Visible actions: ${labels.join(' | ')}` : ''}`);
   }
 
-  activity(projectId, 'Clicked Spreadshirt “Save and publish”. Waiting for publish confirmation…');
+  activity(projectId, 'Marketplace publishing is confirmed ON. Looking for the final publish action…');
+  let action = await clickExactSaveAndPublish(page, 5000);
+  if (!action.ok) {
+    activity(projectId, 'This Spreadshirt editor keeps the final button labelled “Save”. Because Publish on Spreadshirt is confirmed ON, using that verified Save action…');
+    action = await clickVerifiedEditorSave(page);
+  }
+
+  if (!action.ok) {
+    const labels = await visibleActions(page);
+    throw new Error(`Spreadshirt final publish action was not available even though marketplace publishing is ON.${labels.length ? ` Visible actions: ${labels.join(' | ')}` : ''}`);
+  }
+
+  activity(projectId, `Clicked Spreadshirt “${action.label}” with marketplace publishing ON. Waiting for publish confirmation…`);
   const started = Date.now();
   while (Date.now() - started < 30000) {
     text = await allFramesText(page);
     if (FAILURE.test(text)) {
-      throw new Error('Spreadshirt showed an error after “Save and publish”.');
+      throw new Error(`Spreadshirt showed an error after “${action.label}”.`);
     }
     if (PUBLISHED_UNDER_REVIEW.test(text)) {
       return markPublished(this, projectId, page, { underReview: true });
@@ -187,11 +257,15 @@ feature.publish = async function publishFollowingRecordedVideo(projectId) {
     return markPublished(this, projectId, page, { url: finalCheck.url });
   }
 
-  throw new Error('Spreadshirt “Save and publish” was clicked, but the design still could not be verified as Published. The existing Draft is preserved; do not re-upload it.');
+  const state = finalCheck?.verified && finalCheck.draft ? ' Marketplace still reports Draft.' : '';
+  throw new Error(`Spreadshirt “${action.label}” was clicked with marketplace publishing ON, but the design still could not be verified as Published.${state} The existing Draft is preserved; do not re-upload it.`);
 };
 
 module.exports = {
   PUBLISHED_UNDER_REVIEW,
   clickExactSaveAndPublish,
+  clickVerifiedEditorSave,
+  marketplacePublishingState,
+  waitForMarketplacePublishingEnabled,
   allFramesText
 };
