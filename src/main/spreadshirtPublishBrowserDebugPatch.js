@@ -7,8 +7,7 @@ feature.publish = async function publishWithVisibleSpreadshirtBrowser(projectId)
   // Diagnostic-only wrapper: make the existing Spreadshirt automation Chrome window
   // visible before the established final-publish flow runs. No publish behavior,
   // selectors, placement, metadata, verification, or retry logic is changed here.
-  this.sessions.__zeroPodVisibleAutomationServices ||= new Set();
-  this.sessions.__zeroPodVisibleAutomationServices.add('spreadshirt');
+  this.sessions.setAutomationWindowVisible?.('spreadshirt', true);
 
   const { page } = await this.sessions.ensureService('spreadshirt');
   await showAutomationWindow(page);
