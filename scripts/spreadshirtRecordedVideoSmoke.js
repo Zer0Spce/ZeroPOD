@@ -28,8 +28,14 @@ assert(/videoFlow\.waitForProductsCreated = async function waitForProductsCreate
 assert(/Your design has been published, but is still under review/i.test(publish), 'Exact Spreadshirt under-review publish banner must count as success.');
 assert(/ensureFullFrontPlacement/.test(publish), 'Existing prepared projects must enforce Full front before publish.');
 assert(/enableMarketplaceCustomToggle/.test(publish), 'Recorded publish flow must explicitly enable Publish on Spreadshirt.');
-assert(/\^Save and publish\$/.test(publish), 'Recorded publish flow must require the exact Save and publish action.');
-assert(!/\^Save\$/.test(publish), 'Recorded final publish must never fall back to plain Save.');
+assert(/marketplaceState/.test(publish), 'Recorded publish flow must read the actual marketplace switch state.');
+assert(/waitForMarketplacePublishingEnabled/.test(publish), 'Recorded publish flow must positively verify marketplace publishing is ON.');
+assert(/\^Save and publish\$/.test(publish), 'Recorded publish flow must still prefer the exact Save and publish action.');
+assert(/clickVerifiedEditorSave/.test(publish), 'Current Spreadshirt editor must support the verified plain Save publish fallback.');
+assert(/\^Save\$/i.test(publish), 'Verified publish fallback must target only an exact plain Save action.');
+assert(/!state\.verified \|\| !state\.enabled/.test(publish), 'Plain Save fallback must be blocked unless marketplace publishing is positively verified ON.');
+assert(/Marketplace publishing is confirmed ON/.test(publish), 'Activity log must show that marketplace publishing was verified before final Save.');
+assert(/verified-marketplace-save/.test(publish), 'Plain Save fallback must be explicitly marked as marketplace-verified.');
 assert(/reviewState: options\.underReview \? 'under-review'/.test(publish), 'Under-review publication must be persisted as a successful published state.');
 assert(/verifyMarketplacePublished/.test(publish), 'Recorded publish flow must keep Marketplace status verification as a safety fallback.');
 
@@ -43,4 +49,4 @@ const uiPatch = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
 assert(alphaIpc >= 0 && alphaIpc < placementPatch && placementPatch < cardPatch, 'Recorded Full front patch must load after Spreadshirt IPC and before card recovery imports the product waiter.');
 assert(cardPatch < togglePatch && togglePatch < finalPatch && finalPatch < recordedPublish && recordedPublish < uiPatch, 'Recorded final publish patch must be the last Spreadshirt publish override before UI/main.');
 
-console.log('Spreadshirt recorded-video Full front + Save and publish smoke checks passed.');
+console.log('Spreadshirt recorded-video Full front + verified marketplace Save publish smoke checks passed.');
