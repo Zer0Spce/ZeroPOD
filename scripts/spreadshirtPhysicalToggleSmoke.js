@@ -5,13 +5,16 @@ const { spawnSync } = require('child_process');
 const root = path.join(__dirname, '..');
 const toggleFile = path.join(root, 'src/main/spreadshirtMarketplaceTogglePatch.js');
 const strictFile = path.join(root, 'src/main/spreadshirtStrictPublishVerifyPatch.js');
-for (const file of [toggleFile, strictFile]) {
+const debugFile = path.join(root, 'src/main/spreadshirtPublishBrowserDebugPatch.js');
+for (const file of [toggleFile, strictFile, debugFile]) {
   const syntax = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
   if (syntax.status !== 0) throw new Error(syntax.stderr || syntax.stdout || `${path.basename(file)} syntax failed.`);
 }
 
 const source = fs.readFileSync(toggleFile, 'utf8');
 const strict = fs.readFileSync(strictFile, 'utf8');
+const debug = fs.readFileSync(debugFile, 'utf8');
+const dock = fs.readFileSync(path.join(root, 'src/main/chromeDockPatch.js'), 'utf8');
 const bootstrap = fs.readFileSync(path.join(root, 'src/main/bootstrap.js'), 'utf8');
 const assert = (value, message) => { if (!value) throw new Error(message); };
 
@@ -42,9 +45,17 @@ assert(/removePublishLedgerEntry/.test(strict) && /reverted-false-positive/.test
 assert(/publishVerification:\s*'exact-design-id'/.test(strict), 'Successful publishes must persist exact-design-ID verification.');
 assert(!/PUBLISHED_UNDER_REVIEW/.test(strict), 'Strict final layer must not trust generic page-text success banners by themselves.');
 
+assert(/setAutomationWindowVisible\?\.\('spreadshirt', true\)/.test(debug), 'Diagnostic publish wrapper must enable visibility only for Spreadshirt automation Chrome.');
+assert(/showAutomationWindow\(page\)/.test(debug) && /page\.bringToFront/.test(debug), 'Diagnostic publish wrapper must visibly foreground the existing Spreadshirt browser.');
+assert(/return previousPublish\(projectId\)/.test(debug), 'Diagnostic wrapper must delegate to the existing publish implementation unchanged.');
+assert(!/\.click\(|\.fill\(|\.goto\(|recordPublish|projects\.update/.test(debug), 'Diagnostic wrapper must not alter publish interactions or project state.');
+assert(/setAutomationWindowVisible/.test(dock) && /showAutomationWindow/.test(dock), 'Chrome dock patch must support temporary visible automation windows.');
+assert(/left:\s*60/.test(dock) && /top:\s*60/.test(dock), 'Diagnostic automation window must be moved back onto the visible desktop.');
+
 const finalIndex = bootstrap.indexOf("require('./spreadshirtFinalApprovalSequencePatch')");
 const strictIndex = bootstrap.indexOf("require('./spreadshirtStrictPublishVerifyPatch')");
+const debugIndex = bootstrap.indexOf("require('./spreadshirtPublishBrowserDebugPatch')");
 const uiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
-assert(finalIndex >= 0 && strictIndex > finalIndex && uiIndex > strictIndex, 'Strict publish verifier must load after every older publish wrapper and before Spreadshirt UI injection.');
+assert(finalIndex >= 0 && strictIndex > finalIndex && debugIndex > strictIndex && uiIndex > debugIndex, 'Diagnostic browser wrapper must load after strict publish logic and before Spreadshirt UI injection.');
 
-console.log('Spreadshirt exact switch + strict exact-editor/design-ID publish verification smoke checks passed.');
+console.log('Spreadshirt exact switch + strict exact-editor/design-ID verification + visible publish-browser diagnostic smoke checks passed.');
