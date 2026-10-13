@@ -13,6 +13,7 @@ const files = [
   'src/main/spreadshirtMarketplaceRoutePatch.js',
   'src/main/spreadshirtCardDetectionPatch.js',
   'src/main/spreadshirtMarketplaceTogglePatch.js',
+  'src/main/spreadshirtFinalPublishPatch.js',
   'src/main/spreadshirtRegularExportPatch.js',
   'src/main/spreadshirtJourneyReliabilityPatch.js',
   'src/main/spreadshirtUploadReliabilityPatch.js',
@@ -35,6 +36,7 @@ const videoFlow = read('src/main/spreadshirtVideoFlowPatch.js');
 const marketplaceRoute = read('src/main/spreadshirtMarketplaceRoutePatch.js');
 const cardDetection = read('src/main/spreadshirtCardDetectionPatch.js');
 const marketplaceToggle = read('src/main/spreadshirtMarketplaceTogglePatch.js');
+const finalPublish = read('src/main/spreadshirtFinalPublishPatch.js');
 const renderer = read('src/renderer/spreadshirtAlpha.js');
 const preload = read('src/main/preload.js');
 const bootstrap = read('src/main/bootstrap.js');
@@ -72,6 +74,15 @@ assert(/locator\\\.click: Element is not visible|locator\\\.check/.test(marketpl
 assert(/visible Publish on Spreadshirt control/i.test(marketplaceToggle), 'Spreadshirt visible-toggle recovery Activity message is missing.');
 assert(/status:\s*'review'/.test(marketplaceToggle), 'Spreadshirt toggle recovery must restore final-review state without re-uploading.');
 
+assert(/visibleActions/.test(finalPublish), 'Spreadshirt final publish action discovery is missing.');
+assert(/actionScore/.test(finalPublish), 'Spreadshirt final publish action ranking is missing.');
+assert(/save\\s\*\(\?:&\|and\)/.test(finalPublish) || /save.*publish/i.test(finalPublish), 'Spreadshirt Save and publish preference is missing.');
+assert(/\^save changes\$/.test(finalPublish) && /\^save\$/.test(finalPublish), 'Spreadshirt Save/Save changes fallbacks are missing.');
+assert(/page\.frames\(\)/.test(finalPublish), 'Spreadshirt final publish discovery must inspect frames.');
+assert(/actionNumber <= 2/.test(finalPublish), 'Spreadshirt final publish should allow at most two bounded final actions.');
+assert(/Visible actions:/.test(finalPublish), 'Spreadshirt final publish failure diagnostics are missing.');
+assert(/status:\s*'published'/.test(finalPublish), 'Spreadshirt final publish recovery must persist published status.');
+
 assert(/new ExportController/.test(standardExport), 'Spreadshirt must reuse the standard ZeroPOD ExportController.');
 assert(/standard-zeropod-4500x5400/.test(standardExport), 'Spreadshirt standard 4500x5400 export marker is missing.');
 assert(/info\.width !== 4500 \|\| info\.height !== 5400/.test(standardExport), 'Spreadshirt should expect the normal 4500x5400 ZeroPOD PNG.');
@@ -96,7 +107,7 @@ assert(/clickUploadedDesign/.test(videoFlow), 'Spreadshirt must retain legacy up
 assert(/Design products/i.test(videoFlow), 'Spreadshirt must wait for the Design products editor.');
 assert(/products created/i.test(videoFlow), 'Spreadshirt must wait for product creation before final preparation.');
 assert(/Publish on Spreadshirt/i.test(videoFlow), 'Spreadshirt marketplace toggle handling is missing.');
-assert(/Save and publish/i.test(videoFlow), 'Spreadshirt Save and publish handling is missing.');
+assert(/Save and publish/i.test(videoFlow), 'Spreadshirt original Save and publish path must remain available.');
 assert(/Well done!/i.test(videoFlow) && /Woohoo/i.test(videoFlow), 'Spreadshirt post-publish confirmation handling is missing.');
 assert(/addActivity/.test(videoFlow), 'Spreadshirt long-running stages must report Activity progress.');
 assert(/attempt <= 2/.test(videoFlow), 'Recorded upload flow should use bounded retries and avoid long nested retry loops.');
@@ -141,10 +152,11 @@ const ssIpcIndex = bootstrap.indexOf("require('./spreadshirtAlphaIpc')");
 const marketplaceRouteIndex = bootstrap.indexOf("require('./spreadshirtMarketplaceRoutePatch')");
 const cardPatchIndex = bootstrap.indexOf("require('./spreadshirtCardDetectionPatch')");
 const togglePatchIndex = bootstrap.indexOf("require('./spreadshirtMarketplaceTogglePatch')");
+const finalPublishPatchIndex = bootstrap.indexOf("require('./spreadshirtFinalPublishPatch')");
 const ssUiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
 const mainIndex = bootstrap.lastIndexOf("require('./main')");
 assert(flyingPatchIndex >= 0 && flyingPatchIndex < flyingIpcIndex, 'Flying Spreadshirt prototype patch must load before Flying Research IPC.');
 assert(exportPatchIndex >= 0 && exportPatchIndex < journeyPatchIndex && journeyPatchIndex < uploadPatchIndex && uploadPatchIndex < videoPatchIndex && videoPatchIndex < ssIpcIndex, 'Recorded Spreadshirt flow patches must load before Spreadshirt IPC.');
-assert(ssIpcIndex >= 0 && ssIpcIndex < marketplaceRouteIndex && marketplaceRouteIndex < cardPatchIndex && cardPatchIndex < togglePatchIndex && togglePatchIndex < ssUiIndex && ssUiIndex < mainIndex, 'Spreadshirt Marketplace route, newest-card recovery and visible-toggle recovery must load after IPC and before UI/main.');
+assert(ssIpcIndex >= 0 && ssIpcIndex < marketplaceRouteIndex && marketplaceRouteIndex < cardPatchIndex && cardPatchIndex < togglePatchIndex && togglePatchIndex < finalPublishPatchIndex && finalPublishPatchIndex < ssUiIndex && ssUiIndex < mainIndex, 'Spreadshirt Marketplace route, newest-card, visible-toggle and final-publish recovery must load after IPC and before UI/main.');
 
-console.log('Spreadshirt Alpha recorded-video + newest-first-card + stale-upload + visible-toggle recovery smoke checks passed.');
+console.log('Spreadshirt Alpha recorded-video + newest-first-card + stale-upload + visible-toggle + adaptive final-publish smoke checks passed.');
