@@ -1,5 +1,5 @@
 const { feature } = require('./spreadshirtAlphaIpc');
-const { marketplaceState, clickMarketplaceVisibleControl } = require('./spreadshirtMarketplaceTogglePatch');
+const { marketplaceState, enableMarketplaceCustomToggle } = require('./spreadshirtMarketplaceTogglePatch');
 const { verifyMarketplacePublished } = require('./spreadshirtFinalPublishPatch');
 const { ensureFullFrontPlacement } = require('./spreadshirtRecordedPlacementPatch');
 
@@ -115,20 +115,24 @@ async function ensurePublishSwitchOn(page, projectId) {
     return true;
   }
 
-  activity(projectId, 'Clicking Publish on Spreadshirt first so Save and publish becomes available…');
-  const click = await clickMarketplaceVisibleControl(found.frame);
-  if (!click?.clicked && !click?.alreadyChecked) {
-    throw new Error('Spreadshirt “Publish on Spreadshirt” control could not be activated.');
+  activity(projectId, 'Clicking the physical Publish on Spreadshirt switch with a real browser mouse so Save and publish becomes available…');
+  const result = await enableMarketplaceCustomToggle(page);
+  if (!result?.ok) {
+    const reason = result?.reason ? ` (${result.reason})` : '';
+    throw new Error(`Spreadshirt “Publish on Spreadshirt” switch did not turn ON after the real browser click${reason}.`);
   }
 
   const verifyStarted = Date.now();
-  while (Date.now() - verifyStarted < 8000) {
-    const current = await marketplaceState(found.frame);
-    if (current?.checked === true) return true;
+  while (Date.now() - verifyStarted < 10000) {
+    const current = await findMarketplaceState(page);
+    if (current?.state?.checked === true || current?.state?.saveAndPublishVisible) {
+      activity(projectId, 'Publish on Spreadshirt is ON. Save and publish is ready.');
+      return true;
+    }
     await wait(200);
   }
 
-  throw new Error('Spreadshirt “Publish on Spreadshirt” was clicked, but ZeroPOD could not verify that it turned ON.');
+  throw new Error('Spreadshirt marketplace switch activation returned success, but ZeroPOD could not verify the ON state.');
 }
 
 async function clickSaveAndPublish(page, timeoutMs = 15000) {
