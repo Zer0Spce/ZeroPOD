@@ -1,4 +1,14 @@
 const { feature } = require('./spreadshirtAlphaIpc');
+const {
+  MARKETPLACE_DESIGNS_URL,
+  waitForMarketplaceDesigns
+} = require('./spreadshirtMarketplaceRoutePatch');
+const {
+  designTitleFromFile,
+  clearMarketplaceSearch,
+  filterMarketplaceByTitle,
+  firstMarketplaceCard
+} = require('./spreadshirtCardDetectionPatch');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const FAILURE_PATTERN = /Ooops!?\s*Snap|It didn[’']t work|Unfortunately, an error|Something went wrong/i;
@@ -9,8 +19,15 @@ function activity(projectId, label, type = 'spreadshirt') {
   try { feature.projects.addActivity(projectId, { type, label }); } catch {}
 }
 
-async function bodyText(page) {
-  return page.locator('body').innerText().catch(() => '');
+async function allFramesText(page) {
+  const chunks = [];
+  for (const frame of page.frames()) {
+    try {
+      const text = await frame.locator('body').innerText({ timeout: 1500 });
+      if (text) chunks.push(text);
+    } catch {}
+  }
+  return chunks.join('\n');
 }
 
 async function visibleActions(frame) {
@@ -122,7 +139,41 @@ async function clickContinueOrClose(page) {
   return false;
 }
 
-async function completePublishJourney(page, projectId) {
+async function verifyMarketplacePublished(page, project) {
+  const title = project.spreadshirt?.uploadDesignTitle || designTitleFromFile(project.spreadshirt?.pngPath || '');
+  if (!title) return { verified: false, reason: 'missing-title' };
+
+  const context = page.context();
+  let verifyPage = null;
+  try {
+    verifyPage = await context.newPage();
+    await verifyPage.goto(MARKETPLACE_DESIGNS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await waitForMarketplaceDesigns(verifyPage, 20000).catch(() => {});
+    await clearMarketplaceSearch(verifyPage).catch(() => {});
+    await filterMarketplaceByTitle(verifyPage, title).catch(() => {});
+    await wait(700);
+    const card = await firstMarketplaceCard(verifyPage);
+    if (!card) return { verified: false, reason: 'card-not-found' };
+    const text = String(card.text || '').toLowerCase();
+    if (!text.includes(String(title).toLowerCase())) {
+      return { verified: false, reason: 'title-mismatch', card };
+    }
+    if (String(card.status || '').toLowerCase() === 'published' || /\bpublished\b/i.test(card.text || '')) {
+      return { verified: true, published: true, card, url: verifyPage.url() };
+    }
+    if (String(card.status || '').toLowerCase() === 'draft' || /\bdraft\b/i.test(card.text || '')) {
+      return { verified: true, published: false, draft: true, card, url: verifyPage.url() };
+    }
+    return { verified: false, reason: 'unknown-status', card };
+  } catch (error) {
+    return { verified: false, reason: error.message || String(error) };
+  } finally {
+    if (verifyPage) await verifyPage.close().catch(() => {});
+    await page.bringToFront().catch(() => {});
+  }
+}
+
+async function completePublishJourney(page, projectId, project) {
   for (let actionNumber = 1; actionNumber <= 2; actionNumber += 1) {
     const action = await findAndClickFinalAction(page, actionNumber === 1 ? 15000 : 8000);
     if (!action.ok) {
@@ -132,30 +183,50 @@ async function completePublishJourney(page, projectId) {
 
     const started = Date.now();
     while (Date.now() - started < 20000) {
-      const text = await bodyText(page);
+      const text = await allFramesText(page);
       if (FAILURE_PATTERN.test(text)) throw new Error('Spreadshirt showed an error after the final publish action.');
       if (SUCCESS_PATTERN.test(text)) {
         await clickContinueOrClose(page);
-        return { ok: true, label: action.label, url: page.url() };
-      }
-      if (/Well done!/i.test(text)) {
-        await clickContinueOrClose(page);
-        await wait(500);
-        const nextText = await bodyText(page);
-        if (SUCCESS_PATTERN.test(nextText) || /Woohoo/i.test(nextText)) {
-          await clickContinueOrClose(page);
-          return { ok: true, label: action.label, url: page.url() };
-        }
+        return { ok: true, label: action.label, url: page.url(), method: 'frame-confirmation' };
       }
       await wait(300);
     }
 
-    // A plain Save/Save changes can reveal a separate Publish action. Allow one
-    // additional bounded final-action pass before giving up.
-    if (!/^save(?: changes)?$/i.test(action.label)) break;
+    activity(projectId, 'Spreadshirt confirmation text was unclear. Verifying the design status on Marketplace Designs…');
+    const marketplace = await verifyMarketplacePublished(page, project);
+    if (marketplace.verified && marketplace.published) {
+      activity(projectId, 'Marketplace Designs confirms the design is Published.');
+      return { ok: true, label: action.label, url: marketplace.url || page.url(), method: 'marketplace-verified' };
+    }
+    if (marketplace.verified && marketplace.draft) {
+      activity(projectId, 'Marketplace Designs still shows this design as Draft. Retrying only the final publish action…');
+    } else {
+      activity(projectId, `Could not conclusively verify Marketplace status${marketplace.reason ? ` (${marketplace.reason})` : ''}.`, 'spreadshirt-error');
+    }
+
+    // A Save/Save changes can reveal a separate Publish action. Also allow one
+    // additional bounded final-action pass when Marketplace still shows Draft.
+    if (actionNumber >= 2) break;
   }
 
   return { ok: false, reason: 'unverified' };
+}
+
+function markPublished(featureInstance, projectId, page, publishedUrl) {
+  const publishedAt = new Date().toISOString();
+  featureInstance.recordPublish(projectId, publishedUrl || page.url());
+  const current = featureInstance.projects.read(projectId);
+  const updated = featureInstance.projects.update(projectId, {
+    spreadshirt: {
+      ...(current.spreadshirt || {}),
+      status: 'published',
+      publishedAt,
+      publishedUrl: publishedUrl || page.url(),
+      lastError: null
+    }
+  });
+  activity(projectId, 'Spreadshirt publish flow completed successfully.');
+  return { ok: true, project: updated, publishedAt, url: publishedUrl || page.url(), usage: featureInstance.usage() };
 }
 
 const previousPublish = feature.publish.bind(feature);
@@ -164,44 +235,49 @@ feature.publish = async function publishWithCurrentFinalAction(projectId) {
     return await previousPublish(projectId);
   } catch (error) {
     const message = String(error?.message || error || '');
-    if (!/Save and publish.*not found|button was not found/i.test(message)) throw error;
+    if (!/Save and publish.*not found|button was not found|final publish control could not be completed|publish result could not be verified/i.test(message)) throw error;
 
     const project = this.projects.read(projectId);
     if (!project.spreadshirt?.preparedAt) throw error;
     const { page } = await this.sessions.ensureService('spreadshirt');
+    await page.bringToFront();
+    await this.ensureSignedIn(page);
+
+    // Before clicking anything again, verify whether the prior attempt actually published.
+    activity(projectId, 'Checking whether the previous Spreadshirt publish attempt already succeeded…');
+    const precheck = await verifyMarketplacePublished(page, project);
+    if (precheck.verified && precheck.published) {
+      activity(projectId, 'The design is already Published on Spreadshirt. No additional publish click is needed.');
+      return markPublished(this, projectId, page, precheck.url);
+    }
+
     if (project.spreadshirt.editorUrl && page.url() !== project.spreadshirt.editorUrl) {
       await page.goto(project.spreadshirt.editorUrl, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
     }
     await page.bringToFront();
-    await this.ensureSignedIn(page);
 
-    activity(projectId, 'Spreadshirt uses a different final action on this editor. Detecting the visible Save/Publish control…');
-    const result = await completePublishJourney(page, projectId);
+    activity(projectId, 'Detecting the current visible Save/Publish control in the prepared Spreadshirt editor…');
+    const result = await completePublishJourney(page, projectId, project);
     if (!result.ok) {
+      const finalCheck = await verifyMarketplacePublished(page, project);
+      if (finalCheck.verified && finalCheck.published) {
+        activity(projectId, 'Final Marketplace verification confirms the design is Published.');
+        return markPublished(this, projectId, page, finalCheck.url);
+      }
       const details = result.visibleActions?.length ? ` Visible actions: ${result.visibleActions.join(' | ')}` : '';
-      throw new Error(`Spreadshirt final publish control could not be completed.${details}`);
+      const state = finalCheck.verified && finalCheck.draft ? ' Marketplace status: Draft.' : '';
+      throw new Error(`Spreadshirt final publish control could not be completed.${state}${details}`);
     }
 
-    const publishedAt = new Date().toISOString();
-    this.recordPublish(projectId, page.url());
-    const current = this.projects.read(projectId);
-    const updated = this.projects.update(projectId, {
-      spreadshirt: {
-        ...(current.spreadshirt || {}),
-        status: 'published',
-        publishedAt,
-        publishedUrl: page.url(),
-        lastError: null
-      }
-    });
-    activity(projectId, 'Spreadshirt publish flow completed successfully.');
-    return { ok: true, project: updated, publishedAt, url: page.url(), usage: this.usage() };
+    return markPublished(this, projectId, page, result.url);
   }
 };
 
 module.exports = {
+  allFramesText,
   visibleActions,
   actionScore,
   findAndClickFinalAction,
+  verifyMarketplacePublished,
   completePublishJourney
 };
