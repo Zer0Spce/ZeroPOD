@@ -1,48 +1,52 @@
 const { feature } = require('./spreadshirtAlphaIpc');
 const { showAutomationWindow } = require('./chromeDockPatch');
 
+const previousPrepare = feature.prepare.bind(feature);
 const previousPublish = feature.publish.bind(feature);
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Diagnostic visibility must never be sticky across ordinary app/tab activity.
-feature.sessions.setAutomationWindowVisible?.('spreadshirt', false);
+function minimizeZeroPod(featureInstance) {
+  try {
+    const win = featureInstance.sessions?.__zeroPodHostWindow;
+    if (win && !win.isDestroyed?.()) win.minimize?.();
+  } catch {}
+}
 
-feature.publish = async function publishWithVisibleSpreadshirtBrowser(projectId) {
-  // Diagnostic-only wrapper: make the existing Spreadshirt automation Chrome window
-  // visible only while the established final-publish flow runs. No publish behavior,
-  // selectors, placement, metadata, verification, or retry logic is changed here.
-  this.sessions.setAutomationWindowVisible?.('spreadshirt', true);
-
-  const { page } = await this.sessions.ensureService('spreadshirt');
+async function keepSpreadshirtVisible(featureInstance, projectId, label, action) {
+  featureInstance.sessions.setAutomationWindowVisible?.('spreadshirt', true);
+  const { page } = await featureInstance.sessions.ensureService('spreadshirt');
+  minimizeZeroPod(featureInstance);
   await showAutomationWindow(page);
   await page.bringToFront().catch(() => {});
 
-  // Keep Chrome in front during this diagnostic attempt so the Electron host cannot
-  // immediately reclaim focus before the user can inspect the live Spreadshirt page.
-  // This timer does not interact with Spreadshirt DOM or alter publish behavior.
-  const keepVisible = setInterval(() => {
-    if (page.isClosed()) return;
-    page.bringToFront().catch(() => {});
-  }, 750);
-  keepVisible.unref?.();
-
   try {
-    this.projects.addActivity(projectId, {
+    featureInstance.projects.addActivity(projectId, {
       type: 'spreadshirt',
-      label: 'Diagnostic: Spreadshirt browser is visible during Pass · Publish.'
+      label: `Diagnostic: Spreadshirt browser kept in front for ${label}.`
     });
   } catch {}
 
+  const foregroundTimer = setInterval(() => {
+    showAutomationWindow(page).catch(() => {});
+    page.bringToFront().catch(() => {});
+  }, 450);
+
   try {
-    // Deliberate diagnostic observation window only. The established publish routine
-    // starts unchanged after this pause, even when it later short-circuits as already published.
-    await wait(5000);
-    return await previousPublish(projectId);
+    return await action();
   } finally {
-    clearInterval(keepVisible);
-    // Clear the diagnostic lease immediately after this one publish attempt so
-    // opening ZeroPOD, revisiting the Spreadshirt tab, Test Session, Resume, etc.
-    // all return to the normal hidden/off-screen automation browser behavior.
-    this.sessions.setAutomationWindowVisible?.('spreadshirt', false);
+    clearInterval(foregroundTimer);
+    featureInstance.sessions.setAutomationWindowVisible?.('spreadshirt', false);
+    // Deliberately leave the Spreadshirt Chrome window on-screen at the end of
+    // each stage. ZeroPOD stays minimized until the user chooses to return to it,
+    // so the live Spreadshirt result cannot be hidden by the renderer.
+    await showAutomationWindow(page).catch(() => {});
+    await page.bringToFront().catch(() => {});
   }
+}
+
+feature.prepare = async function prepareWithFullVisibleSpreadshirt(projectId) {
+  return keepSpreadshirtVisible(this, projectId, 'the complete upload / product / metadata preparation', () => previousPrepare(projectId));
+};
+
+feature.publish = async function publishWithFullVisibleSpreadshirt(projectId) {
+  return keepSpreadshirtVisible(this, projectId, 'the complete final publish attempt', () => previousPublish(projectId));
 };
