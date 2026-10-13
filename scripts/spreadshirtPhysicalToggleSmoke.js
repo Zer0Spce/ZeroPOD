@@ -6,8 +6,11 @@ const root = path.join(__dirname, '..');
 const toggleFile = path.join(root, 'src/main/spreadshirtMarketplaceTogglePatch.js');
 const strictFile = path.join(root, 'src/main/spreadshirtStrictPublishVerifyPatch.js');
 const freshFile = path.join(root, 'src/main/spreadshirtFreshUploadIdentityPatch.js');
+const transitionFile = path.join(root, 'src/main/spreadshirtUploadTransitionPatch.js');
 const debugFile = path.join(root, 'src/main/spreadshirtPublishBrowserDebugPatch.js');
-for (const file of [toggleFile, strictFile, freshFile, debugFile]) {
+const dockFile = path.join(root, 'src/main/chromeDockPatch.js');
+const backgroundFile = path.join(root, 'src/main/backgroundChromeLaunchPatch.js');
+for (const file of [toggleFile, strictFile, freshFile, transitionFile, debugFile, dockFile, backgroundFile]) {
   const syntax = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
   if (syntax.status !== 0) throw new Error(syntax.stderr || syntax.stdout || `${path.basename(file)} syntax failed.`);
 }
@@ -15,8 +18,10 @@ for (const file of [toggleFile, strictFile, freshFile, debugFile]) {
 const source = fs.readFileSync(toggleFile, 'utf8');
 const strict = fs.readFileSync(strictFile, 'utf8');
 const fresh = fs.readFileSync(freshFile, 'utf8');
+const transition = fs.readFileSync(transitionFile, 'utf8');
 const debug = fs.readFileSync(debugFile, 'utf8');
-const dock = fs.readFileSync(path.join(root, 'src/main/chromeDockPatch.js'), 'utf8');
+const dock = fs.readFileSync(dockFile, 'utf8');
+const background = fs.readFileSync(backgroundFile, 'utf8');
 const bootstrap = fs.readFileSync(path.join(root, 'src/main/bootstrap.js'), 'utf8');
 const assert = (value, message) => { if (!value) throw new Error(message); };
 
@@ -43,19 +48,32 @@ assert(/previous first card was intentionally not opened/.test(fresh), 'Fresh up
 assert(/opened previous design .* instead of the new upload/.test(fresh), 'Fresh upload flow must stop if Spreadshirt opens a pre-existing design ID.');
 assert(/uploadDesignId/.test(fresh) && /uploadCardIdentity/.test(fresh) && /editorUrl/.test(fresh), 'Fresh upload flow must persist exact design identity for later resume/publish verification.');
 
+assert(/MARKETPLACE_DESIGN_EDITOR_RE/.test(transition), 'Spreadshirt upload transition patch must recognize a direct design-editor navigation as completion.');
+assert(/Design products/.test(transition) && /Metadata/.test(transition), 'Spreadshirt upload transition patch must recognize a fully rendered design editor.');
+assert(/designs-index-after-upload-status/.test(transition), 'Spreadshirt upload transition patch must accept the Designs index only after Upload Status was observed and closed.');
+assert(/Current page:/.test(transition) && /Saw Upload Status:/.test(transition) && /Page text:/.test(transition), 'Spreadshirt upload timeout must include useful live-page diagnostics.');
+assert(/videoFlow\.waitForUploadResult = waitForUploadResultReliable/.test(transition), 'Spreadshirt transition patch must replace the brittle literal-banner wait before fresh upload logic imports it.');
+
 assert(/feature\.prepare = async function prepareWithFullVisibleSpreadshirt/.test(debug), 'Visible diagnostic wrapper must cover the full Spreadshirt prepare process.');
 assert(/feature\.publish = async function publishWithFullVisibleSpreadshirt/.test(debug), 'Visible diagnostic wrapper must cover the full Spreadshirt publish process.');
 assert(/__zeroPodHostWindow/.test(debug) && /\.minimize\?\./.test(debug), 'ZeroPOD must minimize during visible Spreadshirt debugging so Chrome stays in front.');
 assert(/setInterval/.test(debug) && /showAutomationWindow\(page\)/.test(debug) && /page\.bringToFront/.test(debug), 'Spreadshirt Chrome must be repeatedly kept visible/in front during the whole stage.');
 assert(!/\.click\(|\.fill\(|\.goto\(|recordPublish|projects\.update/.test(debug), 'Visibility wrapper must not alter Spreadshirt interactions or project state.');
 assert(/setAutomationWindowVisible/.test(dock) && /showAutomationWindow/.test(dock), 'Chrome dock patch must support visible automation windows.');
+assert(/__zeroPodVisibleAutomationServices/.test(dock) && /globalVisible\.add\(serviceId\)/.test(dock), 'Visible automation lease must be shared with the Chrome process launcher.');
+assert(/partner\\\.spreadshirt\\\.com|partner\.spreadshirt\.com/.test(background), 'Background Chrome launcher must identify the Spreadshirt automation process.');
+assert(/windowsHide:\s*false/.test(background) && /--window-position=60,60/.test(background), 'Leased Spreadshirt Chrome must launch visibly instead of starting hidden/off-screen.');
+assert(/windowsHide:\s*true/.test(background) && /--window-position=-20000,-20000/.test(background), 'Other automation Chrome windows must retain the existing hidden background behavior.');
 
+const videoIndex = bootstrap.indexOf("require('./spreadshirtVideoFlowPatch')");
+const transitionIndex = bootstrap.indexOf("require('./spreadshirtUploadTransitionPatch')");
 const editorResumeIndex = bootstrap.indexOf("require('./spreadshirtEditorResumePatch')");
 const freshIndex = bootstrap.indexOf("require('./spreadshirtFreshUploadIdentityPatch')");
 const strictIndex = bootstrap.indexOf("require('./spreadshirtStrictPublishVerifyPatch')");
 const debugIndex = bootstrap.indexOf("require('./spreadshirtPublishBrowserDebugPatch')");
 const uiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
+assert(videoIndex >= 0 && transitionIndex > videoIndex && transitionIndex < freshIndex, 'Upload transition compatibility must load after the video helper and before fresh upload identity imports it.');
 assert(editorResumeIndex >= 0 && freshIndex > editorResumeIndex, 'Fresh upload identity layer must supersede the old editor-resume prepare wrapper.');
 assert(strictIndex > freshIndex && debugIndex > strictIndex && uiIndex > debugIndex, 'Full visible browser wrapper must load after final Spreadshirt publish logic and before UI injection.');
 
-console.log('Spreadshirt exact switch + strict verification + fresh-card identity + full visible browser smoke checks passed.');
+console.log('Spreadshirt exact switch + upload-transition recovery + fresh-card identity + visible-browser + strict verification smoke checks passed.');
