@@ -18,7 +18,7 @@ const resume = fs.readFileSync(path.join(root, 'src/main/spreadshirtEditorResume
 const bootstrap = fs.readFileSync(path.join(root, 'src/main/bootstrap.js'), 'utf8');
 const assert = (value, message) => { if (!value) throw new Error(message); };
 
-assert(/MARKETPLACE_DESIGNS_RE = \/\\\/mp\\\/designs\\\/?\(\?:\[\?#\]\.\*\)\?\$\/i/.test(route), 'Marketplace Designs dashboard regex must be exact and must not match design-editor child paths.');
+assert(route.includes("const MARKETPLACE_DESIGNS_RE = /\\/mp\\/designs\\/?(?:[?#].*)?$/i;"), 'Marketplace Designs dashboard regex must be exact and must not match design-editor child paths.');
 assert(/MARKETPLACE_DESIGN_EDITOR_RE/.test(route), 'Marketplace design-editor route detector is missing.');
 assert(/isMarketplaceDesignsIndexUrl/.test(route), 'Marketplace Designs exact-index helper is missing.');
 assert(/isMarketplaceDesignEditorUrl/.test(route), 'Marketplace design-editor helper is missing.');
