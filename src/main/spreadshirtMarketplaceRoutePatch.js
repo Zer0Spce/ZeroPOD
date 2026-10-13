@@ -2,8 +2,17 @@ const { SERVICES } = require('./sessionManager');
 const { feature } = require('./spreadshirtAlphaIpc');
 
 const MARKETPLACE_DESIGNS_URL = 'https://partner.spreadshirt.com/mp/designs';
-const MARKETPLACE_DESIGNS_RE = /\/mp\/designs(?:[/?#]|$)/i;
+const MARKETPLACE_DESIGNS_RE = /\/mp\/designs\/?(?:[?#].*)?$/i;
+const MARKETPLACE_DESIGN_EDITOR_RE = /\/mp\/designs\/[^/?#]+\/?(?:[?#].*)?$/i;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function isMarketplaceDesignsIndexUrl(value) {
+  return MARKETPLACE_DESIGNS_RE.test(String(value || ''));
+}
+
+function isMarketplaceDesignEditorUrl(value) {
+  return MARKETPLACE_DESIGN_EDITOR_RE.test(String(value || ''));
+}
 
 async function visible(locator) {
   try {
@@ -31,7 +40,7 @@ async function waitForMarketplaceDesigns(page, timeoutMs = 20000) {
     if (/sign in|log in|register/i.test(body) && !/designs|showroom|statistics|account/i.test(body)) {
       throw new Error('Spreadshirt login is required. Use Open Login Browser, sign in, then Test Session.');
     }
-    if (!MARKETPLACE_DESIGNS_RE.test(url) && /\/designs(?:[/?#]|$)/i.test(url)) {
+    if (!isMarketplaceDesignsIndexUrl(url) && /\/designs(?:[/?#]|$)/i.test(url) && !isMarketplaceDesignEditorUrl(url)) {
       await page.goto(MARKETPLACE_DESIGNS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
     }
     await wait(350);
@@ -71,7 +80,7 @@ if (SERVICES.spreadshirt) {
 }
 
 feature.openDesigns = async function openMarketplaceDesigns(page) {
-  if (!MARKETPLACE_DESIGNS_RE.test(page.url())) {
+  if (!isMarketplaceDesignsIndexUrl(page.url())) {
     await page.goto(MARKETPLACE_DESIGNS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
   } else {
     await page.waitForLoadState('domcontentloaded').catch(() => {});
@@ -83,7 +92,7 @@ feature.openDesigns = async function openMarketplaceDesigns(page) {
 
 feature.open = async function openMarketplaceDesignsInBrowser() {
   const { page } = await this.sessions.ensureService('spreadshirt');
-  if (!MARKETPLACE_DESIGNS_RE.test(page.url())) {
+  if (!isMarketplaceDesignsIndexUrl(page.url())) {
     await page.goto(MARKETPLACE_DESIGNS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
   }
   await page.bringToFront();
@@ -95,5 +104,8 @@ feature.open = async function openMarketplaceDesignsInBrowser() {
 module.exports = {
   MARKETPLACE_DESIGNS_URL,
   MARKETPLACE_DESIGNS_RE,
+  MARKETPLACE_DESIGN_EDITOR_RE,
+  isMarketplaceDesignsIndexUrl,
+  isMarketplaceDesignEditorUrl,
   waitForMarketplaceDesigns
 };
