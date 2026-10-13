@@ -127,6 +127,7 @@ require('./spreadshirtRegularExportPatch');
 require('./spreadshirtJourneyReliabilityPatch');
 require('./spreadshirtUploadReliabilityPatch');
 require('./spreadshirtVideoFlowPatch');
+require('./spreadshirtUploadTransitionPatch');
 require('./spreadshirtAlphaIpc');
 require('./spreadshirtMarketplaceRoutePatch');
 require('./spreadshirtRecordedPlacementPatch');
