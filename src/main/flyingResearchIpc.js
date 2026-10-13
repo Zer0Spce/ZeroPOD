@@ -32,6 +32,7 @@ app.whenReady().then(() => {
   ipcMain.handle('flying:capture', () => serialize(() => feature.capture()));
   ipcMain.handle('flying:next-page', () => serialize(() => feature.loadNextPage()));
   ipcMain.handle('flying:workflow', (_event, key) => serialize(() => feature.workflow(key)));
+  ipcMain.handle('flying:spreadshirt', (_event, key) => serialize(() => feature.spreadshirt(key)));
   ipcMain.handle('flying:automation', (_event, payload) => serialize(() => feature.addToAutomation(payload || {})));
   ipcMain.handle('flying:amazon', async (_event, key) => {
     const item = feature.store.get(key);

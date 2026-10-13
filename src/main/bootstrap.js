@@ -1,10 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
 const { SessionManager } = require('./sessionManager');
 
 function threadStatePath() {
-  return path.join(app.getPath('userData'), 'thread-state.json');
+  return path.join(require('electron').app.getPath('userData'), 'thread-state.json');
 }
 
 function readThreadState() {
@@ -122,7 +121,26 @@ require('./researchTrademarkFilterPatch');
 require('./researchIpcPatch');
 require('./flyingResearchPaginationPatch');
 require('./flyingResearchInfiniteScrollPatch');
+require('./flyingSpreadshirtPatch');
 require('./flyingResearchIpc');
+require('./spreadshirtRegularExportPatch');
+require('./spreadshirtJourneyReliabilityPatch');
+require('./spreadshirtUploadReliabilityPatch');
+require('./spreadshirtVideoFlowPatch');
+require('./spreadshirtAlphaIpc');
+require('./spreadshirtMarketplaceRoutePatch');
+require('./spreadshirtRecordedPlacementPatch');
+require('./spreadshirtProductSettingsSaveRecoveryPatch');
+require('./spreadshirtCardDetectionPatch');
+require('./spreadshirtMarketplaceTogglePatch');
+require('./spreadshirtEditorResumePatch');
+require('./spreadshirtFreshUploadIdentityPatch');
+require('./spreadshirtFinalPublishPatch');
+require('./spreadshirtRecordedPublishPatch');
+require('./spreadshirtFinalApprovalSequencePatch');
+require('./spreadshirtStrictPublishVerifyPatch');
+require('./spreadshirtPublishBrowserDebugPatch');
+require('./spreadshirtAlphaUiPatch');
 require('./automateListReliabilityPatch');
 require('./automateListIpc');
 require('./storeCachePatch');
