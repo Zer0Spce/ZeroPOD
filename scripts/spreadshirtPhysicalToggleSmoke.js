@@ -32,9 +32,10 @@ assert(/marketplaceSwitchPrepared/.test(source), 'Prepare must persist whether m
 assert(!/visible-control-unverified/.test(source), 'Old unverified toggle success fallback must not return.');
 
 assert(/designIdFromEditorUrl/.test(strict), 'Strict publish verification must derive a unique Spreadshirt design ID from the editor URL.');
-assert(/Name,\\s\*Id,\\s\*Tags/.test(strict), 'Strict publish verification must search Marketplace by exact design ID.');
-assert(/cards\.length !== 1/.test(strict), 'Strict publish verification must reject ambiguous Marketplace search results.');
-assert(/status === 'in review'/.test(strict) && /status === 'published'/.test(strict) && /status === 'draft'/.test(strict), 'Strict publish verification must distinguish Draft, In review and Published.');
+assert(/readEditorPublishStatus/.test(strict) && /verifyPage\.goto\(editorUrl/.test(strict), 'Strict publish verification must check the exact design editor before dashboard fallbacks.');
+assert(/Name,\\s\*Id,\\s\*Tags/.test(strict), 'Strict publish verification must retain exact design-ID Marketplace search only as a fallback.');
+assert(/exact-design-id-dom-not-found-search-returned-/.test(strict), 'Strict publish verification must reject ambiguous Marketplace search results.');
+assert(/normalized === 'in review'/.test(strict) && /normalized === 'published'/.test(strict) && /normalized === 'draft'/.test(strict), 'Strict publish verification must distinguish Draft, In review and Published.');
 assert(/trusted-playwright-button/.test(strict), 'Save and publish must use a trusted Playwright button click first.');
 assert(/still shows Draft/.test(strict), 'Exact Draft status must block local Published state.');
 assert(/removePublishLedgerEntry/.test(strict) && /reverted-false-positive/.test(strict), 'False local publishes must repair the ledger and return to Final Review.');
@@ -46,4 +47,4 @@ const strictIndex = bootstrap.indexOf("require('./spreadshirtStrictPublishVerify
 const uiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
 assert(finalIndex >= 0 && strictIndex > finalIndex && uiIndex > strictIndex, 'Strict publish verifier must load after every older publish wrapper and before Spreadshirt UI injection.');
 
-console.log('Spreadshirt exact switch + strict design-ID publish verification smoke checks passed.');
+console.log('Spreadshirt exact switch + strict exact-editor/design-ID publish verification smoke checks passed.');
