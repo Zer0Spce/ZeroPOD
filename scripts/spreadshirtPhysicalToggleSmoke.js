@@ -14,7 +14,7 @@ assert(/playwright-native-mouse/.test(source), 'Spreadshirt marketplace toggle m
 assert(/playwright-checkbox-wrapper-mouse/.test(source), 'Spreadshirt marketplace toggle must prefer a real mouse click on the checkbox-linked visible wrapper.');
 assert(/page\.mouse\.move/.test(source) && /page\.mouse\.down/.test(source) && /page\.mouse\.up/.test(source), 'Spreadshirt physical switch must use real Playwright mouse input.');
 assert(/pagePointForFrameRect/.test(source), 'Spreadshirt physical switch must translate frame-local geometry to page coordinates.');
-assert(/checkbox\.closest/.test(source), 'Spreadshirt switch targeting must derive from the actual hidden checkbox DOM relationship.');
+assert(/checkbox\?\.closest|checkbox\.closest/.test(source), 'Spreadshirt switch targeting must derive from the actual hidden checkbox DOM relationship.');
 assert(/checkboxLinkedTargetRect/.test(source), 'Spreadshirt switch state must expose the checkbox-linked visible target geometry.');
 assert(/checkbox\.click\(\)/.test(source), 'Hidden Spreadshirt checkbox must have native browser activation as a fallback.');
 assert(/checkbox-native-click/.test(source), 'Native checkbox activation must be reported for diagnostics.');
