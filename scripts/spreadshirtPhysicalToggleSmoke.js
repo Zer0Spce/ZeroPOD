@@ -45,9 +45,11 @@ assert(/removePublishLedgerEntry/.test(strict) && /reverted-false-positive/.test
 assert(/publishVerification:\s*'exact-design-id'/.test(strict), 'Successful publishes must persist exact-design-ID verification.');
 assert(!/PUBLISHED_UNDER_REVIEW/.test(strict), 'Strict final layer must not trust generic page-text success banners by themselves.');
 
+assert(/setAutomationWindowVisible\?\.\('spreadshirt', false\)/.test(debug), 'Diagnostic visibility must default to OFF outside Pass · Publish.');
 assert(/setAutomationWindowVisible\?\.\('spreadshirt', true\)/.test(debug), 'Diagnostic publish wrapper must enable visibility only for Spreadshirt automation Chrome.');
 assert(/showAutomationWindow\(page\)/.test(debug) && /page\.bringToFront/.test(debug), 'Diagnostic publish wrapper must visibly foreground the existing Spreadshirt browser.');
-assert(/return previousPublish\(projectId\)/.test(debug), 'Diagnostic wrapper must delegate to the existing publish implementation unchanged.');
+assert(/return await previousPublish\(projectId\)/.test(debug), 'Diagnostic wrapper must delegate to the existing publish implementation unchanged.');
+assert(/finally\s*\{[\s\S]*setAutomationWindowVisible\?\.\('spreadshirt', false\)/.test(debug), 'Diagnostic visibility must be cleared after every publish attempt.');
 assert(!/\.click\(|\.fill\(|\.goto\(|recordPublish|projects\.update/.test(debug), 'Diagnostic wrapper must not alter publish interactions or project state.');
 assert(/setAutomationWindowVisible/.test(dock) && /showAutomationWindow/.test(dock), 'Chrome dock patch must support temporary visible automation windows.');
 assert(/left:\s*60/.test(dock) && /top:\s*60/.test(dock), 'Diagnostic automation window must be moved back onto the visible desktop.');
@@ -58,4 +60,4 @@ const debugIndex = bootstrap.indexOf("require('./spreadshirtPublishBrowserDebugP
 const uiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
 assert(finalIndex >= 0 && strictIndex > finalIndex && debugIndex > strictIndex && uiIndex > debugIndex, 'Diagnostic browser wrapper must load after strict publish logic and before Spreadshirt UI injection.');
 
-console.log('Spreadshirt exact switch + strict exact-editor/design-ID verification + visible publish-browser diagnostic smoke checks passed.');
+console.log('Spreadshirt exact switch + strict exact-editor/design-ID verification + one-shot visible publish-browser diagnostic smoke checks passed.');
