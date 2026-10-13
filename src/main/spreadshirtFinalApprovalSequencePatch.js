@@ -2,6 +2,16 @@ const { feature } = require('./spreadshirtAlphaIpc');
 const { marketplaceState, enableMarketplaceCustomToggle } = require('./spreadshirtMarketplaceTogglePatch');
 const { verifyMarketplacePublished } = require('./spreadshirtFinalPublishPatch');
 const { ensureFullFrontPlacement } = require('./spreadshirtRecordedPlacementPatch');
+const {
+  MARKETPLACE_DESIGNS_URL,
+  waitForMarketplaceDesigns
+} = require('./spreadshirtMarketplaceRoutePatch');
+const {
+  designTitleFromFile,
+  verifyExpectedDraftExists,
+  clickMarketplaceCard
+} = require('./spreadshirtCardDetectionPatch');
+const { waitForDesignEditor } = require('./spreadshirtVideoFlowPatch');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const PUBLISHED_UNDER_REVIEW = /Your design has been published, but is still under review|Design status\s*In review/i;
@@ -56,6 +66,99 @@ async function waitForText(page, pattern, timeoutMs = 15000) {
     await wait(250);
   }
   return false;
+}
+
+function isDesignEditorUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.hostname === 'partner.spreadshirt.com'
+      && /^\/mp\/designs\/[^/?#]+\/?$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function editorShellReady(page) {
+  if (!isDesignEditorUrl(page.url())) return false;
+  const text = await allFramesText(page);
+  return /Design products/i.test(text)
+    && /Metadata/i.test(text)
+    && /Products/i.test(text);
+}
+
+async function waitForEditorShell(page, timeoutMs = 25000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await editorShellReady(page)) return true;
+    await wait(250);
+  }
+  return false;
+}
+
+async function restoreDesignEditorForPublish(page, projectId, project) {
+  const savedEditorUrl = project.spreadshirt?.editorUrl || null;
+  activity(projectId, 'Restoring the prepared Spreadshirt design editor before final publishing…');
+
+  if (savedEditorUrl && isDesignEditorUrl(savedEditorUrl)) {
+    if (page.url() !== savedEditorUrl) {
+      await page.goto(savedEditorUrl, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    }
+    await page.bringToFront().catch(() => {});
+    await waitForDesignEditor(page, 15000).catch(() => {});
+    if (await waitForEditorShell(page, 20000)) {
+      activity(projectId, 'Prepared Spreadshirt editor restored. Continuing to Products…');
+      return true;
+    }
+  }
+
+  if (await waitForEditorShell(page, 7000)) {
+    const current = feature.projects.read(projectId);
+    feature.projects.update(projectId, {
+      spreadshirt: {
+        ...(current.spreadshirt || {}),
+        editorUrl: page.url(),
+        lastError: null
+      }
+    });
+    activity(projectId, 'Current Spreadshirt design editor is ready. Continuing to Products…');
+    return true;
+  }
+
+  const title = project.spreadshirt?.uploadDesignTitle
+    || designTitleFromFile(project.spreadshirt?.pngPath || '');
+  if (!title) {
+    throw new Error('Spreadshirt final publish could not restore the design editor because the uploaded design title is missing. No artwork was re-uploaded.');
+  }
+
+  activity(projectId, `Saved editor state is stale. Recovering the existing Spreadshirt Draft “${title}” without uploading it again…`);
+  await page.goto(MARKETPLACE_DESIGNS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
+  await waitForMarketplaceDesigns(page, 20000);
+
+  const presence = await verifyExpectedDraftExists(page, title, 2);
+  if (!presence.present || !presence.card) {
+    throw new Error(`Spreadshirt Draft “${title}” could not be found for final publishing. No artwork was re-uploaded.`);
+  }
+
+  const opened = await clickMarketplaceCard(page, presence.card);
+  if (!opened) {
+    throw new Error(`Spreadshirt Draft “${title}” exists, but ZeroPOD could not reopen its editor for final publishing. No artwork was re-uploaded.`);
+  }
+
+  await waitForDesignEditor(page, 20000).catch(() => {});
+  if (!(await waitForEditorShell(page, 20000))) {
+    throw new Error(`Spreadshirt Draft “${title}” opened, but the Design products editor did not become ready. No artwork was re-uploaded.`);
+  }
+
+  const current = feature.projects.read(projectId);
+  feature.projects.update(projectId, {
+    spreadshirt: {
+      ...(current.spreadshirt || {}),
+      editorUrl: page.url(),
+      lastError: null
+    }
+  });
+  activity(projectId, `Recovered existing Spreadshirt Draft “${title}”. No artwork was re-uploaded.`);
+  return true;
 }
 
 async function openProductsAndSetFullFront(page, projectId) {
@@ -215,9 +318,7 @@ feature.publish = async function publishWithExactFinalApprovalSequence(projectId
     return markPublished(projectId, page, false, before.url);
   }
 
-  if (project.spreadshirt.editorUrl && page.url() !== project.spreadshirt.editorUrl) {
-    await page.goto(project.spreadshirt.editorUrl, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
-  }
+  await restoreDesignEditorForPublish(page, projectId, project);
   await page.bringToFront();
 
   // Exact user-confirmed order:
@@ -250,6 +351,7 @@ feature.publish = async function publishWithExactFinalApprovalSequence(projectId
 };
 
 module.exports = {
+  restoreDesignEditorForPublish,
   openProductsAndSetFullFront,
   returnToMetadata,
   ensurePublishSwitchOn,
