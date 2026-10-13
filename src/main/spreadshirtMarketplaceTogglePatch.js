@@ -14,6 +14,11 @@ async function marketplaceState(frame) {
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) !== 0;
     };
     const ownText = (el) => norm(el?.innerText || el?.textContent || '');
+    const rectData = (el) => {
+      if (!el || !visible(el)) return null;
+      const rect = el.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    };
     const all = [...document.querySelectorAll('body *')].filter(visible);
     const headings = all.filter((el) => ownText(el) === 'publish on spreadshirt');
 
@@ -63,6 +68,8 @@ async function marketplaceState(frame) {
     const labelForCheckbox = checkbox?.id
       ? container.querySelector?.(`label[for="${CSS.escape(checkbox.id)}"]`) || null
       : null;
+    const nestedLabel = checkbox?.closest?.('label') || null;
+    const clickableAncestor = checkbox?.closest?.('[role="switch"],[role="checkbox"],button') || null;
 
     const containerRect = container.getBoundingClientRect();
     const statusLabel = [...container.querySelectorAll?.('*') || []]
@@ -70,36 +77,72 @@ async function marketplaceState(frame) {
       .find((el) => ownText(el) === 'design status');
     const statusTop = statusLabel ? statusLabel.getBoundingClientRect().top : containerRect.bottom;
 
-    const heuristicCandidates = [...container.querySelectorAll?.('*') || []].filter((el) => {
+    const switchShape = (el) => {
       if (!visible(el)) return false;
       const rect = el.getBoundingClientRect();
+      const aspect = rect.height > 0 ? rect.width / rect.height : 0;
+      return rect.width >= 42 && rect.width <= 180
+        && rect.height >= 20 && rect.height <= 82
+        && aspect >= 1.1 && aspect <= 6
+        && rect.left >= containerRect.left + (containerRect.width * 0.5)
+        && rect.top < statusTop - 2;
+    };
+
+    // Derive the primary physical target from the checkbox's own DOM neighborhood.
+    // This is more reliable than guessing a switch-shaped rectangle elsewhere in the card.
+    const linked = [];
+    const pushLinked = (el) => {
+      if (!el || !visible(el) || linked.includes(el)) return;
+      if (switchShape(el)) linked.push(el);
+    };
+    pushLinked(roleSwitch);
+    pushLinked(labelForCheckbox);
+    pushLinked(nestedLabel);
+    pushLinked(clickableAncestor);
+
+    let checkboxNode = checkbox?.parentElement || null;
+    for (let depth = 0; checkboxNode && depth < 5; depth += 1, checkboxNode = checkboxNode.parentElement) {
+      pushLinked(checkboxNode);
+      pushLinked(checkboxNode.previousElementSibling);
+      pushLinked(checkboxNode.nextElementSibling);
+      for (const child of [...checkboxNode.children]) pushLinked(child);
+      const nearby = [...checkboxNode.querySelectorAll?.('[role="switch"],[role="checkbox"],label,button,[class*="switch" i],[class*="toggle" i]') || []];
+      for (const candidate of nearby) pushLinked(candidate);
+      if (checkboxNode === container) break;
+    }
+
+    const linkedTarget = linked.sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      const aSemantic = a === roleSwitch || a === labelForCheckbox || a === nestedLabel || a === clickableAncestor ? 10000 : 0;
+      const bSemantic = b === roleSwitch || b === labelForCheckbox || b === nestedLabel || b === clickableAncestor ? 10000 : 0;
+      const aClass = /switch|toggle/i.test(String(a.className || '')) ? 1000 : 0;
+      const bClass = /switch|toggle/i.test(String(b.className || '')) ? 1000 : 0;
+      return (bSemantic + bClass + br.right) - (aSemantic + aClass + ar.right);
+    })[0] || null;
+
+    // Retain the earlier geometry detector only as a fallback.
+    const heuristicCandidates = [...container.querySelectorAll?.('*') || []].filter((el) => {
+      if (!switchShape(el)) return false;
       const cls = String(el.className || '');
       const semantic = el === roleSwitch
         || el === labelForCheckbox
         || /switch|toggle|checkbox/i.test(cls)
         || el.getAttribute?.('aria-checked') !== null
         || el.getAttribute?.('role') === 'switch';
-      const aspect = rect.height > 0 ? rect.width / rect.height : 0;
-      const switchShape = rect.width >= 45 && rect.width <= 140
-        && rect.height >= 20 && rect.height <= 72
-        && aspect >= 1.25 && aspect <= 5;
-      const rightSide = rect.left >= containerRect.left + (containerRect.width * 0.58);
-      const aboveStatus = rect.top < statusTop - 2;
-      return (semantic || switchShape) && switchShape && rightSide && aboveStatus;
+      return semantic || switchShape(el);
     });
 
-    const physical = [roleSwitch, labelForCheckbox, ...heuristicCandidates]
+    const physical = [linkedTarget, roleSwitch, labelForCheckbox, ...heuristicCandidates]
       .filter((el, index, list) => el && visible(el) && list.indexOf(el) === index)
       .sort((a, b) => {
+        if (a === linkedTarget && b !== linkedTarget) return -1;
+        if (b === linkedTarget && a !== linkedTarget) return 1;
         const ar = a.getBoundingClientRect();
         const br = b.getBoundingClientRect();
         const aSemantic = a === roleSwitch || /switch|toggle/i.test(String(a.className || '')) ? 10000 : 0;
         const bSemantic = b === roleSwitch || /switch|toggle/i.test(String(b.className || '')) ? 10000 : 0;
-        const aShape = ar.height > 0 ? ar.width / ar.height : 0;
-        const bShape = br.height > 0 ? br.width / br.height : 0;
-        const aTrack = aShape >= 1.4 ? 1000 : 0;
-        const bTrack = bShape >= 1.4 ? 1000 : 0;
-        return (bSemantic + bTrack + br.right) - (aSemantic + aTrack + ar.right);
+        return (bSemantic + br.right) - (aSemantic + ar.right);
       })[0] || null;
 
     const physicalChecked = physical
@@ -119,14 +162,18 @@ async function marketplaceState(frame) {
       || saveAndPublishVisible
     );
 
-    const rect = physical ? physical.getBoundingClientRect() : null;
     return {
       checked,
       saveAndPublishVisible,
       hasCheckbox: Boolean(checkbox),
+      checkboxChecked: Boolean(checkbox?.checked),
       checkboxVisible: checkbox ? visible(checkbox) : false,
       hasRoleSwitch: Boolean(roleSwitch),
-      physicalTargetRect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null,
+      checkboxLinkedTargetRect: rectData(linkedTarget),
+      checkboxLinkedTargetTag: linkedTarget?.tagName || null,
+      checkboxLinkedTargetRole: linkedTarget?.getAttribute?.('role') || null,
+      checkboxLinkedTargetClass: String(linkedTarget?.className || '').slice(0, 180),
+      physicalTargetRect: rectData(physical),
       physicalTargetTag: physical?.tagName || null,
       physicalTargetRole: physical?.getAttribute?.('role') || null,
       physicalTargetClass: String(physical?.className || '').slice(0, 180),
@@ -150,7 +197,19 @@ async function saveAndPublishVisibleAnywhere(page) {
   return false;
 }
 
-async function pagePointForFrameRect(page, frame, rect, fraction = 0.7) {
+async function waitForMarketplaceEnabled(page, frame, timeoutMs = 5000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const state = await marketplaceState(frame);
+    if (state?.checked === true || state?.saveAndPublishVisible || await saveAndPublishVisibleAnywhere(page)) {
+      return { ok: true, state };
+    }
+    await wait(180);
+  }
+  return { ok: false, state: await marketplaceState(frame) };
+}
+
+async function pagePointForFrameRect(page, frame, rect, fraction = 0.5) {
   if (!rect) return null;
   let x = rect.x + Math.max(3, Math.min(rect.width - 3, rect.width * fraction));
   let y = rect.y + Math.max(3, Math.min(rect.height - 3, rect.height * 0.5));
@@ -170,7 +229,9 @@ async function pagePointForFrameRect(page, frame, rect, fraction = 0.7) {
 }
 
 async function clickMarketplaceWithNativeMouse(page, frame, state) {
-  const point = await pagePointForFrameRect(page, frame, state?.physicalTargetRect, 0.7);
+  const linkedRect = state?.checkboxLinkedTargetRect || null;
+  const targetRect = linkedRect || state?.physicalTargetRect || null;
+  const point = await pagePointForFrameRect(page, frame, targetRect, linkedRect ? 0.5 : 0.7);
   if (!point) return { clicked: false, reason: 'physical-toggle-rect-not-found' };
   try {
     await page.bringToFront();
@@ -181,13 +242,63 @@ async function clickMarketplaceWithNativeMouse(page, frame, state) {
     await page.mouse.up();
     return {
       clicked: true,
-      method: 'playwright-native-mouse',
+      method: linkedRect ? 'playwright-checkbox-wrapper-mouse' : 'playwright-native-mouse',
       point,
-      rect: state.physicalTargetRect
+      rect: targetRect
     };
   } catch (error) {
     return { clicked: false, reason: 'native-mouse-click-failed', message: error?.message || String(error) };
   }
+}
+
+async function activateCheckboxNatively(frame) {
+  return frame.evaluate(() => {
+    const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const visible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const ownText = (el) => norm(el?.innerText || el?.textContent || '');
+    const headings = [...document.querySelectorAll('body *')].filter(visible).filter((el) => ownText(el) === 'publish on spreadshirt');
+    let container = null;
+    for (const heading of headings) {
+      let node = heading;
+      for (let depth = 0; node && depth < 10; depth += 1, node = node.parentElement) {
+        const text = ownText(node);
+        if (text.includes('sell your products on the spreadshirt marketplace') && text.includes('design status')) {
+          container = node;
+          break;
+        }
+      }
+      if (container) break;
+    }
+    if (!container) return { clicked: false, reason: 'publish-card-not-found' };
+
+    const checkbox = container.querySelector('input[type="checkbox"]');
+    if (!checkbox) return { clicked: false, reason: 'checkbox-not-found' };
+    if (checkbox.checked) return { clicked: false, alreadyChecked: true, method: 'already-enabled' };
+
+    try {
+      checkbox.click();
+      if (checkbox.checked) {
+        return { clicked: true, method: 'checkbox-native-click', checked: true };
+      }
+    } catch {}
+
+    // Last browser-side fallback for Vue/custom checkbox implementations.
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked');
+      descriptor?.set?.call(checkbox, true);
+      checkbox.dispatchEvent(new Event('input', { bubbles: true }));
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+      checkbox.dispatchEvent(new Event('click', { bubbles: true }));
+      return { clicked: true, method: 'checkbox-native-setter', checked: Boolean(checkbox.checked) };
+    } catch (error) {
+      return { clicked: false, reason: 'checkbox-native-activation-failed', message: error?.message || String(error) };
+    }
+  }).catch((error) => ({ clicked: false, reason: 'checkbox-native-evaluate-failed', message: error?.message || String(error) }));
 }
 
 async function clickMarketplaceDomFallback(frame) {
@@ -222,18 +333,18 @@ async function clickMarketplaceDomFallback(frame) {
     const labelForCheckbox = checkbox?.id
       ? container.querySelector?.(`label[for="${CSS.escape(checkbox.id)}"]`) || null
       : null;
+    const nestedLabel = checkbox?.closest?.('label') || null;
     if (roleSwitch && visible(roleSwitch)) {
       try { roleSwitch.click(); return { clicked: true, method: 'role-switch-dom-fallback' }; } catch {}
     }
     if (labelForCheckbox && visible(labelForCheckbox)) {
       try { labelForCheckbox.click(); return { clicked: true, method: 'visible-label-dom-fallback' }; } catch {}
     }
+    if (nestedLabel && visible(nestedLabel)) {
+      try { nestedLabel.click(); return { clicked: true, method: 'nested-label-dom-fallback' }; } catch {}
+    }
     if (checkbox) {
-      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked');
-      descriptor?.set?.call(checkbox, true);
-      checkbox.dispatchEvent(new Event('input', { bubbles: true }));
-      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-      return { clicked: true, method: 'native-checkbox-setter-fallback' };
+      try { checkbox.click(); return { clicked: true, method: 'checkbox-native-click' }; } catch {}
     }
     return { clicked: false, reason: 'marketplace-control-not-found' };
   }).catch(() => ({ clicked: false, reason: 'evaluate-failed' }));
@@ -243,7 +354,7 @@ async function clickMarketplaceVisibleControl(frame, page = null) {
   if (page) {
     const state = await marketplaceState(frame);
     if (state?.checked) return { clicked: false, alreadyChecked: true, method: 'already-enabled' };
-    if (state?.physicalTargetRect) {
+    if (state?.checkboxLinkedTargetRect || state?.physicalTargetRect) {
       return clickMarketplaceWithNativeMouse(page, frame, state);
     }
   }
@@ -258,27 +369,40 @@ async function enableMarketplaceCustomToggle(page) {
       return { ok: true, changed: false, method: 'already-enabled' };
     }
 
+    // Attempt 1: trusted mouse on a visible wrapper derived directly from the checkbox DOM.
     const action = await clickMarketplaceVisibleControl(frame, page);
     if (action?.alreadyChecked) return { ok: true, changed: false, method: 'already-enabled' };
-    if (!action?.clicked) continue;
+    if (action?.clicked) {
+      const verified = await waitForMarketplaceEnabled(page, frame, 4500);
+      if (verified.ok) return { ok: true, changed: true, method: action.method || 'playwright-checkbox-wrapper-mouse' };
+    }
 
-    const started = Date.now();
-    while (Date.now() - started < 10000) {
-      const after = await marketplaceState(frame);
-      if (after?.checked === true || after?.saveAndPublishVisible || await saveAndPublishVisibleAnywhere(page)) {
-        return { ok: true, changed: true, method: action.method || 'playwright-native-mouse' };
-      }
-      await wait(180);
+    // Attempt 2: the hidden checkbox is a real input. Native HTMLElement.click() performs
+    // checkbox activation and fires Spreadshirt/Vue click + change listeners even though
+    // Playwright cannot physically click the hidden input itself.
+    const checkboxAction = await activateCheckboxNatively(frame);
+    if (checkboxAction?.alreadyChecked) return { ok: true, changed: false, method: 'already-enabled' };
+    if (checkboxAction?.clicked) {
+      const verified = await waitForMarketplaceEnabled(page, frame, 6000);
+      if (verified.ok) return { ok: true, changed: true, method: checkboxAction.method || 'checkbox-native-click' };
+    }
+
+    // Attempt 3: preserve the older semantic DOM fallback as a final bounded retry.
+    const fallback = await clickMarketplaceDomFallback(frame);
+    if (fallback?.alreadyChecked) return { ok: true, changed: false, method: 'already-enabled' };
+    if (fallback?.clicked) {
+      const verified = await waitForMarketplaceEnabled(page, frame, 4000);
+      if (verified.ok) return { ok: true, changed: true, method: fallback.method || 'dom-fallback' };
     }
 
     const text = await frame.locator('body').innerText().catch(() => '');
     if (/Ooops!?\s*Snap|It didn[’']t work|Unfortunately, an error/i.test(text)) {
-      return { ok: false, changed: false, method: action.method || 'playwright-native-mouse', reason: 'spreadshirt-error' };
+      return { ok: false, changed: false, method: checkboxAction?.method || action?.method || 'switch-activation', reason: 'spreadshirt-error' };
     }
     return {
       ok: false,
       changed: false,
-      method: action.method || 'playwright-native-mouse',
+      method: checkboxAction?.method || action?.method || 'switch-activation',
       reason: 'toggle-did-not-turn-on',
       state: await marketplaceState(frame)
     };
@@ -300,7 +424,7 @@ feature.prepare = async function prepareWithMarketplaceToggleFix(projectId) {
     await page.bringToFront();
     this.projects.addActivity(projectId, {
       type: 'spreadshirt',
-      label: 'Spreadshirt uses a hidden marketplace checkbox. Clicking the visible Publish on Spreadshirt switch with a real browser mouse…'
+      label: 'Spreadshirt uses a hidden marketplace checkbox. Activating its exact visible switch wrapper and native checkbox events…'
     });
 
     const result = await enableMarketplaceCustomToggle(page);
@@ -328,7 +452,7 @@ feature.prepare = async function prepareWithMarketplaceToggleFix(projectId) {
     this.projects.addActivity(projectId, {
       type: 'spreadshirt',
       label: result.ok
-        ? 'Publish on Spreadshirt is ON through the real browser mouse click. Final review is ready.'
+        ? `Publish on Spreadshirt is ON (${result.method || 'verified'}). Final review is ready.`
         : 'Spreadshirt metadata is ready for Final Review. Marketplace publishing will be activated on Pass · Publish.'
     });
     return {
@@ -344,8 +468,10 @@ feature.prepare = async function prepareWithMarketplaceToggleFix(projectId) {
 module.exports = {
   marketplaceState,
   saveAndPublishVisibleAnywhere,
+  waitForMarketplaceEnabled,
   pagePointForFrameRect,
   clickMarketplaceWithNativeMouse,
+  activateCheckboxNatively,
   clickMarketplaceVisibleControl,
   enableMarketplaceCustomToggle
 };
