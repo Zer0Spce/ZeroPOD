@@ -7,6 +7,13 @@ const originalEnsureService = SessionManager.prototype.ensureService;
 const originalCloseAutomationContext = SessionManager.prototype.closeAutomationContext;
 const originalLaunchNormalLoginBrowser = SessionManager.prototype.launchNormalLoginBrowser;
 
+function visibleAutomationServices() {
+  if (!(globalThis.__zeroPodVisibleAutomationServices instanceof Set)) {
+    globalThis.__zeroPodVisibleAutomationServices = new Set();
+  }
+  return globalThis.__zeroPodVisibleAutomationServices;
+}
+
 async function keepAutomationWindowOffscreen(page) {
   if (!page || page.isClosed()) return;
   let session;
@@ -54,8 +61,14 @@ SessionManager.prototype.endWideService = async function endWideServiceDisabled(
 
 SessionManager.prototype.setAutomationWindowVisible = function setAutomationWindowVisible(serviceId, visible = true) {
   this.__zeroPodVisibleAutomationServices ||= new Set();
-  if (visible) this.__zeroPodVisibleAutomationServices.add(serviceId);
-  else this.__zeroPodVisibleAutomationServices.delete(serviceId);
+  const globalVisible = visibleAutomationServices();
+  if (visible) {
+    this.__zeroPodVisibleAutomationServices.add(serviceId);
+    globalVisible.add(serviceId);
+  } else {
+    this.__zeroPodVisibleAutomationServices.delete(serviceId);
+    globalVisible.delete(serviceId);
+  }
   return this;
 };
 
