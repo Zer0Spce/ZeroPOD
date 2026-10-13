@@ -257,7 +257,7 @@ feature.prepare = async function prepareWithMarketplaceToggleFix(projectId) {
     await page.bringToFront();
     this.projects.addActivity(projectId, {
       type: 'spreadshirt',
-      label: 'Spreadshirt uses a hidden marketplace checkbox. Clicking the physical right-side Publish on Spreadshirt switch instead…'
+      label: 'Spreadshirt uses a hidden marketplace checkbox. Clicking the visible Publish on Spreadshirt control — the physical right-side switch — instead…'
     });
 
     const result = await enableMarketplaceCustomToggle(page);
