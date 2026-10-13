@@ -130,6 +130,7 @@ require('./spreadshirtVideoFlowPatch');
 require('./spreadshirtAlphaIpc');
 require('./spreadshirtMarketplaceRoutePatch');
 require('./spreadshirtRecordedPlacementPatch');
+require('./spreadshirtProductSettingsSaveRecoveryPatch');
 require('./spreadshirtCardDetectionPatch');
 require('./spreadshirtMarketplaceTogglePatch');
 require('./spreadshirtEditorResumePatch');
