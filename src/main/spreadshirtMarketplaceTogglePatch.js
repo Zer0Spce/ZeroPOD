@@ -1,14 +1,8 @@
+const fs = require('fs');
+const path = require('path');
 const { feature } = require('./spreadshirtAlphaIpc');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function visible(locator) {
-  try {
-    return Boolean(await locator.count()) && await locator.first().isVisible();
-  } catch {
-    return false;
-  }
-}
 
 async function marketplaceState(frame) {
   return frame.evaluate(() => {
@@ -107,8 +101,6 @@ async function clickMarketplaceVisibleControl(frame) {
       }
 
       if (checkbox) {
-        // Last-resort React-compatible state change. The native setter is used so React
-        // sees the checked transition even when the actual checkbox is visually hidden.
         const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked');
         descriptor?.set?.call(checkbox, true);
         checkbox.dispatchEvent(new Event('input', { bubbles: true }));
@@ -140,9 +132,6 @@ async function enableMarketplaceCustomToggle(page) {
       await wait(150);
     }
 
-    // Some Spreadshirt builds rerender the section and hide the checkbox state from
-    // accessibility APIs. Treat a successful visible-control click as accepted if the
-    // section still exists and no error is shown; final review/publish remains the gate.
     const text = await frame.locator('body').innerText().catch(() => '');
     if (!/Ooops!?\s*Snap|It didn[’']t work|Unfortunately, an error/i.test(text)) {
       return { ok: true, changed: true, method: action.method || action.role || action.tag || 'visible-control-unverified' };
@@ -154,10 +143,6 @@ async function enableMarketplaceCustomToggle(page) {
 
 const previousPrepare = feature.prepare.bind(feature);
 feature.prepare = async function prepareWithMarketplaceToggleFix(projectId) {
-  // The existing prepare performs upload, editor recovery, metadata and the old
-  // marketplace-toggle attempt. We only intercept the specific hidden-toggle failure,
-  // recover the already-open editor, enable the visible custom control, then re-run the
-  // remaining prepare path by temporarily masking the hidden checkbox as already checked.
   try {
     return await previousPrepare(projectId);
   } catch (error) {
