@@ -26,6 +26,9 @@ assert(/require\('\.\/automationPodTargetsPatch'\)/.test(ipc), 'Automation POD r
 assert(/data-pod-target="redbubble"/.test(targetsUi) && /data-pod-target="spreadshirt"/.test(targetsUi), 'Automation UI must show Redbubble and Spreadshirt checkboxes.');
 assert(/at least one POD destination/i.test(targetsUi), 'Automation UI must prevent rows with no selected POD target.');
 assert(/patch:\s*\{\s*targets\s*\}/.test(targetsUi), 'Automation target checkbox changes must persist to the queue row.');
+assert(/observer\.observe\(root, \{ childList: true \}\)/.test(targetsUi), 'Automation target UI should observe only queue-row replacement.');
+assert(!/observer\.observe\(document\.documentElement/.test(targetsUi), 'Automation target UI must not observe its own subtree changes and create a mutation loop.');
+assert(/block\.dataset\.signature/.test(targetsUi), 'Automation target UI must avoid rebuilding unchanged target controls every poll.');
 
 assert(/NEW_CHAT_KEY/.test(polish) && /zeroPodNewChatFixed/.test(polish), 'Spreadshirt New Chat control repair is missing.');
 assert(/localStorage\.setItem\(NEW_CHAT_KEY, input\.checked \? '1' : '0'\)/.test(polish), 'Spreadshirt New Chat state must persist in the format the workflow reads.');
