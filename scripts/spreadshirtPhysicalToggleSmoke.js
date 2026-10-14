@@ -7,10 +7,11 @@ const toggleFile = path.join(root, 'src/main/spreadshirtMarketplaceTogglePatch.j
 const strictFile = path.join(root, 'src/main/spreadshirtStrictPublishVerifyPatch.js');
 const freshFile = path.join(root, 'src/main/spreadshirtFreshUploadIdentityPatch.js');
 const transitionFile = path.join(root, 'src/main/spreadshirtUploadTransitionPatch.js');
+const routeFile = path.join(root, 'src/main/spreadshirtMarketplaceRoutePatch.js');
 const debugFile = path.join(root, 'src/main/spreadshirtPublishBrowserDebugPatch.js');
 const dockFile = path.join(root, 'src/main/chromeDockPatch.js');
 const backgroundFile = path.join(root, 'src/main/backgroundChromeLaunchPatch.js');
-for (const file of [toggleFile, strictFile, freshFile, transitionFile, debugFile, dockFile, backgroundFile]) {
+for (const file of [toggleFile, strictFile, freshFile, transitionFile, routeFile, debugFile, dockFile, backgroundFile]) {
   const syntax = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
   if (syntax.status !== 0) throw new Error(syntax.stderr || syntax.stdout || `${path.basename(file)} syntax failed.`);
 }
@@ -19,6 +20,7 @@ const source = fs.readFileSync(toggleFile, 'utf8');
 const strict = fs.readFileSync(strictFile, 'utf8');
 const fresh = fs.readFileSync(freshFile, 'utf8');
 const transition = fs.readFileSync(transitionFile, 'utf8');
+const route = fs.readFileSync(routeFile, 'utf8');
 const debug = fs.readFileSync(debugFile, 'utf8');
 const dock = fs.readFileSync(dockFile, 'utf8');
 const background = fs.readFileSync(backgroundFile, 'utf8');
@@ -54,6 +56,12 @@ assert(/designs-index-after-upload-status/.test(transition), 'Spreadshirt upload
 assert(/Current page:/.test(transition) && /Saw Upload Status:/.test(transition) && /Page text:/.test(transition), 'Spreadshirt upload timeout must include useful live-page diagnostics.');
 assert(/videoFlow\.waitForUploadResult = waitForUploadResultReliable/.test(transition), 'Spreadshirt transition patch must replace the brittle literal-banner wait before fresh upload logic imports it.');
 
+assert(/async function clickDesignsNavigation\(page\)/.test(route), 'Spreadshirt Marketplace route recovery must expose a dedicated dashboard Designs-navigation helper.');
+assert(/\/dashboard/.test(route) && /looksLikeDashboard/.test(route), 'Spreadshirt Marketplace route recovery must detect authenticated Dashboard redirects.');
+assert(/a\[href="\/mp\/designs"\]/.test(route), 'Spreadshirt Dashboard recovery must prefer the first-party /mp/designs navigation link.');
+assert(/clickDesignsNavigation\(page\)/.test(route) && /dashboardRecoveryAttempts/.test(route), 'Spreadshirt Marketplace wait must actively recover from Dashboard redirects instead of only timing out.');
+assert(/Visible Designs links:/.test(route), 'Spreadshirt Marketplace timeout diagnostics must report visible Designs destinations.');
+
 assert(/feature\.prepare = async function prepareWithFullVisibleSpreadshirt/.test(debug), 'Visible diagnostic wrapper must cover the full Spreadshirt prepare process.');
 assert(/feature\.publish = async function publishWithFullVisibleSpreadshirt/.test(debug), 'Visible diagnostic wrapper must cover the full Spreadshirt publish process.');
 assert(/__zeroPodHostWindow/.test(debug) && /\.minimize\?\./.test(debug), 'ZeroPOD must minimize during visible Spreadshirt debugging so Chrome stays in front.');
@@ -76,4 +84,4 @@ assert(videoIndex >= 0 && transitionIndex > videoIndex && transitionIndex < fres
 assert(editorResumeIndex >= 0 && freshIndex > editorResumeIndex, 'Fresh upload identity layer must supersede the old editor-resume prepare wrapper.');
 assert(strictIndex > freshIndex && debugIndex > strictIndex && uiIndex > debugIndex, 'Full visible browser wrapper must load after final Spreadshirt publish logic and before UI injection.');
 
-console.log('Spreadshirt exact switch + upload-transition recovery + fresh-card identity + visible-browser + strict verification smoke checks passed.');
+console.log('Spreadshirt exact switch + upload-transition recovery + dashboard-route recovery + fresh-card identity + visible-browser + strict verification smoke checks passed.');
