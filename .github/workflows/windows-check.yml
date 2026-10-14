@@ -43,7 +43,10 @@ jobs:
           node --check src/main/spreadshirtExactGridPublishProofPatch.js
           node --check src/main/spreadshirtSavePublishActionPatch.js
           node --check src/main/spreadshirtCanonicalDesignIdentityPatch.js
+          node --check src/main/automationPodTargetsPatch.js
           node --check src/renderer/spreadshirtBetaPolish.js
+          node --check src/renderer/automationPodTargetsUi.js
+          node --check src/renderer/connectionsExtraServices.js
           node scripts/exportPlacementSmoke.js
           node scripts/spreadshirtCreateNewSmoke.js
           node scripts/spreadshirtNoStatusHandoffSmoke.js
@@ -52,6 +55,7 @@ jobs:
           node scripts/spreadshirtSavePublishActionSmoke.js
           node scripts/spreadshirtHiddenChromeSmoke.js
           node scripts/spreadshirtBetaPolishSmoke.js
+          node scripts/automationMultiPodSmoke.js
           npm run check
 
       - name: Build unpacked Windows package
