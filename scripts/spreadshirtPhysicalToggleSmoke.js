@@ -56,7 +56,7 @@ assert(/uploadDesignId/.test(fresh) && /uploadCardIdentity/.test(fresh) && /edit
 
 assert(/snapshotMarketplaceCardsWithArtworkFingerprint/.test(visual), 'Spreadshirt card detection must replace DOM-only snapshots with artwork fingerprinting.');
 assert(/chooseArtwork/.test(visual) && /preferred = el\.tagName === 'IMG'/.test(visual), 'Artwork fingerprinting must prefer the real large image instead of decorative SVG elements.');
-assert(/page\.screenshot/.test(visual) && /visualHash/.test(visual) && /sha256/.test(visual), 'Spreadshirt card detection must retain a visual thumbnail hash fallback.');
+assert(/require\('sharp'\)/.test(visual) && /perceptualFingerprint/.test(visual) && /page\.screenshot/.test(visual) && /visualHash/.test(visual), 'Spreadshirt card detection must retain a perceptual visual-thumbnail fingerprint fallback.');
 assert(/card\.identity = realArtworkIdentity \|\| card\.visualIdentity \|\| card\.domIdentity/.test(visual), 'Actual artwork identity must outrank unreliable Spreadshirt wrapper identities.');
 assert(/fresh\.snapshotMarketplaceCards = snapshotMarketplaceCardsWithArtworkFingerprint/.test(visual), 'Artwork fingerprint snapshot must override the fresh-card detector before post-upload verification imports it.');
 
