@@ -36,6 +36,8 @@ jobs:
           node --check src/main/redbubbleUploadLimitPausePatch.js
           node --check src/main/redbubbleLimitCheckPatch.js
           node --check src/main/spreadshirtForbiddenMetadataRepairPatch.js
+          node --check src/main/spreadshirtNativeForegroundPatch.js
+          node --check src/main/spreadshirtExactGridPublishProofPatch.js
           node scripts/exportPlacementSmoke.js
           node scripts/spreadshirtCreateNewSmoke.js
           node scripts/spreadshirtNoStatusHandoffSmoke.js
