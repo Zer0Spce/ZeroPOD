@@ -42,3 +42,7 @@ app.whenReady().then(() => {
   });
 });
 app.on('before-quit', () => sessions.closeAll().catch(() => {}));
+
+// Restore cached Flying Research cards on first tab open and expose an explicit
+// Refresh button instead of automatically replacing the last imported results.
+require('./flyingResearchCacheUiPatch');
