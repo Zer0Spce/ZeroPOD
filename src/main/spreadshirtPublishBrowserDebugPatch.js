@@ -1,6 +1,7 @@
 const { feature } = require('./spreadshirtAlphaIpc');
 const { keepAutomationWindowOffscreen } = require('./chromeDockPatch');
 const { hideChromeWindowByProfile, startChromeHideLease } = require('./spreadshirtTrueHiddenChromePatch');
+require('./spreadshirtAutomationUploadRecoveryPatch');
 
 const previousPrepare = feature.prepare.bind(feature);
 const previousPublish = feature.publish.bind(feature);
