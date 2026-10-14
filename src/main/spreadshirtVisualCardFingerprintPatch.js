@@ -82,22 +82,23 @@ async function snapshotMarketplaceCardsWithArtworkFingerprint(page) {
       const bg = getComputedStyle(el).backgroundImage;
       if (bg && bg !== 'none') {
         const match = bg.match(/url\(["']?(.*?)["']?\)/i);
-        return stableUrl(match?.[1] || bg);
+        if (match?.[1]) return stableUrl(match[1]);
       }
       if (el.tagName === 'CANVAS') return `canvas:${el.width || 0}x${el.height || 0}`;
       if (el.tagName === 'SVG') return `svg:${String(el.outerHTML || '').replace(/\s+/g, ' ').slice(0, 2000)}`;
       return '';
     };
     const chooseArtwork = (root) => {
-      const primary = [...root.querySelectorAll('img,picture img,canvas,[style*="background-image"]')]
+      const primary = [...root.querySelectorAll('img,picture img,canvas,div,figure,span')]
         .filter(visible)
         .map((el) => {
           const rect = el.getBoundingClientRect();
           const area = rect.width * rect.height;
-          const preferred = el.tagName === 'IMG' ? 3 : el.tagName === 'CANVAS' ? 2 : 1;
-          return { el, rect, area, preferred, key: mediaKey(el) };
+          const key = mediaKey(el);
+          const preferred = el.tagName === 'IMG' ? 4 : el.tagName === 'CANVAS' ? 3 : key ? 2 : 0;
+          return { el, rect, area, preferred, key };
         })
-        .filter((entry) => entry.rect.width >= 70 && entry.rect.height >= 70 && entry.area >= 7000)
+        .filter((entry) => entry.key && entry.rect.width >= 70 && entry.rect.height >= 70 && entry.area >= 7000)
         .sort((a, b) => (b.preferred - a.preferred) || (b.area - a.area));
       if (primary.length) return primary[0];
 
@@ -197,9 +198,6 @@ async function snapshotMarketplaceCardsWithArtworkFingerprint(page) {
     const realArtworkIdentity = card.imageKey && !/^(canvas|svg):/i.test(card.imageKey)
       ? `artwork:${card.imageKey}`
       : null;
-
-    // Actual artwork is the source of truth. It outranks Spreadshirt wrapper
-    // IDs/hrefs, which have proven unreliable on the current Designs grid.
     card.identity = realArtworkIdentity || card.visualIdentity || card.domIdentity || null;
   }
 
