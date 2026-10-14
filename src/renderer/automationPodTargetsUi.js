@@ -5,6 +5,7 @@
   let decorating = false;
   let timer = null;
   let observer = null;
+  let observedRoot = null;
 
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[char]);
@@ -71,10 +72,21 @@
     }
   }
 
+  function ensureRowsObserver(root) {
+    if (!root || observedRoot === root) return;
+    observer?.disconnect();
+    observedRoot = root;
+    observer = new MutationObserver(() => decorateRows().catch(() => {}));
+    // Observe only replacement of queue rows. Our target controls are inserted
+    // inside those rows, so they cannot recursively retrigger this observer.
+    observer.observe(root, { childList: true });
+  }
+
   async function decorateRows() {
     if (decorating || !window.zeroPOD?.automation) return;
     const root = document.getElementById('automationRowsV2');
     if (!root) return;
+    ensureRowsObserver(root);
     decorating = true;
     try {
       const snapshot = await window.zeroPOD.automation.list();
@@ -91,6 +103,9 @@
           const status = rowEl.querySelector('.az-status');
           status?.insertAdjacentElement('beforebegin', block);
         }
+        const signature = `${targets.redbubble ? 1 : 0}:${targets.spreadshirt ? 1 : 0}:${locked ? 1 : 0}`;
+        if (block.dataset.signature === signature) return;
+        block.dataset.signature = signature;
         block.innerHTML = `
           <div class="az-targets-label">Upload to</div>
           <label class="az-target-pill rb"><input type="checkbox" data-pod-target="redbubble" ${targets.redbubble ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>Redbubble</span></label>
@@ -137,9 +152,9 @@
       updateTargets(input).catch(() => {});
     }, true);
 
-    observer = new MutationObserver(() => decorateRows().catch(() => {}));
-    observer.observe(document.documentElement, { childList: true, subtree: true });
     timer = setInterval(() => {
+      const root = document.getElementById('automationRowsV2');
+      if (root) ensureRowsObserver(root);
       if (document.getElementById('automation')?.classList.contains('active-view')) decorateRows().catch(() => {});
     }, 1200);
   }
