@@ -50,3 +50,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => sessions.closeAll().catch(() => {}));
 
 module.exports = { feature };
+
+// Loaded here (before main.js constructs AutomationQueueController) so every
+// Automation row can route its finished artwork to Redbubble, Spreadshirt, or both.
+require('./automationPodTargetsPatch');
