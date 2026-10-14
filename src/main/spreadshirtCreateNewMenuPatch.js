@@ -1,6 +1,7 @@
 const videoFlow = require('./spreadshirtVideoFlowPatch');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const UPLOAD_DESIGN_PATTERN = /upload\s+designs?/i;
 
 async function isVisible(locator) {
   try {
@@ -23,7 +24,7 @@ async function visibleUploadSurface(page) {
       const dialog = group.nth(index);
       if (!(await dialog.isVisible().catch(() => false))) continue;
       const text = await dialog.innerText().catch(() => '');
-      if (/Upload\s+design/i.test(text) && /Select\s+file|Browse/i.test(text)) return dialog;
+      if (UPLOAD_DESIGN_PATTERN.test(text) && /Select\s+file|Browse/i.test(text)) return dialog;
     }
   }
 
@@ -38,7 +39,7 @@ async function visibleUploadSurface(page) {
     const nodes = [...document.querySelectorAll('div,section,form,aside')].filter(visible);
     return nodes.some((node) => {
       const text = norm(node.innerText || node.textContent || '');
-      if (!/Upload\s+design/i.test(text)) return false;
+      if (!/upload\s+designs?/i.test(text)) return false;
       const button = [...node.querySelectorAll('button,[role="button"],a')]
         .find((el) => visible(el) && /Select\s+file|Browse/i.test(norm(el.innerText || el.textContent || el.getAttribute('aria-label') || '')));
       return Boolean(button || node.querySelector('input[type="file"]'));
@@ -50,12 +51,12 @@ async function visibleUploadSurface(page) {
 
 async function findVisibleUploadDesignAction(page) {
   const candidates = [
-    page.getByRole('menuitem', { name: /^Upload Design$/i }).first(),
-    page.getByRole('button', { name: /^Upload Design$/i }).first(),
-    page.getByRole('link', { name: /^Upload Design$/i }).first(),
-    page.locator('[role="option"]').filter({ hasText: /^\s*Upload Design\s*$/i }).first(),
-    page.locator('[role="button"]').filter({ hasText: /^\s*Upload Design\s*$/i }).first(),
-    page.getByText(/^Upload Design$/i, { exact: true }).first()
+    page.getByRole('menuitem', { name: /upload\s+designs?/i }).first(),
+    page.getByRole('button', { name: /upload\s+designs?/i }).first(),
+    page.getByRole('link', { name: /upload\s+designs?/i }).first(),
+    page.locator('[role="option"]').filter({ hasText: /upload\s+designs?/i }).first(),
+    page.locator('[role="button"]').filter({ hasText: /upload\s+designs?/i }).first(),
+    page.getByText(/upload\s+designs?/i).first()
   ];
   for (const candidate of candidates) {
     if (await isVisible(candidate)) return candidate;
@@ -125,9 +126,9 @@ async function openCreateNewThenUploadDesign(page) {
     const clicked = await clickCreateNewLikeYesterday(page, createNew, attempt === 1);
     if (!clicked) continue;
 
-    // Crucial: inspect the first click result before ever clicking Create New
-    // again. On the current Spreadshirt UI the first click can open a menu with
-    // an “Upload Design” choice; re-clicking Create New simply closes that menu.
+    // Inspect the result of the first Create New click before ever clicking the
+    // button again. Current Spreadshirt can open a menu/popover containing an
+    // “Upload Design” action; another Create New click would simply close it.
     const outcome = await waitForCreateNewOutcome(page, 6500);
     if (outcome?.type === 'surface') return true;
     if (outcome?.type === 'upload-action') {
@@ -163,7 +164,6 @@ async function selectFileFromCurrentUploadSurface(page, file) {
     throw new Error('Spreadshirt upload file panel is not visible. ZeroPOD refused to use hidden/stale file controls.');
   }
 
-  const chooserPromise = page.waitForEvent('filechooser', { timeout: 7000 }).catch(() => null);
   const buttons = [
     page.getByRole('button', { name: /select file/i }).first(),
     page.getByRole('button', { name: /browse/i }).first(),
@@ -173,6 +173,7 @@ async function selectFileFromCurrentUploadSurface(page, file) {
   for (const button of buttons) {
     if (!(await isVisible(button))) continue;
     if (await button.isDisabled().catch(() => false)) continue;
+    const chooserPromise = page.waitForEvent('filechooser', { timeout: 7000 }).catch(() => null);
     const clicked = await button.click({ force: true, timeout: 3000 }).then(() => true).catch(() => false);
     if (!clicked) continue;
     const chooser = await chooserPromise;
@@ -196,7 +197,7 @@ async function selectFileFromCurrentUploadSurface(page, file) {
       for (let depth = 0; node && depth < 10; depth += 1, node = node.parentElement) {
         if (!visible(node)) continue;
         const text = norm(node.innerText || node.textContent || '');
-        if (/Upload\s+design/i.test(text) && /Select\s+file|Browse/i.test(text)) return true;
+        if (/upload\s+designs?/i.test(text) && /Select\s+file|Browse/i.test(text)) return true;
       }
       return false;
     });
