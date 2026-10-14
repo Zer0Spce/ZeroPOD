@@ -36,6 +36,7 @@ jobs:
           node --check src/main/redbubbleUploadLimitPausePatch.js
           node --check src/main/redbubbleLimitCheckPatch.js
           node scripts/exportPlacementSmoke.js
+          node scripts/spreadshirtCreateNewSmoke.js
           npm run check
 
       - name: Build unpacked Windows package
