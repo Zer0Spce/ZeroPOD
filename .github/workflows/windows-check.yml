@@ -37,11 +37,13 @@ jobs:
           node --check src/main/redbubbleLimitCheckPatch.js
           node --check src/main/backgroundChromeLaunchPatch.js
           node --check src/main/spreadshirtNativeForegroundPatch.js
+          node --check src/main/spreadshirtTrueHiddenChromePatch.js
           node --check src/main/spreadshirtPublishBrowserDebugPatch.js
           node --check src/main/spreadshirtForbiddenMetadataRepairPatch.js
           node --check src/main/spreadshirtExactGridPublishProofPatch.js
           node --check src/main/spreadshirtSavePublishActionPatch.js
           node --check src/main/spreadshirtCanonicalDesignIdentityPatch.js
+          node --check src/renderer/spreadshirtBetaPolish.js
           node scripts/exportPlacementSmoke.js
           node scripts/spreadshirtCreateNewSmoke.js
           node scripts/spreadshirtNoStatusHandoffSmoke.js
@@ -49,6 +51,7 @@ jobs:
           node scripts/spreadshirtForbiddenMetadataSmoke.js
           node scripts/spreadshirtSavePublishActionSmoke.js
           node scripts/spreadshirtHiddenChromeSmoke.js
+          node scripts/spreadshirtBetaPolishSmoke.js
           npm run check
 
       - name: Build unpacked Windows package
