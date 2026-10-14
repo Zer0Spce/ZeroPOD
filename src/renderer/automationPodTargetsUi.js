@@ -2,10 +2,10 @@
   if (window.__zeroPODAutomationTargetsInstalled) return;
   window.__zeroPODAutomationTargetsInstalled = true;
 
-  let decorating = false;
   let timer = null;
-  let observer = null;
-  let observedRoot = null;
+  let hookedRoot = null;
+  const rowsById = new Map();
+  const innerHtmlDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
 
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[char]);
@@ -31,7 +31,6 @@
       .az-target-pill:has(input:checked){border-color:#5969ad;background:#171d31;color:#e2e6ff}
       .az-target-pill.ss:has(input:checked){border-color:#39785d;background:#13261e;color:#9ae2bd}
       .az-targets-label{font-size:9px;font-weight:900;letter-spacing:.05em;color:#6f7b8b;text-transform:uppercase;width:100%;line-height:1}
-      .az-target-help{margin:8px 0 0;font-size:11px;color:#8f9aa8;line-height:1.45}
       .az-target-legend{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;padding:10px 12px;background:#101419;border:1px solid #2a313c;border-radius:10px;font-size:11px;color:#9ca7b6}
       @media(max-width:1150px){#automation .az-row{grid-template-columns:38px 1fr 1fr minmax(160px,.7fr) 125px 38px!important}}
       @media(max-width:900px){#automation .az-row{grid-template-columns:38px 1fr 38px!important}.az-file,.az-url,.az-targets,.az-status{grid-column:2!important}.az-remove{grid-column:3!important;grid-row:1!important}}
@@ -48,6 +47,48 @@
     line.innerHTML = `<span>${esc(new Date().toLocaleTimeString())}</span><b>${esc(message)}</b>`;
     root.appendChild(line);
     root.scrollTop = root.scrollHeight;
+  }
+
+  function targetMarkup(rowId, fallbackLocked = false) {
+    const row = rowsById.get(String(rowId));
+    const targets = targetsFor(row);
+    const locked = row ? row.status === 'running' || row.status === 'completed' : fallbackLocked;
+    return `<div class="az-targets" data-target-row="${esc(rowId)}">
+      <div class="az-targets-label">Upload to</div>
+      <label class="az-target-pill rb"><input type="checkbox" data-pod-target="redbubble" ${targets.redbubble ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>Redbubble</span></label>
+      <label class="az-target-pill ss"><input type="checkbox" data-pod-target="spreadshirt" ${targets.spreadshirt ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>Spreadshirt</span></label>
+    </div>`;
+  }
+
+  function transformAutomationRows(html) {
+    if (typeof html !== 'string' || !html.includes('az-row')) return html;
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    template.content.querySelectorAll('.az-row[data-row-id]').forEach((rowEl) => {
+      if (rowEl.querySelector('.az-targets')) return;
+      const status = rowEl.querySelector('.az-status');
+      if (!status) return;
+      const fallbackLocked = Boolean(rowEl.querySelector('.az-remove[disabled]'));
+      status.insertAdjacentHTML('beforebegin', targetMarkup(rowEl.dataset.rowId, fallbackLocked));
+    });
+    return template.innerHTML;
+  }
+
+  function hookRowsRoot(root) {
+    if (!root || hookedRoot === root || !innerHtmlDescriptor?.get || !innerHtmlDescriptor?.set) return false;
+    hookedRoot = root;
+    Object.defineProperty(root, 'innerHTML', {
+      configurable: true,
+      enumerable: false,
+      get() { return innerHtmlDescriptor.get.call(this); },
+      set(value) { innerHtmlDescriptor.set.call(this, transformAutomationRows(value)); }
+    });
+
+    const existing = innerHtmlDescriptor.get.call(root);
+    if (existing && root.querySelector('.az-row') && !root.querySelector('.az-targets')) {
+      innerHtmlDescriptor.set.call(root, transformAutomationRows(existing));
+    }
+    return true;
   }
 
   function polishCopy() {
@@ -72,49 +113,13 @@
     }
   }
 
-  function ensureRowsObserver(root) {
-    if (!root || observedRoot === root) return;
-    observer?.disconnect();
-    observedRoot = root;
-    observer = new MutationObserver(() => decorateRows().catch(() => {}));
-    // Observe only replacement of queue rows. Our target controls are inserted
-    // inside those rows, so they cannot recursively retrigger this observer.
-    observer.observe(root, { childList: true });
-  }
-
-  async function decorateRows() {
-    if (decorating || !window.zeroPOD?.automation) return;
+  async function syncRows() {
+    if (!window.zeroPOD?.automation) return;
+    const snapshot = await window.zeroPOD.automation.list();
+    rowsById.clear();
+    for (const row of snapshot.rows || []) rowsById.set(String(row.id), row);
     const root = document.getElementById('automationRowsV2');
-    if (!root) return;
-    ensureRowsObserver(root);
-    decorating = true;
-    try {
-      const snapshot = await window.zeroPOD.automation.list();
-      const byId = new Map((snapshot.rows || []).map((row) => [String(row.id), row]));
-      root.querySelectorAll('.az-row[data-row-id]').forEach((rowEl) => {
-        const row = byId.get(String(rowEl.dataset.rowId));
-        if (!row) return;
-        const targets = targetsFor(row);
-        const locked = row.status === 'running' || row.status === 'completed';
-        let block = rowEl.querySelector('.az-targets');
-        if (!block) {
-          block = document.createElement('div');
-          block.className = 'az-targets';
-          const status = rowEl.querySelector('.az-status');
-          status?.insertAdjacentElement('beforebegin', block);
-        }
-        const signature = `${targets.redbubble ? 1 : 0}:${targets.spreadshirt ? 1 : 0}:${locked ? 1 : 0}`;
-        if (block.dataset.signature === signature) return;
-        block.dataset.signature = signature;
-        block.innerHTML = `
-          <div class="az-targets-label">Upload to</div>
-          <label class="az-target-pill rb"><input type="checkbox" data-pod-target="redbubble" ${targets.redbubble ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>Redbubble</span></label>
-          <label class="az-target-pill ss"><input type="checkbox" data-pod-target="spreadshirt" ${targets.spreadshirt ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>Spreadshirt</span></label>`;
-      });
-      polishCopy();
-    } finally {
-      decorating = false;
-    }
+    if (root) hookRowsRoot(root);
   }
 
   async function updateTargets(input) {
@@ -131,20 +136,24 @@
     }
 
     const targets = { redbubble: rb.checked, spreadshirt: ss.checked };
+    const rowId = String(rowEl.dataset.rowId);
+    const cached = rowsById.get(rowId) || { id: rowId };
+    rowsById.set(rowId, { ...cached, targets });
+
     try {
-      await window.zeroPOD.automation.update({ rowId: rowEl.dataset.rowId, patch: { targets } });
+      await window.zeroPOD.automation.update({ rowId, patch: { targets } });
       const selected = [targets.redbubble && 'Redbubble', targets.spreadshirt && 'Spreadshirt'].filter(Boolean).join(' + ');
       log(`Row ${[...rowEl.parentElement.children].indexOf(rowEl) + 1}: POD destination set to ${selected}.`, 'ok');
     } catch (error) {
       log(`Could not update POD destination: ${error.message || error}`, 'error');
+      await syncRows().catch(() => {});
     }
-    await decorateRows();
   }
 
   function install() {
     installStyles();
     polishCopy();
-    decorateRows().catch(() => {});
+    syncRows().catch(() => {});
 
     document.addEventListener('change', (event) => {
       const input = event.target.closest?.('[data-pod-target]');
@@ -152,11 +161,17 @@
       updateTargets(input).catch(() => {});
     }, true);
 
+    // Do not mutate queue rows on a MutationObserver. The Automation screen already
+    // refreshes itself on a timer; destination controls are injected synchronously
+    // through the row root's innerHTML setter so they exist in the very same paint.
     timer = setInterval(() => {
       const root = document.getElementById('automationRowsV2');
-      if (root) ensureRowsObserver(root);
-      if (document.getElementById('automation')?.classList.contains('active-view')) decorateRows().catch(() => {});
-    }, 1200);
+      if (root && root !== hookedRoot) hookRowsRoot(root);
+      if (document.getElementById('automation')?.classList.contains('active-view')) {
+        syncRows().catch(() => {});
+        polishCopy();
+      }
+    }, 900);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
@@ -164,6 +179,5 @@
 
   window.addEventListener('beforeunload', () => {
     if (timer) clearInterval(timer);
-    observer?.disconnect();
   });
 })();
