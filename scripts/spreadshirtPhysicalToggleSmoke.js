@@ -85,16 +85,17 @@ assert(/a\[href="\/mp\/designs"\]/.test(route), 'Spreadshirt Dashboard recovery 
 assert(/clickDesignsNavigation\(page\)/.test(route) && /dashboardRecoveryAttempts/.test(route), 'Spreadshirt Marketplace wait must actively recover from Dashboard redirects instead of only timing out.');
 assert(/Visible Designs links:/.test(route), 'Spreadshirt Marketplace timeout diagnostics must report visible Designs destinations.');
 
-assert(/feature\.prepare = async function prepareWithFullVisibleSpreadshirt/.test(debug), 'Visible diagnostic wrapper must cover the full Spreadshirt prepare process.');
-assert(/feature\.publish = async function publishWithFullVisibleSpreadshirt/.test(debug), 'Visible diagnostic wrapper must cover the full Spreadshirt publish process.');
-assert(/__zeroPodHostWindow/.test(debug) && /\.minimize\?\./.test(debug), 'ZeroPOD must minimize during visible Spreadshirt debugging so Chrome stays in front.');
-assert(/setInterval/.test(debug) && /showAutomationWindow\(page\)/.test(debug) && /page\.bringToFront/.test(debug), 'Spreadshirt Chrome must be repeatedly kept visible/in front during the whole stage.');
+assert(/feature\.prepare = async function prepareWithHiddenSpreadshirt/.test(debug), 'Hidden browser wrapper must cover the full Spreadshirt prepare process.');
+assert(/feature\.publish = async function publishWithHiddenSpreadshirt/.test(debug), 'Hidden browser wrapper must cover the full Spreadshirt publish process.');
+assert(/setAutomationWindowVisible\?\.\('spreadshirt', false\)/.test(debug), 'Spreadshirt wrapper must force the automation visibility lease off.');
+assert(/keepAutomationWindowOffscreen\(page\)/.test(debug), 'Spreadshirt wrapper must keep Chrome off-screen before and after automation.');
+assert(!/__zeroPodHostWindow|\.minimize\?\.|setInterval|showAutomationWindow\(page\)/.test(debug), 'Spreadshirt hidden wrapper must not minimize ZeroPOD or raise Chrome.');
 assert(!/\.click\(|\.fill\(|\.goto\(|recordPublish|projects\.update/.test(debug), 'Visibility wrapper must not alter Spreadshirt interactions or project state.');
-assert(/setAutomationWindowVisible/.test(dock) && /showAutomationWindow/.test(dock), 'Chrome dock patch must support visible automation windows.');
-assert(/__zeroPodVisibleAutomationServices/.test(dock) && /globalVisible\.add\(serviceId\)/.test(dock), 'Visible automation lease must be shared with the Chrome process launcher.');
-assert(/partner\\\.spreadshirt\\\.com|partner\.spreadshirt\.com/.test(background), 'Background Chrome launcher must identify the Spreadshirt automation process.');
-assert(/windowsHide:\s*false/.test(background) && /--window-position=60,60/.test(background), 'Leased Spreadshirt Chrome must launch visibly instead of starting hidden/off-screen.');
-assert(/windowsHide:\s*true/.test(background) && /--window-position=-20000,-20000/.test(background), 'Other automation Chrome windows must retain the existing hidden background behavior.');
+assert(/setAutomationWindowVisible/.test(dock) && /showAutomationWindow/.test(dock) && /keepAutomationWindowOffscreen/.test(dock), 'Chrome dock patch must retain generic visible/hidden automation controls for other services.');
+assert(/__zeroPodVisibleAutomationServices/.test(dock) && /globalVisible\.add\(serviceId\)/.test(dock), 'Generic automation visibility leases must remain available for non-Spreadshirt services.');
+assert(!/spreadshirtVisible/.test(background), 'Background Chrome launcher must not retain a Spreadshirt visible-launch exception.');
+assert(!/windowsHide:\s*false/.test(background), 'Automation Chrome must never be launched as a visible Windows process.');
+assert(/windowsHide:\s*true/.test(background) && /--window-position=-20000,-20000/.test(background), 'Automation Chrome, including Spreadshirt, must launch hidden and off-screen.');
 
 const videoIndex = bootstrap.indexOf("require('./spreadshirtVideoFlowPatch')");
 const transitionIndex = bootstrap.indexOf("require('./spreadshirtUploadTransitionPatch')");
@@ -109,6 +110,6 @@ assert(videoIndex >= 0 && transitionIndex > videoIndex && transitionIndex < fres
 assert(editorResumeIndex >= 0 && freshIndex > editorResumeIndex, 'Fresh upload identity layer must supersede the old editor-resume prepare wrapper.');
 assert(visualIndex > freshIndex && visualIndex < postVerifyIndex, 'Artwork fingerprinting must override card snapshots before post-upload verification imports them.');
 assert(postVerifyIndex > visualIndex && postVerifyIndex < strictIndex, 'Post-upload card verifier must supersede fresh prepare logic before strict publish layers load.');
-assert(strictIndex > postVerifyIndex && debugIndex > strictIndex && uiIndex > debugIndex, 'Full visible browser wrapper must load after final Spreadshirt prepare/publish logic and before UI injection.');
+assert(strictIndex > postVerifyIndex && debugIndex > strictIndex && uiIndex > debugIndex, 'Hidden browser wrapper must load after final Spreadshirt prepare/publish logic and before UI injection.');
 
-console.log('Spreadshirt exact switch + upload transition handoff + artwork fingerprinting + post-upload card verification + dashboard-route recovery + visible-browser + strict publish verification smoke checks passed.');
+console.log('Spreadshirt exact switch + upload transition handoff + artwork fingerprinting + post-upload card verification + dashboard-route recovery + hidden-browser + strict publish verification smoke checks passed.');
