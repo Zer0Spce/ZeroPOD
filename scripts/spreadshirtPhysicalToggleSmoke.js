@@ -50,11 +50,13 @@ assert(/previous first card was intentionally not opened/.test(fresh), 'Fresh up
 assert(/opened previous design .* instead of the new upload/.test(fresh), 'Fresh upload flow must stop if Spreadshirt opens a pre-existing design ID.');
 assert(/uploadDesignId/.test(fresh) && /uploadCardIdentity/.test(fresh) && /editorUrl/.test(fresh), 'Fresh upload flow must persist exact design identity for later resume/publish verification.');
 
-assert(/MARKETPLACE_DESIGN_EDITOR_RE/.test(transition), 'Spreadshirt upload transition patch must recognize a direct design-editor navigation as completion.');
-assert(/Design products/.test(transition) && /Metadata/.test(transition), 'Spreadshirt upload transition patch must recognize a fully rendered design editor.');
-assert(/designs-index-after-upload-status/.test(transition), 'Spreadshirt upload transition patch must accept the Designs index only after Upload Status was observed and closed.');
+assert(/MARKETPLACE_DESIGN_EDITOR_RE/.test(transition), 'Spreadshirt upload verification must recognize a direct design-editor navigation as positive evidence.');
+assert(/Design products/.test(transition) && /Metadata/.test(transition), 'Spreadshirt upload verification must recognize a fully rendered design editor.');
+assert(!/reason:\s*['"]designs-index-after-upload-status['"]/.test(transition), 'Returning to Designs after Upload Status must never count as upload success by itself.');
+assert(/returnedWithoutConfirmation/.test(transition) && /did not mark the file as uploaded/i.test(transition), 'Unconfirmed Designs returns must fail safely without recording upload success.');
+assert(/UPLOAD_LIMIT_PATTERN/.test(transition) && /UPLOAD_REJECTION_PATTERN/.test(transition), 'Spreadshirt upload verification must detect upload limits and explicit file rejection states.');
 assert(/Current page:/.test(transition) && /Saw Upload Status:/.test(transition) && /Page text:/.test(transition), 'Spreadshirt upload timeout must include useful live-page diagnostics.');
-assert(/videoFlow\.waitForUploadResult = waitForUploadResultReliable/.test(transition), 'Spreadshirt transition patch must replace the brittle literal-banner wait before fresh upload logic imports it.');
+assert(/videoFlow\.waitForUploadResult = waitForUploadResultReliable/.test(transition), 'Strict Spreadshirt upload verification must replace the brittle helper before fresh upload logic imports it.');
 
 assert(/async function clickDesignsNavigation\(page\)/.test(route), 'Spreadshirt Marketplace route recovery must expose a dedicated dashboard Designs-navigation helper.');
 assert(/\/dashboard/.test(route) && /looksLikeDashboard/.test(route), 'Spreadshirt Marketplace route recovery must detect authenticated Dashboard redirects.');
@@ -80,8 +82,8 @@ const freshIndex = bootstrap.indexOf("require('./spreadshirtFreshUploadIdentityP
 const strictIndex = bootstrap.indexOf("require('./spreadshirtStrictPublishVerifyPatch')");
 const debugIndex = bootstrap.indexOf("require('./spreadshirtPublishBrowserDebugPatch')");
 const uiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
-assert(videoIndex >= 0 && transitionIndex > videoIndex && transitionIndex < freshIndex, 'Upload transition compatibility must load after the video helper and before fresh upload identity imports it.');
+assert(videoIndex >= 0 && transitionIndex > videoIndex && transitionIndex < freshIndex, 'Upload verification compatibility must load after the video helper and before fresh upload identity imports it.');
 assert(editorResumeIndex >= 0 && freshIndex > editorResumeIndex, 'Fresh upload identity layer must supersede the old editor-resume prepare wrapper.');
 assert(strictIndex > freshIndex && debugIndex > strictIndex && uiIndex > debugIndex, 'Full visible browser wrapper must load after final Spreadshirt publish logic and before UI injection.');
 
-console.log('Spreadshirt exact switch + upload-transition recovery + dashboard-route recovery + fresh-card identity + visible-browser + strict verification smoke checks passed.');
+console.log('Spreadshirt exact switch + strict upload verification + dashboard-route recovery + fresh-card identity + visible-browser + strict publish verification smoke checks passed.');
