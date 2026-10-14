@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+const sharp = require('sharp');
 const fresh = require('./spreadshirtFreshUploadIdentityPatch');
 
 function stableUrlKey(value) {
@@ -11,9 +11,24 @@ function stableUrlKey(value) {
   return raw;
 }
 
-function sha256(value) {
+async function perceptualFingerprint(buffer) {
   try {
-    return crypto.createHash('sha256').update(value).digest('hex');
+    const { data } = await sharp(buffer)
+      .resize(16, 16, { fit: 'fill' })
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    if (!data?.length) return null;
+    let total = 0;
+    for (const value of data) total += value;
+    const average = total / data.length;
+    let bits = '';
+    for (const value of data) bits += value >= average ? '1' : '0';
+    let hex = '';
+    for (let index = 0; index < bits.length; index += 4) {
+      hex += Number.parseInt(bits.slice(index, index + 4).padEnd(4, '0'), 2).toString(16);
+    }
+    return hex;
   } catch {
     return null;
   }
@@ -69,12 +84,8 @@ async function snapshotMarketplaceCardsWithArtworkFingerprint(page) {
         const match = bg.match(/url\(["']?(.*?)["']?\)/i);
         return stableUrl(match?.[1] || bg);
       }
-      if (el.tagName === 'CANVAS') {
-        return `canvas:${el.width || 0}x${el.height || 0}`;
-      }
-      if (el.tagName === 'SVG') {
-        return `svg:${String(el.outerHTML || '').replace(/\s+/g, ' ').slice(0, 2000)}`;
-      }
+      if (el.tagName === 'CANVAS') return `canvas:${el.width || 0}x${el.height || 0}`;
+      if (el.tagName === 'SVG') return `svg:${String(el.outerHTML || '').replace(/\s+/g, ' ').slice(0, 2000)}`;
       return '';
     };
     const chooseArtwork = (root) => {
@@ -113,7 +124,6 @@ async function snapshotMarketplaceCardsWithArtworkFingerprint(page) {
         if (!visible(node)) continue;
         const rect = node.getBoundingClientRect();
         if (rect.width < 140 || rect.width > 700 || rect.height < 170 || rect.height > 950) continue;
-
         const artwork = chooseArtwork(node);
         if (!artwork) continue;
         const imageRect = artwork.rect;
@@ -121,11 +131,7 @@ async function snapshotMarketplaceCardsWithArtworkFingerprint(page) {
         const designId = href?.match(/\/mp\/designs\/([^/?#]+)/i)?.[1] || attrId(node);
         const text = norm(node.innerText || node.textContent || '');
         const imageKey = artwork.key || '';
-        const domIdentity = designId
-          ? `id:${designId}`
-          : href
-            ? `href:${href}`
-            : null;
+        const domIdentity = designId ? `id:${designId}` : href ? `href:${href}` : null;
 
         card = {
           x: rect.x,
@@ -163,9 +169,6 @@ async function snapshotMarketplaceCardsWithArtworkFingerprint(page) {
     return cards;
   }).catch(() => []);
 
-  // DOM IDs and hrefs are not consistently exposed on Spreadshirt's current
-  // Designs grid. Fingerprint the artwork region itself so a visibly new card can
-  // still be distinguished from every card that existed before the upload.
   for (const card of cards.slice(0, 30)) {
     try {
       const width = Math.max(1, Math.floor(card.imageWidth));
@@ -182,7 +185,7 @@ async function snapshotMarketplaceCardsWithArtworkFingerprint(page) {
             height
           }
         });
-        card.visualHash = sha256(buffer);
+        card.visualHash = await perceptualFingerprint(buffer);
         card.visualIdentity = card.visualHash ? `visual:${card.visualHash}` : null;
       }
     } catch {
@@ -195,9 +198,8 @@ async function snapshotMarketplaceCardsWithArtworkFingerprint(page) {
       ? `artwork:${card.imageKey}`
       : null;
 
-    // The actual artwork is the source of truth. This intentionally outranks the
-    // card's DOM ID/href because Spreadshirt has been exposing unreliable wrapper
-    // identities while the thumbnail itself changes correctly after an upload.
+    // Actual artwork is the source of truth. It outranks Spreadshirt wrapper
+    // IDs/hrefs, which have proven unreliable on the current Designs grid.
     card.identity = realArtworkIdentity || card.visualIdentity || card.domIdentity || null;
   }
 
@@ -208,5 +210,6 @@ fresh.snapshotMarketplaceCards = snapshotMarketplaceCardsWithArtworkFingerprint;
 
 module.exports = {
   snapshotMarketplaceCardsWithArtworkFingerprint,
+  perceptualFingerprint,
   stableUrlKey
 };
