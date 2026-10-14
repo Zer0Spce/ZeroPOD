@@ -7,12 +7,8 @@ function threadStatePath() {
 }
 
 function readThreadState() {
-  try {
-    const file = threadStatePath();
-    return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
-  } catch {
-    return {};
-  }
+  try { const file = threadStatePath(); return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {}; }
+  catch { return {}; }
 }
 
 function writeThreadState(state) {
@@ -26,17 +22,13 @@ function isValidChatGPTThreadUrl(value) {
     const url = new URL(String(value || '').trim());
     if (url.protocol !== 'https:' || url.hostname !== 'chatgpt.com') return false;
     if (url.pathname === '/' || url.pathname === '') return true;
-
     const match = url.pathname.match(/^\/c\/([A-Za-z0-9-]+)$/);
     if (!match) return false;
-
     const id = match[1];
     if (/^local-chatgpt/i.test(id)) return false;
     if (id.length < 20) return false;
     return true;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 SessionManager.prototype.getLastThreadUrl = function getLastThreadUrl(serviceId) {
@@ -51,9 +43,7 @@ SessionManager.prototype.getLastThreadUrl = function getLastThreadUrl(serviceId)
 SessionManager.prototype.rememberThreadUrl = function rememberThreadUrl(serviceId, url) {
   const value = String(url || '').trim();
   if (!value) return null;
-  if (serviceId === 'chatgpt' && !isValidChatGPTThreadUrl(value)) {
-    return this.getLastThreadUrl(serviceId);
-  }
+  if (serviceId === 'chatgpt' && !isValidChatGPTThreadUrl(value)) return this.getLastThreadUrl(serviceId);
   const state = readThreadState();
   state[serviceId] = { ...(state[serviceId] || {}), lastThreadUrl: value, updatedAt: new Date().toISOString() };
   writeThreadState(state);
@@ -134,6 +124,8 @@ require('./spreadshirtCreateNewMenuPatch');
 require('./spreadshirtNoStatusCardHandoffPatch');
 require('./spreadshirtAlphaIpc');
 require('./spreadshirtMarketplaceRoutePatch');
+require('./spreadshirtSessionGatePatch');
+require('./automationSpreadshirtAttentionPatch');
 require('./spreadshirtRecordedPlacementPatch');
 require('./spreadshirtCardDetectionPatch');
 require('./spreadshirtMarketplaceTogglePatch');
