@@ -67,8 +67,8 @@
   }
 
   function wireCard(card) {
-    if (card.dataset.extraWired === '1') return;
-    card.dataset.extraWired = '1';
+    // render() replaces the card contents each refresh, so the new buttons need
+    // fresh listeners every time instead of keeping a stale "already wired" flag.
     card.querySelector('.extra-login')?.addEventListener('click', (event) => login(event.currentTarget.dataset.id, event.currentTarget));
     card.querySelector('.extra-test')?.addEventListener('click', (event) => test(event.currentTarget.dataset.id, event.currentTarget));
     card.querySelector('.extra-logout')?.addEventListener('click', (event) => logout(event.currentTarget.dataset.id, event.currentTarget));
