@@ -4,6 +4,7 @@
 
   const AUTO_KEY = 'zeropod.spreadshirt.automateEverything.v1';
   const ACTIVE_KEY = 'zeropod.spreadshirt.alpha.activeProject';
+  const NEW_CHAT_KEY = 'zeropod.spreadshirt.alpha.newChat';
   let autoAction = null;
   let pollTimer = null;
   let observer = null;
@@ -22,12 +23,30 @@
     root.scrollTop = root.scrollHeight;
   }
 
+  function installFallbackStyles() {
+    if (byId('spreadshirtPolishStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'spreadshirtPolishStyles';
+    style.textContent = `
+      #spreadshirtAlpha .uw-option{position:relative;display:grid;grid-template-columns:28px 1fr;gap:12px;align-items:start;padding:14px 16px;border:1px solid #394251;background:#141920;border-radius:12px;cursor:pointer;margin-top:10px}
+      #spreadshirtAlpha .uw-option-beta{border-color:#62522b;background:#241f12}
+      #spreadshirtAlpha .uw-option input{position:absolute;opacity:0;pointer-events:none}
+      #spreadshirtAlpha .uw-checkmark{width:22px;height:22px;border:2px solid #657083;border-radius:6px;background:#0f1318;display:grid;place-items:center;margin-top:1px}
+      #spreadshirtAlpha .uw-option input:checked + .uw-checkmark{background:#6875ff;border-color:#7f89ff;box-shadow:0 0 0 3px rgba(104,117,255,.14)}
+      #spreadshirtAlpha .uw-option input:checked + .uw-checkmark::after{content:'✓';color:white;font-weight:900;font-size:14px;line-height:1}
+      #spreadshirtAlpha .uw-option strong{display:block;font-size:14px}
+      #spreadshirtAlpha .uw-option-copy{display:block;font-size:12px;color:#98a3b2;line-height:1.45;margin-top:4px}
+      #spreadshirtAlpha .uw-beta-pill{display:inline-flex;align-items:center;padding:2px 6px;border-radius:999px;background:#4a3d16;color:#f1d462;font-size:9px;font-weight:800;letter-spacing:.05em;margin-left:4px}
+    `;
+    document.head.appendChild(style);
+  }
+
   function polishLabels() {
     const redbubbleNav = document.querySelector('.nav[data-view="create"]');
     if (redbubbleNav && redbubbleNav.textContent.trim() !== 'Redbubble') redbubbleNav.textContent = 'Redbubble';
 
     const redbubbleHeading = document.querySelector('#create h2');
-    if (redbubbleHeading && redbubbleHeading.textContent.trim() === 'Workflow') redbubbleHeading.textContent = 'Redbubble';
+    if (redbubbleHeading && /^Workflow$/i.test(redbubbleHeading.textContent.trim())) redbubbleHeading.textContent = 'Redbubble';
 
     const spreadshirtNav = document.querySelector('.nav[data-view="spreadshirtAlpha"]');
     if (spreadshirtNav && spreadshirtNav.textContent.trim() !== 'Spreadshirt') spreadshirtNav.textContent = 'Spreadshirt';
@@ -41,11 +60,47 @@
     });
   }
 
+  function fixNewChatControl() {
+    const input = byId('ssNewChat');
+    const label = input?.closest('label');
+    if (!input || !label) return false;
+
+    installFallbackStyles();
+    label.classList.remove('ss-option');
+    label.classList.add('uw-option', 'ss-new-chat-polished');
+
+    if (!label.querySelector('.uw-checkmark')) {
+      const mark = document.createElement('span');
+      mark.className = 'uw-checkmark';
+      mark.setAttribute('aria-hidden', 'true');
+      input.insertAdjacentElement('afterend', mark);
+    }
+
+    const copy = label.querySelector(':scope > span:not(.uw-checkmark)');
+    if (copy) {
+      copy.querySelector('.ss-small')?.classList.add('uw-option-copy');
+    }
+
+    if (input.dataset.zeroPodNewChatFixed !== '1') {
+      input.dataset.zeroPodNewChatFixed = '1';
+      // Keep compatibility with the original Spreadshirt workflow, which stores
+      // this setting as 1/0 and reads the live checkbox when generation starts.
+      const saved = localStorage.getItem(NEW_CHAT_KEY);
+      if (saved === '1' || saved === '0') input.checked = saved === '1';
+      input.addEventListener('change', () => {
+        localStorage.setItem(NEW_CHAT_KEY, input.checked ? '1' : '0');
+        appendLog(input.checked ? 'New Chat enabled for the next Spreadshirt design.' : 'New Chat disabled; the last working ChatGPT thread will be reused.', '');
+      });
+    }
+    return true;
+  }
+
   function installAutomateEverythingControl() {
     if (byId('ssAutomateEverything')) return true;
     const newChat = byId('ssNewChat')?.closest('label');
     if (!newChat?.parentElement) return false;
 
+    installFallbackStyles();
     const option = document.createElement('label');
     option.className = 'uw-option uw-option-beta ss-automate-everything';
     option.innerHTML = `
@@ -80,6 +135,7 @@
 
   async function runAutoTick() {
     polishLabels();
+    fixNewChatControl();
     installAutomateEverythingControl();
 
     const checkbox = byId('ssAutomateEverything');
@@ -118,10 +174,12 @@
 
   function install() {
     polishLabels();
+    fixNewChatControl();
     installAutomateEverythingControl();
 
     observer = new MutationObserver(() => {
       polishLabels();
+      fixNewChatControl();
       installAutomateEverythingControl();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -129,7 +187,9 @@
     pollTimer = setInterval(() => runAutoTick().catch(() => { autoAction = null; }), 700);
   }
 
-  install();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
+  else install();
+
   window.addEventListener('beforeunload', () => {
     if (pollTimer) clearInterval(pollTimer);
     observer?.disconnect();
