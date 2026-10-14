@@ -3,6 +3,7 @@ const { AutomationQueueController } = require('./automationQueueController');
 const previousProcessRow = AutomationQueueController.prototype.processRow;
 const previousMapProjectToRow = AutomationQueueController.prototype.mapProjectToRow;
 const previousRetry = AutomationQueueController.prototype.retry;
+const POST_UPLOAD_CARD_ERROR = /returned to Designs after Upload Status|could not verify a genuinely new design card|new design card.*not visible/i;
 
 function spreadshirtSelected(row, project) {
   const targets = row?.targets || project?.automationTargets || {};
@@ -63,10 +64,13 @@ AutomationQueueController.prototype.retry = function retrySpreadshirtAttention(r
     try {
       const project = this.projects.read(row.projectId);
       if (spreadshirtSelected(row, project) && project?.spreadshirt?.lastError) {
+        const previousError = project.spreadshirt.lastError;
+        const needsUploadRecovery = POST_UPLOAD_CARD_ERROR.test(String(previousError?.message || ''));
         this.projects.update(project.id, {
           spreadshirt: {
             ...(project.spreadshirt || {}),
             lastError: null,
+            automationUploadRecoveryError: needsUploadRecovery ? previousError : null,
             retryRequestedAt: new Date().toISOString()
           }
         });
@@ -76,4 +80,4 @@ AutomationQueueController.prototype.retry = function retrySpreadshirtAttention(r
   return previousRetry.call(this, rowId);
 };
 
-module.exports = { spreadshirtSelected };
+module.exports = { spreadshirtSelected, POST_UPLOAD_CARD_ERROR };
