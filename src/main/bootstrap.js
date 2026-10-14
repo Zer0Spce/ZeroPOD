@@ -135,6 +135,7 @@ require('./spreadshirtCardDetectionPatch');
 require('./spreadshirtMarketplaceTogglePatch');
 require('./spreadshirtEditorResumePatch');
 require('./spreadshirtFreshUploadIdentityPatch');
+require('./spreadshirtVisualCardFingerprintPatch');
 require('./spreadshirtPostUploadCardVerifyPatch');
 require('./spreadshirtFinalPublishPatch');
 require('./spreadshirtRecordedPublishPatch');
