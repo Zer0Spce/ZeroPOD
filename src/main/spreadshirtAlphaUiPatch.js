@@ -18,6 +18,8 @@ function installSpreadshirtAlpha(window) {
       await window.webContents.executeJavaScript(rendererScript('spreadshirtAlpha.js'));
       await window.webContents.executeJavaScript(rendererScript('spreadshirtRegularExportUiPatch.js'));
       await window.webContents.executeJavaScript(rendererScript('spreadshirtBetaPolish.js'));
+      await window.webContents.executeJavaScript(rendererScript('automationPodTargetsUi.js'));
+      await window.webContents.executeJavaScript(rendererScript('connectionsExtraServices.js'));
     } catch {}
   };
 
@@ -26,7 +28,7 @@ function installSpreadshirtAlpha(window) {
 
   setTimeout(() => {
     if (window.isDestroyed() || window.webContents.isDestroyed()) return;
-    window.webContents.executeJavaScript(`Boolean(document.getElementById('spreadshirtAlpha'))`)
+    window.webContents.executeJavaScript(`Boolean(document.getElementById('spreadshirtAlpha')) && Boolean(window.__zeroPODAutomationTargetsInstalled) && Boolean(window.__zeroPODExtraConnectionsInstalled)`)
       .then((mounted) => { if (!mounted) inject(); })
       .catch(() => {});
   }, 2600);
