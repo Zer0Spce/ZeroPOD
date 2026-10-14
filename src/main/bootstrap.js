@@ -76,6 +76,7 @@ SessionManager.prototype.isValidChatGPTThreadUrl = function isValidChatGPTThread
 require('./backgroundChromeLaunchPatch');
 require('./chatgptChromePatch');
 require('./chromeDockPatch');
+require('./spreadshirtNativeForegroundPatch');
 require('./connectionReliabilityPatch');
 require('./chatgptUploadReadyPatch');
 require('./chatgptNetworkCapturePatch');
@@ -146,6 +147,7 @@ require('./spreadshirtRecordedPublishPatch');
 require('./spreadshirtFinalApprovalSequencePatch');
 require('./spreadshirtStrictPublishVerifyPatch');
 require('./spreadshirtForbiddenMetadataRepairPatch');
+require('./spreadshirtExactGridPublishProofPatch');
 require('./spreadshirtPublishBrowserDebugPatch');
 require('./spreadshirtAlphaUiPatch');
 require('./automateListReliabilityPatch');
