@@ -38,11 +38,14 @@ jobs:
           node --check src/main/spreadshirtForbiddenMetadataRepairPatch.js
           node --check src/main/spreadshirtNativeForegroundPatch.js
           node --check src/main/spreadshirtExactGridPublishProofPatch.js
+          node --check src/main/spreadshirtSavePublishActionPatch.js
+          node --check src/main/spreadshirtCanonicalDesignIdentityPatch.js
           node scripts/exportPlacementSmoke.js
           node scripts/spreadshirtCreateNewSmoke.js
           node scripts/spreadshirtNoStatusHandoffSmoke.js
           node scripts/spreadshirtMarketplaceBridgeSmoke.js
           node scripts/spreadshirtForbiddenMetadataSmoke.js
+          node scripts/spreadshirtSavePublishActionSmoke.js
           npm run check
 
       - name: Build unpacked Windows package
