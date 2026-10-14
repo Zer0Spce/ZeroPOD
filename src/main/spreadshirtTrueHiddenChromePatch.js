@@ -1,10 +1,24 @@
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const { SessionManager } = require('./sessionManager');
 const { feature } = require('./spreadshirtAlphaIpc');
 const { keepAutomationWindowOffscreen, showAutomationWindow } = require('./chromeDockPatch');
 
 function psEscape(value) {
   return String(value || '').replace(/'/g, "''");
+}
+
+function win32TypeDefinition(className = 'ZeroPodHideWin32') {
+  return [
+    "Add-Type -TypeDefinition @'",
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    `public static class ${className} {`,
+    '  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);',
+    '  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);',
+    '  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);',
+    '}',
+    "'@"
+  ];
 }
 
 function runWindowCommand(profilePath, mode = 'hide', watchMs = 0) {
@@ -15,15 +29,7 @@ function runWindowCommand(profilePath, mode = 'hide', watchMs = 0) {
   const show = mode === 'show';
   const duration = Math.max(0, Number(watchMs) || 0);
   const script = [
-    "Add-Type -TypeDefinition @'",
-    'using System;',
-    'using System.Runtime.InteropServices;',
-    'public static class ZeroPodHideWin32 {',
-    '  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);',
-    '  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);',
-    '  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);',
-    '}',
-    "'@",
+    ...win32TypeDefinition('ZeroPodHideWin32'),
     `$profile='${profile}'`,
     `$deadline=(Get-Date).AddMilliseconds(${duration})`,
     '$found=$false',
@@ -39,7 +45,7 @@ function runWindowCommand(profilePath, mode = 'hide', watchMs = 0) {
       ? '    [ZeroPodHideWin32]::ShowWindowAsync($proc.MainWindowHandle,9) | Out-Null; [ZeroPodHideWin32]::BringWindowToTop($proc.MainWindowHandle) | Out-Null; [ZeroPodHideWin32]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null'
       : '    [ZeroPodHideWin32]::ShowWindowAsync($proc.MainWindowHandle,0) | Out-Null',
     '  }',
-    show ? '  break' : '  if ((Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 120 }',
+    show ? '  break' : '  if ((Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 140 }',
     `} while ((Get-Date) -lt $deadline${duration > 0 ? '' : ' -and -not $found'})`,
     show ? 'if ($found) { Write-Output "SHOWN" } else { Write-Output "NO_WINDOW" }' : 'if ($found) { Write-Output "HIDDEN" } else { Write-Output "NO_WINDOW" }'
   ].join('\n');
@@ -66,13 +72,60 @@ function showChromeWindowByProfile(profilePath) {
   return runWindowCommand(profilePath, 'show', 0);
 }
 
+// A cancellable native hide lease is used during every automatic Spreadshirt
+// prepare/publish operation. It continuously applies SW_HIDE to the real browser
+// window, so page.bringToFront() can switch Playwright tabs without ever exposing
+// an unclickable Chrome/Edge window behind ZeroPOD.
+function startChromeHideLease(profilePath) {
+  if (process.platform !== 'win32') return { stop() {} };
+  const profile = psEscape(profilePath);
+  if (!profile) return { stop() {} };
+
+  const script = [
+    ...win32TypeDefinition('ZeroPodHideLeaseWin32'),
+    `$profile='${profile}'`,
+    '$windowPid=$null',
+    'while ($true) {',
+    '  if ($null -eq $windowPid) {',
+    '    $rows=@(Get-CimInstance Win32_Process | Where-Object {',
+    "      ($_.Name -ieq 'chrome.exe' -or $_.Name -ieq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile)",
+    '    })',
+    '    foreach ($row in $rows) {',
+    '      $candidate=Get-Process -Id $row.ProcessId -ErrorAction SilentlyContinue',
+    '      if ($candidate -and $candidate.MainWindowHandle -ne 0) { $windowPid=$row.ProcessId; break }',
+    '    }',
+    '  }',
+    '  if ($null -ne $windowPid) {',
+    '    $proc=Get-Process -Id $windowPid -ErrorAction SilentlyContinue',
+    '    if (-not $proc) { $windowPid=$null }',
+    '    elseif ($proc.MainWindowHandle -ne 0) { [ZeroPodHideLeaseWin32]::ShowWindowAsync($proc.MainWindowHandle,0) | Out-Null }',
+    '    else { $windowPid=$null }',
+    '  }',
+    '  Start-Sleep -Milliseconds 180',
+    '}'
+  ].join('\n');
+
+  const child = spawn(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+    { windowsHide: true, stdio: 'ignore' }
+  );
+  child.unref?.();
+
+  return {
+    stop() {
+      if (!child || child.killed) return;
+      try { child.kill(); } catch {}
+      if (child.pid) execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {});
+    }
+  };
+}
+
 const previousEnsureService = SessionManager.prototype.ensureService;
 SessionManager.prototype.ensureService = async function ensureServiceWithNativeSpreadshirtHide(serviceId) {
   const manualOpen = serviceId === 'spreadshirt' && Boolean(this.__zeroPodSpreadshirtManualOpen);
   const profilePath = serviceId === 'spreadshirt' ? this.getProfilePath(serviceId) : null;
 
-  // Start hiding before Playwright launches so a brand-new automation browser never
-  // gets a chance to sit behind ZeroPOD or appear in the taskbar during startup.
   if (serviceId === 'spreadshirt' && !manualOpen) {
     hideChromeWindowByProfile(profilePath, 9000).catch(() => {});
   }
@@ -103,8 +156,6 @@ SessionManager.prototype.focusAutomationWindow = async function focusAutomationW
   return { ok: true, hidden: true, nativeHidden: Boolean(native?.ok), native };
 };
 
-// Keep the explicit Open Spreadshirt button useful. Automatic runs stay hidden,
-// but a user-requested Open action intentionally restores and focuses the window.
 const previousOpen = feature.open.bind(feature);
 feature.open = async function openSpreadshirtExplicitlyVisible() {
   this.sessions.__zeroPodSpreadshirtManualOpen = true;
@@ -121,4 +172,4 @@ feature.open = async function openSpreadshirtExplicitlyVisible() {
   }
 };
 
-module.exports = { hideChromeWindowByProfile, showChromeWindowByProfile };
+module.exports = { hideChromeWindowByProfile, showChromeWindowByProfile, startChromeHideLease };
