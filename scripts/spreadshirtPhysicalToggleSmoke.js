@@ -7,12 +7,13 @@ const toggleFile = path.join(root, 'src/main/spreadshirtMarketplaceTogglePatch.j
 const strictFile = path.join(root, 'src/main/spreadshirtStrictPublishVerifyPatch.js');
 const freshFile = path.join(root, 'src/main/spreadshirtFreshUploadIdentityPatch.js');
 const transitionFile = path.join(root, 'src/main/spreadshirtUploadTransitionPatch.js');
+const visualFile = path.join(root, 'src/main/spreadshirtVisualCardFingerprintPatch.js');
 const postVerifyFile = path.join(root, 'src/main/spreadshirtPostUploadCardVerifyPatch.js');
 const routeFile = path.join(root, 'src/main/spreadshirtMarketplaceRoutePatch.js');
 const debugFile = path.join(root, 'src/main/spreadshirtPublishBrowserDebugPatch.js');
 const dockFile = path.join(root, 'src/main/chromeDockPatch.js');
 const backgroundFile = path.join(root, 'src/main/backgroundChromeLaunchPatch.js');
-for (const file of [toggleFile, strictFile, freshFile, transitionFile, postVerifyFile, routeFile, debugFile, dockFile, backgroundFile]) {
+for (const file of [toggleFile, strictFile, freshFile, transitionFile, visualFile, postVerifyFile, routeFile, debugFile, dockFile, backgroundFile]) {
   const syntax = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
   if (syntax.status !== 0) throw new Error(syntax.stderr || syntax.stdout || `${path.basename(file)} syntax failed.`);
 }
@@ -21,6 +22,7 @@ const source = fs.readFileSync(toggleFile, 'utf8');
 const strict = fs.readFileSync(strictFile, 'utf8');
 const fresh = fs.readFileSync(freshFile, 'utf8');
 const transition = fs.readFileSync(transitionFile, 'utf8');
+const visual = fs.readFileSync(visualFile, 'utf8');
 const postVerify = fs.readFileSync(postVerifyFile, 'utf8');
 const route = fs.readFileSync(routeFile, 'utf8');
 const debug = fs.readFileSync(debugFile, 'utf8');
@@ -51,6 +53,12 @@ assert(/beforeIdentities/.test(fresh) && /beforeDesignIds/.test(fresh), 'Fresh-c
 assert(/previous first card was intentionally not opened/.test(fresh), 'Fresh upload flow must refuse to fall back to the previous first card.');
 assert(/opened previous design .* instead of the new upload/.test(fresh), 'Fresh upload flow must stop if Spreadshirt opens a pre-existing design ID.');
 assert(/uploadDesignId/.test(fresh) && /uploadCardIdentity/.test(fresh) && /editorUrl/.test(fresh), 'Fresh upload flow must persist exact design identity for later resume/publish verification.');
+
+assert(/snapshotMarketplaceCardsWithArtworkFingerprint/.test(visual), 'Spreadshirt card detection must replace DOM-only snapshots with artwork fingerprinting.');
+assert(/chooseArtwork/.test(visual) && /preferred = el\.tagName === 'IMG'/.test(visual), 'Artwork fingerprinting must prefer the real large image instead of decorative SVG elements.');
+assert(/page\.screenshot/.test(visual) && /visualHash/.test(visual) && /sha256/.test(visual), 'Spreadshirt card detection must retain a visual thumbnail hash fallback.');
+assert(/card\.identity = realArtworkIdentity \|\| card\.visualIdentity \|\| card\.domIdentity/.test(visual), 'Actual artwork identity must outrank unreliable Spreadshirt wrapper identities.');
+assert(/fresh\.snapshotMarketplaceCards = snapshotMarketplaceCardsWithArtworkFingerprint/.test(visual), 'Artwork fingerprint snapshot must override the fresh-card detector before post-upload verification imports it.');
 
 assert(/MARKETPLACE_DESIGN_EDITOR_RE/.test(transition), 'Spreadshirt upload verification must recognize a direct design-editor navigation as positive evidence.');
 assert(/Design products/.test(transition) && /Metadata/.test(transition), 'Spreadshirt upload verification must recognize a fully rendered design editor.');
@@ -92,13 +100,15 @@ const videoIndex = bootstrap.indexOf("require('./spreadshirtVideoFlowPatch')");
 const transitionIndex = bootstrap.indexOf("require('./spreadshirtUploadTransitionPatch')");
 const editorResumeIndex = bootstrap.indexOf("require('./spreadshirtEditorResumePatch')");
 const freshIndex = bootstrap.indexOf("require('./spreadshirtFreshUploadIdentityPatch')");
+const visualIndex = bootstrap.indexOf("require('./spreadshirtVisualCardFingerprintPatch')");
 const postVerifyIndex = bootstrap.indexOf("require('./spreadshirtPostUploadCardVerifyPatch')");
 const strictIndex = bootstrap.indexOf("require('./spreadshirtStrictPublishVerifyPatch')");
 const debugIndex = bootstrap.indexOf("require('./spreadshirtPublishBrowserDebugPatch')");
 const uiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
 assert(videoIndex >= 0 && transitionIndex > videoIndex && transitionIndex < freshIndex, 'Upload transition compatibility must load after the video helper and before fresh upload identity imports it.');
 assert(editorResumeIndex >= 0 && freshIndex > editorResumeIndex, 'Fresh upload identity layer must supersede the old editor-resume prepare wrapper.');
-assert(postVerifyIndex > freshIndex && postVerifyIndex < strictIndex, 'Post-upload card verifier must supersede fresh prepare logic before strict publish layers load.');
+assert(visualIndex > freshIndex && visualIndex < postVerifyIndex, 'Artwork fingerprinting must override card snapshots before post-upload verification imports them.');
+assert(postVerifyIndex > visualIndex && postVerifyIndex < strictIndex, 'Post-upload card verifier must supersede fresh prepare logic before strict publish layers load.');
 assert(strictIndex > postVerifyIndex && debugIndex > strictIndex && uiIndex > debugIndex, 'Full visible browser wrapper must load after final Spreadshirt prepare/publish logic and before UI injection.');
 
-console.log('Spreadshirt exact switch + upload transition handoff + post-upload card verification + dashboard-route recovery + fresh-card identity + visible-browser + strict publish verification smoke checks passed.');
+console.log('Spreadshirt exact switch + upload transition handoff + artwork fingerprinting + post-upload card verification + dashboard-route recovery + visible-browser + strict publish verification smoke checks passed.');
