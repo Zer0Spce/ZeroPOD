@@ -1,4 +1,5 @@
 require('./spreadshirtMarketplaceRoutePatch');
+require('./spreadshirtTrueHiddenChromePatch');
 
 const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
