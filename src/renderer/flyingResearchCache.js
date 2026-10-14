@@ -6,7 +6,7 @@
   if (!api) return;
 
   let cachedCount = 0;
-  let usingCache = false;
+  let cacheTimer = null;
 
   const byId = (id) => document.getElementById(id);
 
@@ -27,7 +27,7 @@
 
   function showCacheNotice() {
     const notice = byId('frNotice');
-    if (!notice) return;
+    if (!notice || cachedCount <= 0) return;
     notice.textContent = `${cachedCount} cached Flying Research design${cachedCount === 1 ? '' : 's'} restored. Click Refresh to fetch the latest results from Flying.`;
     notice.classList.remove('error');
   }
@@ -44,48 +44,45 @@
     button.title = 'Fetch the current Flying Research tool again and replace the cached view.';
     capture.insertAdjacentElement('afterend', button);
 
-    button.addEventListener('click', async () => {
+    button.addEventListener('click', () => {
       if (button.disabled) return;
       button.disabled = true;
       const old = button.textContent;
       button.textContent = 'Refreshing…';
-      usingCache = false;
-      try {
-        const activeTool = document.querySelector('#frTools button.active');
-        if (activeTool) activeTool.click();
-        else byId('frSearch')?.click();
-        // Flying's own action handler owns the asynchronous search. Refresh the
-        // persistent-count indicator after that action has had time to upsert.
-        setTimeout(() => updateCachedCount().catch(() => {}), 2500);
-      } finally {
-        setTimeout(() => {
-          button.disabled = false;
-          button.textContent = old;
-        }, 900);
-      }
+
+      const activeTool = document.querySelector('#frTools button.active');
+      if (activeTool) activeTool.click();
+      else byId('frSearch')?.click();
+
+      // Flying's own action handler owns the asynchronous refresh and persists
+      // imported cards through ResearchStore. We only update the cache indicator.
+      setTimeout(() => updateCachedCount().catch(() => {}), 2500);
+      setTimeout(() => {
+        button.disabled = false;
+        button.textContent = old;
+      }, 900);
     });
     return true;
   }
 
-  // Flying Research already persists imported cards in its ResearchStore. The
-  // old tab ignored that cache on first open and immediately ran a live search.
-  // Intercept only that first-open navigation when cached rows exist, then use
-  // the existing Show Imported path so the original renderer owns `items` and
-  // all card buttons/selection behavior remain unchanged.
+  // Flying Research already persists imported cards in ResearchStore. The old
+  // tab ignored that cache whenever the dynamic tab was opened after a restart
+  // and immediately performed a live search. When cached rows exist, always use
+  // the existing Show Imported action instead. A live network refresh now occurs
+  // only when the user presses the explicit Refresh button (or starts a search).
   document.addEventListener('click', (event) => {
     const nav = event.target.closest?.('.nav[data-view="flyingResearch"]');
-    if (!nav || cachedCount <= 0 || usingCache) return;
+    if (!nav || cachedCount <= 0) return;
 
     event.preventDefault();
     event.stopImmediatePropagation();
-    usingCache = true;
     activateFlyingView(nav);
 
     setTimeout(() => {
       const load = byId('frLoad');
       if (load) {
         load.click();
-        setTimeout(showCacheNotice, 120);
+        setTimeout(showCacheNotice, 250);
       }
     }, 0);
   }, true);
@@ -100,16 +97,26 @@
       }, 200);
     }
 
-    // Keep the cache count current after imports/searches without reloading the
-    // Flying page. This is intentionally lightweight and does not mutate cards.
     document.addEventListener('click', (event) => {
       const id = event.target?.id;
       if (['frCapture', 'frSearch', 'frNextPage'].includes(id)) {
         setTimeout(() => updateCachedCount().catch(() => {}), 2500);
       }
     }, true);
+
+    // Initial automatic searches do not originate from a renderer button click,
+    // so keep the persisted row count synchronized while the tab is active too.
+    cacheTimer = setInterval(() => {
+      if (byId('flyingResearch')?.classList.contains('active-view')) {
+        updateCachedCount().catch(() => {});
+      }
+    }, 3000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
   else install();
+
+  window.addEventListener('beforeunload', () => {
+    if (cacheTimer) clearInterval(cacheTimer);
+  });
 })();
