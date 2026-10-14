@@ -145,6 +145,7 @@ require('./spreadshirtFinalPublishPatch');
 require('./spreadshirtRecordedPublishPatch');
 require('./spreadshirtFinalApprovalSequencePatch');
 require('./spreadshirtStrictPublishVerifyPatch');
+require('./spreadshirtForbiddenMetadataRepairPatch');
 require('./spreadshirtPublishBrowserDebugPatch');
 require('./spreadshirtAlphaUiPatch');
 require('./automateListReliabilityPatch');
