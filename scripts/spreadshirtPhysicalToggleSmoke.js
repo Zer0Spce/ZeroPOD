@@ -7,11 +7,12 @@ const toggleFile = path.join(root, 'src/main/spreadshirtMarketplaceTogglePatch.j
 const strictFile = path.join(root, 'src/main/spreadshirtStrictPublishVerifyPatch.js');
 const freshFile = path.join(root, 'src/main/spreadshirtFreshUploadIdentityPatch.js');
 const transitionFile = path.join(root, 'src/main/spreadshirtUploadTransitionPatch.js');
+const postVerifyFile = path.join(root, 'src/main/spreadshirtPostUploadCardVerifyPatch.js');
 const routeFile = path.join(root, 'src/main/spreadshirtMarketplaceRoutePatch.js');
 const debugFile = path.join(root, 'src/main/spreadshirtPublishBrowserDebugPatch.js');
 const dockFile = path.join(root, 'src/main/chromeDockPatch.js');
 const backgroundFile = path.join(root, 'src/main/backgroundChromeLaunchPatch.js');
-for (const file of [toggleFile, strictFile, freshFile, transitionFile, routeFile, debugFile, dockFile, backgroundFile]) {
+for (const file of [toggleFile, strictFile, freshFile, transitionFile, postVerifyFile, routeFile, debugFile, dockFile, backgroundFile]) {
   const syntax = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
   if (syntax.status !== 0) throw new Error(syntax.stderr || syntax.stdout || `${path.basename(file)} syntax failed.`);
 }
@@ -20,6 +21,7 @@ const source = fs.readFileSync(toggleFile, 'utf8');
 const strict = fs.readFileSync(strictFile, 'utf8');
 const fresh = fs.readFileSync(freshFile, 'utf8');
 const transition = fs.readFileSync(transitionFile, 'utf8');
+const postVerify = fs.readFileSync(postVerifyFile, 'utf8');
 const route = fs.readFileSync(routeFile, 'utf8');
 const debug = fs.readFileSync(debugFile, 'utf8');
 const dock = fs.readFileSync(dockFile, 'utf8');
@@ -44,7 +46,7 @@ assert(/removePublishLedgerEntry/.test(strict) && /reverted-false-positive/.test
 
 assert(/forceMarketplaceDesigns/.test(fresh), 'Fresh Spreadshirt workflow must force the Designs index instead of inheriting a previous editor.');
 assert(/Captured \$\{beforeCards\.length\} existing Spreadshirt design card/.test(fresh), 'Fresh upload flow must snapshot existing design cards before upload.');
-assert(/waitForGenuinelyNewDesignCard/.test(fresh), 'Fresh upload flow must wait for a genuinely new card after upload.');
+assert(/waitForGenuinelyNewDesignCard/.test(fresh), 'Fresh upload flow must retain genuinely-new-card identity protection.');
 assert(/beforeIdentities/.test(fresh) && /beforeDesignIds/.test(fresh), 'Fresh-card detection must compare against pre-upload card identities and design IDs.');
 assert(/previous first card was intentionally not opened/.test(fresh), 'Fresh upload flow must refuse to fall back to the previous first card.');
 assert(/opened previous design .* instead of the new upload/.test(fresh), 'Fresh upload flow must stop if Spreadshirt opens a pre-existing design ID.');
@@ -52,11 +54,22 @@ assert(/uploadDesignId/.test(fresh) && /uploadCardIdentity/.test(fresh) && /edit
 
 assert(/MARKETPLACE_DESIGN_EDITOR_RE/.test(transition), 'Spreadshirt upload verification must recognize a direct design-editor navigation as positive evidence.');
 assert(/Design products/.test(transition) && /Metadata/.test(transition), 'Spreadshirt upload verification must recognize a fully rendered design editor.');
-assert(!/reason:\s*['"]designs-index-after-upload-status['"]/.test(transition), 'Returning to Designs after Upload Status must never count as upload success by itself.');
-assert(/returnedWithoutConfirmation/.test(transition) && /did not mark the file as uploaded/i.test(transition), 'Unconfirmed Designs returns must fail safely without recording upload success.');
+assert(!/reason:\s*['"]designs-index-after-upload-status['"]/.test(transition), 'Returning to Designs after Upload Status must never count as confirmed upload success by itself.');
+assert(/needsCardVerification:\s*true/.test(transition) && /designs-index-needs-card-verification/.test(transition), 'Unconfirmed Designs returns must hand off to fresh-card verification instead of throwing or recording success.');
+assert(/confirmed:\s*false/.test(transition) && /confirmed:\s*true/.test(transition), 'Upload transition results must distinguish confirmed UI success from pending card verification.');
 assert(/UPLOAD_LIMIT_PATTERN/.test(transition) && /UPLOAD_REJECTION_PATTERN/.test(transition), 'Spreadshirt upload verification must detect upload limits and explicit file rejection states.');
 assert(/Current page:/.test(transition) && /Saw Upload Status:/.test(transition) && /Page text:/.test(transition), 'Spreadshirt upload timeout must include useful live-page diagnostics.');
-assert(/videoFlow\.waitForUploadResult = waitForUploadResultReliable/.test(transition), 'Strict Spreadshirt upload verification must replace the brittle helper before fresh upload logic imports it.');
+assert(/videoFlow\.waitForUploadResult = waitForUploadResultReliable/.test(transition), 'Spreadshirt upload transition verifier must replace the brittle helper before fresh upload logic imports it.');
+
+assert(/feature\.prepare = async function prepareWithPostUploadCardVerification/.test(postVerify), 'Post-upload card verification must own the final Spreadshirt prepare flow.');
+assert(/const uploadResult = await waitForUploadResult/.test(postVerify) && /uploadResult\?\.needsCardVerification/.test(postVerify), 'Prepare flow must inspect the pending card-verification handoff explicitly.');
+assert(/waitForVerifiedNewCard/.test(postVerify) && /snapshotMarketplaceCards/.test(postVerify), 'Pending uploads must be verified against the pre-upload card snapshot.');
+assert(/markUploadAccepted/.test(postVerify) && /uploadAcceptedAt/.test(postVerify), 'Upload acceptance must be recorded only by the verified-identity layer.');
+const freshWaitCall = postVerify.indexOf('const fresh = await waitForVerifiedNewCard');
+const cardAcceptCall = postVerify.indexOf('markUploadAccepted(projectId, file, designTitle, beforeIds, {', freshWaitCall);
+assert(freshWaitCall >= 0 && cardAcceptCall > freshWaitCall, 'Ambiguous Designs returns must verify a new card before recording upload acceptance.');
+assert(/status: project\.spreadshirt\?\.uploadAcceptedAt \? 'uploaded-draft' : 'recovery-needed'/.test(postVerify), 'A verified upload must remain preserved if a later editor step fails.');
+assert(/no previous design was opened/i.test(postVerify), 'Card verification failures must preserve previous-design protection.');
 
 assert(/async function clickDesignsNavigation\(page\)/.test(route), 'Spreadshirt Marketplace route recovery must expose a dedicated dashboard Designs-navigation helper.');
 assert(/\/dashboard/.test(route) && /looksLikeDashboard/.test(route), 'Spreadshirt Marketplace route recovery must detect authenticated Dashboard redirects.');
@@ -79,11 +92,13 @@ const videoIndex = bootstrap.indexOf("require('./spreadshirtVideoFlowPatch')");
 const transitionIndex = bootstrap.indexOf("require('./spreadshirtUploadTransitionPatch')");
 const editorResumeIndex = bootstrap.indexOf("require('./spreadshirtEditorResumePatch')");
 const freshIndex = bootstrap.indexOf("require('./spreadshirtFreshUploadIdentityPatch')");
+const postVerifyIndex = bootstrap.indexOf("require('./spreadshirtPostUploadCardVerifyPatch')");
 const strictIndex = bootstrap.indexOf("require('./spreadshirtStrictPublishVerifyPatch')");
 const debugIndex = bootstrap.indexOf("require('./spreadshirtPublishBrowserDebugPatch')");
 const uiIndex = bootstrap.indexOf("require('./spreadshirtAlphaUiPatch')");
-assert(videoIndex >= 0 && transitionIndex > videoIndex && transitionIndex < freshIndex, 'Upload verification compatibility must load after the video helper and before fresh upload identity imports it.');
+assert(videoIndex >= 0 && transitionIndex > videoIndex && transitionIndex < freshIndex, 'Upload transition compatibility must load after the video helper and before fresh upload identity imports it.');
 assert(editorResumeIndex >= 0 && freshIndex > editorResumeIndex, 'Fresh upload identity layer must supersede the old editor-resume prepare wrapper.');
-assert(strictIndex > freshIndex && debugIndex > strictIndex && uiIndex > debugIndex, 'Full visible browser wrapper must load after final Spreadshirt publish logic and before UI injection.');
+assert(postVerifyIndex > freshIndex && postVerifyIndex < strictIndex, 'Post-upload card verifier must supersede fresh prepare logic before strict publish layers load.');
+assert(strictIndex > postVerifyIndex && debugIndex > strictIndex && uiIndex > debugIndex, 'Full visible browser wrapper must load after final Spreadshirt prepare/publish logic and before UI injection.');
 
-console.log('Spreadshirt exact switch + strict upload verification + dashboard-route recovery + fresh-card identity + visible-browser + strict publish verification smoke checks passed.');
+console.log('Spreadshirt exact switch + upload transition handoff + post-upload card verification + dashboard-route recovery + fresh-card identity + visible-browser + strict publish verification smoke checks passed.');
