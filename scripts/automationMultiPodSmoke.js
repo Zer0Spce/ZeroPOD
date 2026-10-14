@@ -26,9 +26,10 @@ assert(/require\('\.\/automationPodTargetsPatch'\)/.test(ipc), 'Automation POD r
 assert(/data-pod-target="redbubble"/.test(targetsUi) && /data-pod-target="spreadshirt"/.test(targetsUi), 'Automation UI must show Redbubble and Spreadshirt checkboxes.');
 assert(/at least one POD destination/i.test(targetsUi), 'Automation UI must prevent rows with no selected POD target.');
 assert(/patch:\s*\{\s*targets\s*\}/.test(targetsUi), 'Automation target checkbox changes must persist to the queue row.');
-assert(/observer\.observe\(root, \{ childList: true \}\)/.test(targetsUi), 'Automation target UI should observe only queue-row replacement.');
-assert(!/observer\.observe\(document\.documentElement/.test(targetsUi), 'Automation target UI must not observe its own subtree changes and create a mutation loop.');
-assert(/block\.dataset\.signature/.test(targetsUi), 'Automation target UI must avoid rebuilding unchanged target controls every poll.');
+assert(/Object\.defineProperty\(root, 'innerHTML'/.test(targetsUi), 'Automation POD controls must be injected synchronously into the normal row render.');
+assert(/transformAutomationRows/.test(targetsUi) && /targetMarkup/.test(targetsUi), 'Automation row render transformer is missing.');
+assert(!/new MutationObserver/.test(targetsUi), 'Automation POD target UI must not use a competing MutationObserver renderer.');
+assert(/very same paint/.test(targetsUi), 'Automation target render should document the no-flicker same-paint contract.');
 
 assert(/NEW_CHAT_KEY/.test(polish) && /zeroPodNewChatFixed/.test(polish), 'Spreadshirt New Chat control repair is missing.');
 assert(/localStorage\.setItem\(NEW_CHAT_KEY, input\.checked \? '1' : '0'\)/.test(polish), 'Spreadshirt New Chat state must persist in the format the workflow reads.');
@@ -43,4 +44,4 @@ assert(/ShowWindowAsync\(\$proc\.MainWindowHandle,0\)/.test(hidden), 'Native Spr
 assert(/startChromeHideLease/.test(flow), 'Spreadshirt prepare/publish must hold a native hide lease for the full action.');
 assert(/nativeLease\.stop\(\)/.test(flow), 'Native hide lease must be released after the automatic action.');
 
-console.log('Automation multi-POD + Spreadshirt controls + extra Connections smoke passed.');
+console.log('Automation multi-POD + no-flicker target rendering + Spreadshirt controls + extra Connections smoke passed.');
