@@ -50,22 +50,23 @@ async function waitForUploadResultReliable(page, timeoutMs = 60000) {
 
     if (/Upload status/i.test(text)) sawUploadStatus = true;
     if (/Upload successful/i.test(text)) {
-      return { ok: true, sawUploadStatus, reason: 'upload-success-text', url };
+      return { ok: true, confirmed: true, sawUploadStatus, reason: 'upload-success-text', url };
     }
 
     // A newly-created design editor is strong, independent evidence that the
     // file really reached Spreadshirt even when its success banner disappears.
     if (MARKETPLACE_DESIGN_EDITOR_RE.test(url)) {
-      return { ok: true, sawUploadStatus, reason: 'direct-design-editor', url };
+      return { ok: true, confirmed: true, sawUploadStatus, reason: 'direct-design-editor', url };
     }
     if (/Design products/i.test(text) && /Metadata/i.test(text)) {
-      return { ok: true, sawUploadStatus, reason: 'design-editor-ready', url };
+      return { ok: true, confirmed: true, sawUploadStatus, reason: 'design-editor-ready', url };
     }
 
-    // IMPORTANT: returning to the Designs index is NOT upload success. We used to
-    // accept this transition after Upload Status closed, which produced false
-    // positives when Spreadshirt never accepted the file. Give the UI a short
-    // grace period for a late success/editor transition, then fail safely.
+    // Returning to the Designs index is neither success nor failure. Spreadshirt
+    // currently does this after some real uploads without ever leaving the
+    // “Upload successful” banner visible. Hand the flow off to the fresh-card
+    // verifier, which compares the post-upload card set against the pre-upload
+    // snapshot before ZeroPOD records upload success.
     const dialogVisible = await uploadDialogVisible(page);
     const returnedWithoutConfirmation = sawUploadStatus
       && MARKETPLACE_DESIGNS_INDEX_RE.test(url)
@@ -74,11 +75,15 @@ async function waitForUploadResultReliable(page, timeoutMs = 60000) {
 
     if (returnedWithoutConfirmation) {
       if (!returnedToDesignsAt) returnedToDesignsAt = Date.now();
-      if (Date.now() - returnedToDesignsAt >= 5000) {
-        throw new Error(
-          'Spreadshirt closed Upload Status and returned to Designs without any verified “Upload successful” confirmation or new design editor. ' +
-          'ZeroPOD did not mark the file as uploaded. Retry is safe because no upload success was recorded.'
-        );
+      if (Date.now() - returnedToDesignsAt >= 2500) {
+        return {
+          ok: true,
+          confirmed: false,
+          needsCardVerification: true,
+          sawUploadStatus,
+          reason: 'designs-index-needs-card-verification',
+          url
+        };
       }
     } else {
       returnedToDesignsAt = 0;
@@ -89,7 +94,7 @@ async function waitForUploadResultReliable(page, timeoutMs = 60000) {
 
   const diagnostics = compactDiagnosticText(lastText);
   throw new Error(
-    `Spreadshirt upload did not reach a verified completion state within ${Math.round(timeoutMs / 1000)} seconds. ` +
+    `Spreadshirt upload did not reach a verifiable completion state within ${Math.round(timeoutMs / 1000)} seconds. ` +
     `Current page: ${lastUrl || 'unknown'}. Saw Upload Status: ${sawUploadStatus ? 'yes' : 'no'}. ` +
     `Returned to Designs without confirmation: ${returnedToDesignsAt ? 'yes' : 'no'}. ` +
     `Page text: ${diagnostics || 'unavailable'}`
