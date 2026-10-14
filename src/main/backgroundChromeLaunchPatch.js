@@ -1,9 +1,8 @@
 const childProcess = require('child_process');
 
-// Automation Chrome should never jump in front of ZeroPOD. Inject an off-screen
-// window position only for Chrome processes that expose a remote-debugging port.
-// Native Connections -> Login Chrome has no remote-debugging flag and remains
-// completely visible for manual sign-in / CAPTCHA / 2FA.
+// Keep every automation Chrome fully rendered but hidden/off-screen so it never
+// steals focus from ZeroPOD. Connections -> Login uses the normal visible browser
+// handoff and is intentionally not affected by this automation-only patch.
 if (!childProcess.__zeroPodBackgroundChromePatched) {
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = function zeroPodBackgroundSpawn(file, args = [], options = {}) {
@@ -15,7 +14,7 @@ if (!childProcess.__zeroPodBackgroundChromePatched) {
       const hasPosition = list.some((arg) => /^--window-position=/i.test(String(arg)));
       const hasSize = list.some((arg) => /^--window-size=/i.test(String(arg)));
       if (!hasPosition) list.push('--window-position=-20000,-20000');
-      if (!hasSize) list.push('--window-size=1280,860');
+      if (!hasSize) list.push('--window-size=1280,900');
       if (!list.some((arg) => String(arg) === '--no-first-run')) list.push('--no-first-run');
       return originalSpawn.call(childProcess, file, list, { ...options, windowsHide: true });
     }

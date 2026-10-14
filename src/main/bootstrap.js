@@ -1,19 +1,14 @@
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
 const { SessionManager } = require('./sessionManager');
 
 function threadStatePath() {
-  return path.join(app.getPath('userData'), 'thread-state.json');
+  return path.join(require('electron').app.getPath('userData'), 'thread-state.json');
 }
 
 function readThreadState() {
-  try {
-    const file = threadStatePath();
-    return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
-  } catch {
-    return {};
-  }
+  try { const file = threadStatePath(); return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {}; }
+  catch { return {}; }
 }
 
 function writeThreadState(state) {
@@ -27,17 +22,13 @@ function isValidChatGPTThreadUrl(value) {
     const url = new URL(String(value || '').trim());
     if (url.protocol !== 'https:' || url.hostname !== 'chatgpt.com') return false;
     if (url.pathname === '/' || url.pathname === '') return true;
-
     const match = url.pathname.match(/^\/c\/([A-Za-z0-9-]+)$/);
     if (!match) return false;
-
     const id = match[1];
     if (/^local-chatgpt/i.test(id)) return false;
     if (id.length < 20) return false;
     return true;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 SessionManager.prototype.getLastThreadUrl = function getLastThreadUrl(serviceId) {
@@ -52,9 +43,7 @@ SessionManager.prototype.getLastThreadUrl = function getLastThreadUrl(serviceId)
 SessionManager.prototype.rememberThreadUrl = function rememberThreadUrl(serviceId, url) {
   const value = String(url || '').trim();
   if (!value) return null;
-  if (serviceId === 'chatgpt' && !isValidChatGPTThreadUrl(value)) {
-    return this.getLastThreadUrl(serviceId);
-  }
+  if (serviceId === 'chatgpt' && !isValidChatGPTThreadUrl(value)) return this.getLastThreadUrl(serviceId);
   const state = readThreadState();
   state[serviceId] = { ...(state[serviceId] || {}), lastThreadUrl: value, updatedAt: new Date().toISOString() };
   writeThreadState(state);
@@ -77,6 +66,7 @@ SessionManager.prototype.isValidChatGPTThreadUrl = function isValidChatGPTThread
 require('./backgroundChromeLaunchPatch');
 require('./chatgptChromePatch');
 require('./chromeDockPatch');
+require('./spreadshirtNativeForegroundPatch');
 require('./connectionReliabilityPatch');
 require('./chatgptUploadReadyPatch');
 require('./chatgptNetworkCapturePatch');
@@ -122,7 +112,40 @@ require('./researchTrademarkFilterPatch');
 require('./researchIpcPatch');
 require('./flyingResearchPaginationPatch');
 require('./flyingResearchInfiniteScrollPatch');
+require('./flyingSpreadshirtPatch');
 require('./flyingResearchIpc');
+require('./flyingResearchCacheUiPatch');
+require('./spreadshirtRegularExportPatch');
+require('./spreadshirtJourneyReliabilityPatch');
+require('./spreadshirtUploadReliabilityPatch');
+require('./spreadshirtVideoFlowPatch');
+require('./spreadshirtUploadTransitionPatch');
+require('./spreadshirtCreateNewReliabilityPatch');
+require('./spreadshirtCreateNewMenuPatch');
+require('./spreadshirtNoStatusCardHandoffPatch');
+require('./spreadshirtAlphaIpc');
+require('./spreadshirtMarketplaceRoutePatch');
+require('./spreadshirtSessionGatePatch');
+require('./automationSpreadshirtAttentionPatch');
+require('./spreadshirtRecordedPlacementPatch');
+require('./spreadshirtCardDetectionPatch');
+require('./spreadshirtMarketplaceTogglePatch');
+require('./spreadshirtMarketplaceToggleBridgePatch');
+require('./spreadshirtEditorResumePatch');
+require('./spreadshirtFreshUploadIdentityPatch');
+require('./spreadshirtVisualCardFingerprintPatch');
+require('./spreadshirtPostUploadCardVerifyPatch');
+require('./spreadshirtAutomationUploadRecoveryPatch');
+require('./spreadshirtFinalPublishPatch');
+require('./spreadshirtRecordedPublishPatch');
+require('./spreadshirtFinalApprovalSequencePatch');
+require('./spreadshirtStrictPublishVerifyPatch');
+require('./spreadshirtSavePublishActionPatch');
+require('./spreadshirtForbiddenMetadataRepairPatch');
+require('./spreadshirtCanonicalDesignIdentityPatch');
+require('./spreadshirtExactGridPublishProofPatch');
+require('./spreadshirtPublishBrowserDebugPatch');
+require('./spreadshirtAlphaUiPatch');
 require('./automateListReliabilityPatch');
 require('./automateListIpc');
 require('./storeCachePatch');

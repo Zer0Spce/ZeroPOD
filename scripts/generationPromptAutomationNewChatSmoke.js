@@ -73,10 +73,15 @@ assert.match(injector, /executeJavaScript/);
 assert.match(injector, /automationNewChatOption/);
 
 const bootstrap = read('src/main/bootstrap.js');
+assert.match(bootstrap, /SessionManager\.prototype\.getLastThreadUrl\s*=/, 'Bootstrap must define getLastThreadUrl before ChatGPT thread preference patches load.');
+assert.match(bootstrap, /SessionManager\.prototype\.rememberThreadUrl\s*=/, 'Bootstrap must define rememberThreadUrl.');
+assert.match(bootstrap, /SessionManager\.prototype\.clearLastThreadUrl\s*=/, 'Bootstrap must define clearLastThreadUrl.');
+assert.match(bootstrap, /SessionManager\.prototype\.isValidChatGPTThreadUrl\s*=/, 'Bootstrap must retain ChatGPT thread URL validation.');
+assert(bootstrap.indexOf('SessionManager.prototype.getLastThreadUrl') < bootstrap.indexOf("require('./chatThreadPreferencePatch')"), 'Thread-session methods must be defined before chatThreadPreferencePatch loads.');
 assert(bootstrap.indexOf("require('./chatThreadPreferencePatch')") < bootstrap.indexOf("require('./generationPromptPatch')"));
 assert(bootstrap.indexOf("require('./automationControlPatch')") < bootstrap.indexOf("require('./automationNewChatUiPatch')"));
 assert(bootstrap.indexOf("require('./automationNewChatUiPatch')") < bootstrap.indexOf("require('./sourceImageIpc')"));
 assert(bootstrap.indexOf("require('./sourceImageIpc')") < bootstrap.indexOf("require('./main')"));
 
 require('./sourceImageAutofetchSmoke');
-console.log('Generation prompt + Automation New Chat + source-image autofetch smoke passed.');
+console.log('Generation prompt + Automation New Chat + source-image autofetch + thread-session bootstrap smoke passed.');
