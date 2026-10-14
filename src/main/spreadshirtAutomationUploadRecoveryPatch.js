@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const sharp = require('sharp');
 const { feature } = require('./spreadshirtAlphaIpc');
 const {
@@ -19,6 +20,14 @@ function activity(projectId, label, type = 'spreadshirt') {
 
 function isAutomationProject(project) {
   return project?.spreadshirt?.source === 'automation' || project?.automationTargets?.spreadshirt === true;
+}
+
+function recoveryMessage(project) {
+  return String(
+    project?.spreadshirt?.lastError?.message
+    || project?.spreadshirt?.automationUploadRecoveryError?.message
+    || ''
+  );
 }
 
 async function artworkHashes(file) {
@@ -68,7 +77,7 @@ async function openCard(page, card) {
 async function recoverUploadedAutomationDesign(projectId) {
   let project = feature.projects.read(projectId);
   if (!isAutomationProject(project) || project.spreadshirt?.uploadAcceptedAt) return false;
-  if (!POST_UPLOAD_CARD_ERROR.test(String(project.spreadshirt?.lastError?.message || ''))) return false;
+  if (!POST_UPLOAD_CARD_ERROR.test(recoveryMessage(project))) return false;
 
   const file = project.spreadshirt?.pngPath || project.finalPngPath;
   const expectedHashes = await artworkHashes(file);
@@ -104,12 +113,13 @@ async function recoverUploadedAutomationDesign(projectId) {
             status: 'uploaded-draft',
             uploadAcceptedAt: project.spreadshirt?.uploadAcceptedAt || new Date().toISOString(),
             uploadDesignTitle: project.spreadshirt?.uploadDesignTitle || project.spreadshirt?.metadata?.title || null,
-            uploadFileName: project.spreadshirt?.uploadFileName || (file ? require('path').basename(file) : null),
+            uploadFileName: project.spreadshirt?.uploadFileName || (file ? path.basename(file) : null),
             uploadCardHref: candidate.href || opened.editorUrl,
             uploadCardIdentity: candidate.identity || (opened.designId ? `id:${opened.designId}` : null),
             uploadDesignId: opened.designId || candidate.designId || null,
             editorUrl: opened.editorUrl,
             lastError: null,
+            automationUploadRecoveryError: null,
             automationRecoveredUploadAt: new Date().toISOString()
           }
         });
@@ -132,8 +142,9 @@ feature.prepare = async function prepareWithAutomationUploadRecovery(projectId) 
 
   // If the previous Automation attempt already uploaded but failed only while
   // identifying the new Designs card, recover that exact artwork BEFORE the
-  // normal prepare path gets any chance to upload again.
-  if (isAutomationProject(project) && !project.spreadshirt?.uploadAcceptedAt && POST_UPLOAD_CARD_ERROR.test(String(project.spreadshirt?.lastError?.message || ''))) {
+  // normal prepare path gets any chance to upload again. Retry preserves this
+  // reason in automationUploadRecoveryError so no daily upload slot is wasted.
+  if (isAutomationProject(project) && !project.spreadshirt?.uploadAcceptedAt && POST_UPLOAD_CARD_ERROR.test(recoveryMessage(project))) {
     const recovered = await recoverUploadedAutomationDesign(projectId);
     if (recovered) return previousPrepare(projectId);
     throw new Error('Spreadshirt appears to have accepted the previous Automation upload, but ZeroPOD could not safely match it to the current artwork. The existing upload is protected from a duplicate. Open Spreadshirt to inspect it, then Retry.');
@@ -157,5 +168,6 @@ feature.prepare = async function prepareWithAutomationUploadRecovery(projectId) 
 
 module.exports = {
   recoverUploadedAutomationDesign,
-  POST_UPLOAD_CARD_ERROR
+  POST_UPLOAD_CARD_ERROR,
+  recoveryMessage
 };
