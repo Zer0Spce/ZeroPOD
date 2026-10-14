@@ -1,15 +1,25 @@
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const root = path.join(__dirname, '..');
-const main = (file) => fs.readFileSync(path.join(root, 'src', 'main', file), 'utf8');
+const mainPath = (file) => path.join(root, 'src', 'main', file);
+const main = (file) => fs.readFileSync(mainPath(file), 'utf8');
 const renderer = (file) => fs.readFileSync(path.join(root, 'src', 'renderer', file), 'utf8');
 const assert = (value, message) => { if (!value) throw new Error(message); };
+
+for (const file of ['spreadshirtSessionGatePatch.js', 'automationSpreadshirtAttentionPatch.js']) {
+  const syntax = spawnSync(process.execPath, ['--check', mainPath(file)], { encoding: 'utf8' });
+  if (syntax.status !== 0) throw new Error(syntax.stderr || syntax.stdout || `${file} syntax failed.`);
+}
 
 const routing = main('automationPodTargetsPatch.js');
 const ipc = main('spreadshirtAlphaIpc.js');
 const hidden = main('spreadshirtTrueHiddenChromePatch.js');
 const flow = main('spreadshirtPublishBrowserDebugPatch.js');
+const bootstrap = main('bootstrap.js');
+const sessionGate = main('spreadshirtSessionGatePatch.js');
+const attention = main('automationSpreadshirtAttentionPatch.js');
 const uiPatch = main('spreadshirtAlphaUiPatch.js');
 const targetsUi = renderer('automationPodTargetsUi.js');
 const polish = renderer('spreadshirtBetaPolish.js');
@@ -31,6 +41,17 @@ assert(/transformAutomationRows/.test(targetsUi) && /targetMarkup/.test(targetsU
 assert(!/new MutationObserver/.test(targetsUi), 'Automation POD target UI must not use a competing MutationObserver renderer.');
 assert(/very same paint/.test(targetsUi), 'Automation target render should document the no-flicker same-paint contract.');
 
+assert(/openDesigns\(page\)/.test(sessionGate), 'Spreadshirt gate must verify the live Marketplace Designs page.');
+assert(/authStatus:\s*'verified'/.test(sessionGate), 'Successful live Spreadshirt gate verification must refresh the saved session state.');
+assert(/Only downgrade/.test(sessionGate), 'Transient route failures must not erase a valid Spreadshirt login.');
+assert(/authStatus:\s*'needs-login'/.test(sessionGate), 'A real Spreadshirt login screen must still block the gate.');
+assert(/require\('\.\/spreadshirtSessionGatePatch'\)/.test(bootstrap), 'Live Spreadshirt session gate patch is not loaded.');
+
+assert(/spreadshirt\.lastError/.test(attention), 'Spreadshirt Automation failures must be persisted on the project.');
+assert(/status:\s*'needs-attention'/.test(attention) && /spreadshirt-attention/.test(attention), 'Spreadshirt failures must remain paused for user attention.');
+assert(/previousRetry\.call/.test(attention) && /lastError:\s*null/.test(attention), 'Manual Retry must clear the Spreadshirt attention latch.');
+assert(/require\('\.\/automationSpreadshirtAttentionPatch'\)/.test(bootstrap), 'Spreadshirt attention patch is not loaded.');
+
 assert(/NEW_CHAT_KEY/.test(polish) && /zeroPodNewChatFixed/.test(polish), 'Spreadshirt New Chat control repair is missing.');
 assert(/localStorage\.setItem\(NEW_CHAT_KEY, input\.checked \? '1' : '0'\)/.test(polish), 'Spreadshirt New Chat state must persist in the format the workflow reads.');
 assert(/Automate everything/.test(polish), 'Spreadshirt Automate everything BETA control must remain available.');
@@ -44,4 +65,4 @@ assert(/ShowWindowAsync\(\$proc\.MainWindowHandle,0\)/.test(hidden), 'Native Spr
 assert(/startChromeHideLease/.test(flow), 'Spreadshirt prepare/publish must hold a native hide lease for the full action.');
 assert(/nativeLease\.stop\(\)/.test(flow), 'Native hide lease must be released after the automatic action.');
 
-console.log('Automation multi-POD + no-flicker target rendering + Spreadshirt controls + extra Connections smoke passed.');
+console.log('Automation multi-POD + no-flicker UI + live Spreadshirt session verification + attention pause smoke passed.');
