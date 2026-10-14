@@ -1,6 +1,6 @@
 const { execFile } = require('child_process');
 const { SessionManager } = require('./sessionManager');
-const { showAutomationWindow } = require('./chromeDockPatch');
+const { showAutomationWindow, keepAutomationWindowOffscreen } = require('./chromeDockPatch');
 
 function focusChromeWindowByProfile(profilePath) {
   if (process.platform !== 'win32') return Promise.resolve({ ok: false, reason: 'non-windows' });
@@ -52,12 +52,22 @@ function focusChromeWindowByProfile(profilePath) {
 }
 
 SessionManager.prototype.focusAutomationWindow = async function focusAutomationWindow(serviceId, suppliedPage = null) {
-  this.setAutomationWindowVisible?.(serviceId, true);
   let page = suppliedPage;
   if (!page || page.isClosed?.()) {
     const result = await this.ensureService(serviceId);
     page = result.page;
   }
+
+  // Spreadshirt now behaves like the rest of ZeroPOD automation: keep Chrome
+  // fully rendered off-screen and never raise its native window during prepare,
+  // publish, verification, success, or error handling.
+  if (serviceId === 'spreadshirt') {
+    this.setAutomationWindowVisible?.(serviceId, false);
+    await keepAutomationWindowOffscreen(page).catch(() => {});
+    return { ok: true, hidden: true, nativeFocused: false };
+  }
+
+  this.setAutomationWindowVisible?.(serviceId, true);
   await showAutomationWindow(page).catch(() => {});
   await page.bringToFront().catch(() => {});
   const native = await focusChromeWindowByProfile(this.getProfilePath(serviceId)).catch((error) => ({ ok: false, reason: error?.message || String(error) }));
