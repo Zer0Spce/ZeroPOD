@@ -16,6 +16,7 @@ function installSpreadshirtAlpha(window) {
     try {
       await window.webContents.executeJavaScript(rendererScript('spreadshirtAlpha.js'));
       await window.webContents.executeJavaScript(rendererScript('spreadshirtRegularExportUiPatch.js'));
+      await window.webContents.executeJavaScript(rendererScript('spreadshirtBetaPolish.js'));
     } catch {}
   };
 
