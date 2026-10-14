@@ -125,9 +125,7 @@ async function snapshotMarketplaceCardsWithArtworkFingerprint(page) {
           ? `id:${designId}`
           : href
             ? `href:${href}`
-            : imageKey
-              ? `artwork:${imageKey}`
-              : null;
+            : null;
 
         card = {
           x: rect.x,
@@ -172,30 +170,35 @@ async function snapshotMarketplaceCardsWithArtworkFingerprint(page) {
     try {
       const width = Math.max(1, Math.floor(card.imageWidth));
       const height = Math.max(1, Math.floor(card.imageHeight));
-      if (width < 70 || height < 70) continue;
-      const buffer = await page.screenshot({
-        type: 'png',
-        animations: 'disabled',
-        caret: 'hide',
-        clip: {
-          x: Math.max(0, card.imageDocX),
-          y: Math.max(0, card.imageDocY),
-          width,
-          height
-        }
-      });
-      card.visualHash = sha256(buffer);
-      card.visualIdentity = card.visualHash ? `visual:${card.visualHash}` : null;
+      if (width >= 70 && height >= 70) {
+        const buffer = await page.screenshot({
+          type: 'png',
+          animations: 'disabled',
+          caret: 'hide',
+          clip: {
+            x: Math.max(0, card.imageDocX),
+            y: Math.max(0, card.imageDocY),
+            width,
+            height
+          }
+        });
+        card.visualHash = sha256(buffer);
+        card.visualIdentity = card.visualHash ? `visual:${card.visualHash}` : null;
+      }
     } catch {
       card.visualHash = null;
       card.visualIdentity = null;
     }
 
-    // Prefer a stable real design ID/href when Spreadshirt exposes one. Otherwise
-    // use the artwork URL, and finally the screenshot fingerprint as the identity.
     card.imageKey = stableUrlKey(card.imageKey);
-    if (!card.identity && card.imageKey) card.identity = `artwork:${card.imageKey}`;
-    if (!card.identity && card.visualIdentity) card.identity = card.visualIdentity;
+    const realArtworkIdentity = card.imageKey && !/^(canvas|svg):/i.test(card.imageKey)
+      ? `artwork:${card.imageKey}`
+      : null;
+
+    // The actual artwork is the source of truth. This intentionally outranks the
+    // card's DOM ID/href because Spreadshirt has been exposing unreliable wrapper
+    // identities while the thumbnail itself changes correctly after an upload.
+    card.identity = realArtworkIdentity || card.visualIdentity || card.domIdentity || null;
   }
 
   return cards;
