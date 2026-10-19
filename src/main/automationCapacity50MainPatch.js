@@ -1,8 +1,20 @@
 const { FlyingResearchFeature } = require('./flyingResearchFeature');
+const { AutomationQueueStore } = require('./automationQueueStore');
 
 const MAX_AUTOMATION_ROWS = 50;
 const CHUNK_SIZE = 15;
 const previousAddToAutomation = FlyingResearchFeature.prototype.addToAutomation;
+const previousAddRows = AutomationQueueStore.prototype.addRows;
+
+AutomationQueueStore.prototype.addRows = function addRowsWith50RowLimit(rows = []) {
+  const incoming = Array.isArray(rows) ? rows : [];
+  const current = this.read();
+  const available = Math.max(0, MAX_AUTOMATION_ROWS - current.rows.length);
+  if (incoming.length > available) {
+    throw new Error(`Automation List can hold a maximum of ${MAX_AUTOMATION_ROWS} rows.`);
+  }
+  return previousAddRows.call(this, incoming);
+};
 
 function fakeLengthRows(rows) {
   return new Proxy(rows, {
