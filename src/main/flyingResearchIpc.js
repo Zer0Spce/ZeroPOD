@@ -43,6 +43,9 @@ app.whenReady().then(() => {
 });
 app.on('before-quit', () => sessions.closeAll().catch(() => {}));
 
+// Raise the shared Automation List capacity to 50, including Flying imports.
+require('./automationCapacity50MainPatch');
+
 // Restore cached Flying Research cards on first tab open and expose an explicit
 // Refresh button instead of automatically replacing the last imported results.
 require('./flyingResearchCacheUiPatch');
