@@ -46,11 +46,13 @@ jobs:
           node --check src/main/spreadshirtAutomationUploadRecoveryPatch.js
           node --check src/main/automationSpreadshirtAttentionPatch.js
           node --check src/main/automationPodTargetsPatch.js
+          node --check src/main/automationCapacity50MainPatch.js
           node --check src/main/flyingResearchCacheUiPatch.js
           node --check src/renderer/spreadshirtBetaPolish.js
           node --check src/renderer/automationPodTargetsUi.js
           node --check src/renderer/connectionsExtraServices.js
           node --check src/renderer/flyingResearchCache.js
+          node --check src/renderer/automationCapacity50.js
           node scripts/exportPlacementSmoke.js
           node scripts/spreadshirtCreateNewSmoke.js
           node scripts/spreadshirtNoStatusHandoffSmoke.js
@@ -62,6 +64,7 @@ jobs:
           node scripts/automationMultiPodSmoke.js
           node scripts/spreadshirtAutomationRecoverySmoke.js
           node scripts/flyingResearchCacheSmoke.js
+          node scripts/automationCapacity50Smoke.js
           npm run check
 
       - name: Build unpacked Windows package
