@@ -53,6 +53,7 @@ jobs:
           node --check src/renderer/connectionsExtraServices.js
           node --check src/renderer/flyingResearchCache.js
           node --check src/renderer/automationCapacity50.js
+          node --check src/renderer/automationHeaderLock.js
           node scripts/exportPlacementSmoke.js
           node scripts/spreadshirtCreateNewSmoke.js
           node scripts/spreadshirtNoStatusHandoffSmoke.js
