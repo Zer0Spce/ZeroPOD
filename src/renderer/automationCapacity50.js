@@ -5,12 +5,25 @@
   const MAX_ROWS = 50;
   const esc = (value) => window.automationEscape(value);
 
+  // #544 layered a second 50-row refresher on top of Automation's original
+  // 30-row poll. Stop the original poll first so the UI has one renderer only.
+  try {
+    if (typeof automationPoll !== 'undefined' && automationPoll) {
+      clearInterval(automationPoll);
+      automationPoll = null;
+    }
+  } catch {}
+  if (window.__zeroPODAutomationCapacity50Poll) {
+    clearInterval(window.__zeroPODAutomationCapacity50Poll);
+    window.__zeroPODAutomationCapacity50Poll = null;
+  }
+
   function updateCopy() {
     const heading = document.querySelector('#automation .az-head p.muted');
-    if (heading) heading.textContent = heading.textContent.replace(/Queue up to \d+/, `Queue up to ${MAX_ROWS}`);
+    if (heading) heading.textContent = 'Queue up to 50 image + source URL jobs. ZeroPOD runs the proven workflow from generation through verified Redbubble publish, one row at a time.';
 
     const jobHint = document.querySelector('#automation .az-panel .heading-row .last-seen');
-    if (jobHint) jobHint.textContent = jobHint.textContent.replace(/up to \d+/, `up to ${MAX_ROWS}`);
+    if (jobHint) jobHint.textContent = 'Starts empty. Press + to add only the rows you need, up to 50.';
 
     document.querySelectorAll('#flyingResearch .fr-small').forEach((node) => {
       node.textContent = node.textContent.replace(/(?:15|30)-row limit/gi, `${MAX_ROWS}-row limit`);
@@ -105,13 +118,15 @@
     await refresh50();
   }
 
-  // Replace the global refresh function used by polling/navigation so all 50 rows
-  // remain visible instead of the original renderer slicing the queue to 30.
+  // Replace the global functions used by navigation/Flying handoff. Assign both
+  // through the page binding and window so existing listeners see the same function.
+  try { refreshAutomationListV2 = refresh50; } catch {}
+  try { addAutomationRowV2 = addRow50; } catch {}
   window.refreshAutomationListV2 = refresh50;
   window.addAutomationRowV2 = addRow50;
 
-  // The original + button captured the old addAutomationRowV2 function directly.
-  // Clone it once to remove that old listener and bind the 50-row implementation.
+  // The original + button captured the old 30-row function at registration time.
+  // Clone it once to remove that listener and bind only the 50-row implementation.
   const oldAdd = document.getElementById('automationAddRowV2');
   if (oldAdd?.parentNode) {
     const replacement = oldAdd.cloneNode(true);
@@ -121,6 +136,11 @@
 
   updateCopy();
   refresh50().catch((error) => window.automationLog?.(`Refresh error: ${error.message || error}`, 'error'));
+
+  window.__zeroPODAutomationCapacity50Poll = setInterval(() => {
+    const visible = document.getElementById('automation')?.classList.contains('active-view');
+    if (visible) refresh50().catch((error) => window.automationLog?.(`Refresh error: ${error.message || error}`, 'error'));
+  }, 1200);
 
   let attempts = 0;
   const copyTimer = setInterval(() => {
