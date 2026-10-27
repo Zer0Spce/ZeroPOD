@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     logout: (serviceId) => ipcRenderer.invoke('connections:logout', serviceId)
   },
   pod: { rules: () => ipcRenderer.invoke('pod:rules') },
+  promptSettings: {
+    get: () => ipcRenderer.invoke('prompt-settings:get'),
+    save: (payload) => ipcRenderer.invoke('prompt-settings:save', payload),
+    reset: () => ipcRenderer.invoke('prompt-settings:reset'),
+    pasteClipboard: () => ipcRenderer.invoke('prompt-settings:paste-clipboard')
+  },
   projects: {
     list: () => ipcRenderer.invoke('projects:list'),
     archived: () => ipcRenderer.invoke('projects:archived'),
