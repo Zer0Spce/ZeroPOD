@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
@@ -152,6 +152,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('task:pause', () => taskWorkload.pause());
   ipcMain.handle('task:stop', () => taskWorkload.stop());
   ipcMain.handle('task:clear', (_e, status) => taskWorkload.clear(status));
+  ipcMain.handle('task:open-output-folder', async () => {
+    const folder = taskWorkload.outputDir;
+    fs.mkdirSync(folder, { recursive: true });
+    const error = await shell.openPath(folder);
+    if (error) throw new Error(`Could not open Task Workload output folder: ${error}`);
+    return { ok: true, path: folder };
+  });
   ipcMain.handle('automation:list', () => automation.snapshot());
   ipcMain.handle('automation:add', (_event, rows) => automation.addRows(rows));
   ipcMain.handle('automation:update', (_event, { rowId, patch }) => automation.updateRow(rowId, patch));
