@@ -56,6 +56,7 @@ jobs:
           node --check src/renderer/automationHeaderLock.js
           node --check src/renderer/promptSettings.js
           node --check src/main/taskWorkload.js
+          node --check src/main/taskWorkloadSpreadsheet.js
           node --check src/renderer/taskWorkload.js
           node scripts/exportPlacementSmoke.js
           node scripts/spreadshirtCreateNewSmoke.js
@@ -70,6 +71,7 @@ jobs:
           node scripts/flyingResearchCacheSmoke.js
           node scripts/automationCapacity50Smoke.js
           node scripts/promptSettingsSmoke.js
+          node scripts/taskWorkloadSpreadsheetSmoke.js
           npm run check
 
       - name: Build unpacked Windows package
