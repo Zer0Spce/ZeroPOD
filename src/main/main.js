@@ -11,6 +11,7 @@ const { ExportController } = require('./exportController');
 const { RedbubbleController } = require('./redbubbleController');
 const { AutomationQueueStore } = require('./automationQueueStore');
 const { AutomationQueueController } = require('./automationQueueController');
+const { TaskWorkload } = require('./taskWorkload');
 const { WorkspaceManager } = require('./workspaceManager');
 const { parseCsv, toCsv } = require('./automationCsv');
 const { readAutomationWorkbook, writeAutomationWorkbook } = require('./automationSpreadsheet');
@@ -46,6 +47,7 @@ const exporter = new ExportController({ projects });
 const redbubble = new RedbubbleController({ sessions, projects });
 const automationStore = new AutomationQueueStore();
 const automation = new AutomationQueueController({ store: automationStore, projects, chatgpt, metadata, vectorizer, exporter, redbubble });
+const taskWorkload = new TaskWorkload({projects,chatgpt,vectorizer,exporter});
 const workspace = new WorkspaceManager({ projects, automationStore });
 
 function enrich(project) { return { ...project, workflow: workflow.describe(project) }; }
@@ -144,6 +146,12 @@ app.whenReady().then(async () => {
     if (!validation.ok) throw new Error(`Quality check failed: ${validation.errors.join(' ')}`); return redbubble.publish(projectId);
   });
 
+  ipcMain.handle('task:list', () => taskWorkload.snapshot());
+  ipcMain.handle('task:set', (_e, rows) => taskWorkload.setRows(rows));
+  ipcMain.handle('task:start', () => taskWorkload.start());
+  ipcMain.handle('task:pause', () => taskWorkload.pause());
+  ipcMain.handle('task:stop', () => taskWorkload.stop());
+  ipcMain.handle('task:clear', (_e, status) => taskWorkload.clear(status));
   ipcMain.handle('automation:list', () => automation.snapshot());
   ipcMain.handle('automation:add', (_event, rows) => automation.addRows(rows));
   ipcMain.handle('automation:update', (_event, { rowId, patch }) => automation.updateRow(rowId, patch));
