@@ -12,6 +12,7 @@ const { RedbubbleController } = require('./redbubbleController');
 const { AutomationQueueStore } = require('./automationQueueStore');
 const { AutomationQueueController } = require('./automationQueueController');
 const { TaskWorkload } = require('./taskWorkload');
+const { readTaskWorkbook } = require('./taskWorkloadSpreadsheet');
 const { WorkspaceManager } = require('./workspaceManager');
 const { parseCsv, toCsv } = require('./automationCsv');
 const { readAutomationWorkbook, writeAutomationWorkbook } = require('./automationSpreadsheet');
@@ -152,6 +153,17 @@ app.whenReady().then(async () => {
   ipcMain.handle('task:pause', () => taskWorkload.pause());
   ipcMain.handle('task:stop', () => taskWorkload.stop());
   ipcMain.handle('task:clear', (_e, status) => taskWorkload.clear(status));
+  ipcMain.handle('task:import-xlsx', async () => {
+    if (taskWorkload.running) throw new Error('Stop Task Workload before importing another list.');
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: 'Add Task Workload List (.xlsx)',
+      properties: ['openFile'],
+      filters: [{ name: 'Excel workbooks', extensions: ['xlsx'] }]
+    });
+    if (picked.canceled || !picked.filePaths?.length) return { canceled: true };
+    const imported = await readTaskWorkbook(picked.filePaths[0]);
+    return { canceled: false, ...taskWorkload.appendRows(imported), file: path.basename(picked.filePaths[0]) };
+  });
   ipcMain.handle('task:open-output-folder', async () => {
     const folder = taskWorkload.outputDir;
     fs.mkdirSync(folder, { recursive: true });
