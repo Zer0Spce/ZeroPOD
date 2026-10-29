@@ -9,6 +9,23 @@ class TaskWorkload {
  save(){fs.mkdirSync(path.dirname(this.file),{recursive:true});fs.writeFileSync(this.file,JSON.stringify({rows:this.rows},null,2))}
  snapshot(){return {rows:this.rows,running:this.running,paused:this.paused,outputDir:this.outputDir}}
  setRows(rows){if(this.running)throw Error('Pause or stop before editing the queue.');if(!Array.isArray(rows)||rows.length>50)throw Error('Maximum 50 jobs');this.rows=rows.map((r,i)=>{const row=Object.fromEntries(FIELDS.map(k=>[k,String(r[k]||'').trim()]));const old=this.rows[i];return {...row,status:old&&FIELDS.every(k=>old[k]===row[k])?old.status:'pending',output:old&&FIELDS.every(k=>old[k]===row[k])?old.output:null,error:null}});this.save();return this.snapshot()}
+ appendRows(rows){
+  if(this.running)throw Error('Stop Task Workload before importing an Excel list.');
+  if(!Array.isArray(rows))throw Error('Invalid Excel import.');
+  const fields=FIELDS;
+  const seen=new Set(this.rows.map(row=>String(row.id||'').trim().toLowerCase()).filter(Boolean));
+  const additions=[];let skipped=0;
+  for(const incoming of rows){
+   const row=Object.fromEntries(fields.map(key=>[key,String(incoming[key]||'').trim()]));
+   if(!row.id||!row.niche||!row.idea)throw Error('Imported rows require ID, Niche and Idea.');
+   const id=row.id.toLowerCase();
+   if(seen.has(id)){skipped++;continue}
+   seen.add(id);additions.push({...row,status:'pending',output:null,error:null});
+  }
+  if(this.rows.length+additions.length>50)throw Error('Task Workload supports 50 rows total. Clear old jobs or import fewer rows.');
+  this.rows.push(...additions);this.save();
+  return {added:additions.length,skipped,snapshot:this.snapshot()};
+ }
  clear(status){if(this.running)throw Error('Stop queue before clearing.');this.rows=this.rows.filter(r=>r.status!==status);this.save();return this.snapshot()}
  pause(){this.paused=true;return this.snapshot()}
  stop(){this.stopRequested=true;this.paused=false;return this.snapshot()}
