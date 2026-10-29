@@ -73,6 +73,14 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     settings: () => ipcRenderer.invoke('spreadshirt:settings'),
     updateSettings: (patch) => ipcRenderer.invoke('spreadshirt:update-settings', patch)
   },
+  taskWorkload: {
+    list: () => ipcRenderer.invoke('task:list'),
+    set: rows => ipcRenderer.invoke('task:set', rows),
+    start: () => ipcRenderer.invoke('task:start'),
+    pause: () => ipcRenderer.invoke('task:pause'),
+    stop: () => ipcRenderer.invoke('task:stop'),
+    clear: status => ipcRenderer.invoke('task:clear', status)
+  },
   automation: {
     list: () => ipcRenderer.invoke('automation:list'),
     add: (rows) => ipcRenderer.invoke('automation:add', rows),
