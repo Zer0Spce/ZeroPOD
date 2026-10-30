@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     start: () => ipcRenderer.invoke('task:start'),
     pause: () => ipcRenderer.invoke('task:pause'),
     stop: () => ipcRenderer.invoke('task:stop'),
+    retryRow: index => ipcRenderer.invoke('task:retry-row', index),
+    preview: index => ipcRenderer.invoke('task:preview', index),
     clear: status => ipcRenderer.invoke('task:clear', status),
     openOutputFolder: () => ipcRenderer.invoke('task:open-output-folder'),
     importXlsx: () => ipcRenderer.invoke('task:import-xlsx')
