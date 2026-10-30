@@ -152,6 +152,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('task:start', () => taskWorkload.start());
   ipcMain.handle('task:pause', () => taskWorkload.pause());
   ipcMain.handle('task:stop', () => taskWorkload.stop());
+  ipcMain.handle('task:retry-row', (_e, index) => taskWorkload.retryRow(index));
+  ipcMain.handle('task:preview', (_e, index) => taskWorkload.preview(index));
   ipcMain.handle('task:clear', (_e, status) => taskWorkload.clear(status));
   ipcMain.handle('task:import-xlsx', async () => {
     if (taskWorkload.running) throw new Error('Stop Task Workload before importing another list.');
