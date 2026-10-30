@@ -11,6 +11,9 @@
     ['difference', 'Difference from Original']
   ];
   const CHAT_KEY = 'zeropod.taskWorkload.newChat.v1';
+  const REFERENCE_KEY = 'zeropod.taskWorkload.showReference.v1';
+  const COLUMN_WIDTHS = { id:130,niche:168,idea:240,text:190,reference:209,difference:240 };
+  const imageCache = new Map();
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[char]));
@@ -21,6 +24,7 @@
   let dirty = false;
   let busy = false;
   let snapshotSignature = '';
+  let showReference = localStorage.getItem(REFERENCE_KEY) === 'true';
 
   const style = document.createElement('style');
   style.id = 'taskWorkloadWideStyles';
@@ -62,6 +66,22 @@
     '#taskWorkload .tw-output-item strong{color:var(--text,#fff);overflow:hidden;text-overflow:ellipsis}',
     '#taskWorkload .tw-output-item span{color:#85ddb0;overflow-wrap:anywhere}',
     '#taskWorkload .tw-output-item.failed span{color:#ffb4bc}',
+    '#taskWorkload .tw-ref-toggle{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border,#29313c);border-radius:9px;background:var(--surface-2,#1b2027);padding:9px 12px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}',
+    '#taskWorkload .tw-ref-toggle input{width:17px;height:17px;margin:0;accent-color:var(--accent,#3b82f6)}',
+    '#taskWorkload .tw-table{min-width:1030px}',
+    '#taskWorkload .tw-action-cell{white-space:nowrap}',
+    '#taskWorkload .tw-retry{font-size:11px;padding:9px 10px;white-space:nowrap}',
+    '#taskWorkload .tw-output-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(225px,1fr));gap:14px;margin-top:18px}',
+    '#taskWorkload .tw-output-item{display:flex;flex-direction:column;gap:10px;min-width:0;padding:12px;border:1px solid var(--border,#29313c);background:var(--surface-2,#1b2027);border-radius:12px}',
+    '#taskWorkload .tw-output-item strong{font-size:13px;white-space:normal}',
+    '#taskWorkload .tw-output-item span{font-size:11px;line-height:1.5;word-break:break-word}',
+    '#taskWorkload .tw-thumb{width:100%;height:210px;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:9px;background:var(--bg-elevated,#101318);border:1px solid var(--border,#29313c);font-size:11px;color:var(--muted,#9ca6b6);text-align:center}',
+    '#taskWorkload .tw-thumb img{display:block;width:100%;height:100%;object-fit:contain}',
+    '#taskWorkload .tw-card-head{display:flex;gap:8px;align-items:flex-start;justify-content:space-between}',
+    '#taskWorkload .tw-card-actions{margin-top:auto;display:flex;gap:8px}',
+    '#taskWorkload .tw-card-actions button{font-size:11px;padding:7px 10px}',
+    '#taskWorkload .tw-card-path{max-height:45px;overflow:auto;overflow-wrap:anywhere}',
+    '#taskWorkload .tw-output-item.failed .tw-card-error{color:#ffb4bc}',
     '@media(max-width:1050px){.content:has(#taskWorkload.active-view){padding:22px 14px}.tw-output-item{grid-template-columns:1fr!important}}'
   ].join('');
   document.head.appendChild(style);
@@ -78,15 +98,11 @@
         '<button id="twImport">Add List (.xlsx)</button>' +
         '<button id="twSave">Save Queue</button>' +
         '<button id="twOpenOutput">Open Output Folder</button>' +
+        '<label class="tw-ref-toggle"><input type="checkbox" id="twShowReference">Show Reference Link</label>' +
       '</div>' +
       '<div class="tw-table-wrap">' +
-        '<table class="tw-table"><colgroup>' +
-          '<col style="width:38px"><col style="width:130px"><col style="width:168px">' +
-          '<col style="width:240px"><col style="width:190px"><col style="width:209px">' +
-          '<col style="width:185px"><col style="width:120px">' +
-        '</colgroup><thead><tr><th>#</th>' +
-          FIELDS.map(field => '<th>' + esc(field[1]) + '</th>').join('') +
-          '<th>Status</th></tr></thead><tbody id="twRows"></tbody></table>' +
+        '<table class="tw-table"><colgroup id="twColumns"></colgroup>' +
+        '<thead><tr id="twHeader"></tr></thead><tbody id="twRows"></tbody></table>' +
       '</div>' +
       '<div class="tw-new-chat"><label>' +
         '<input type="checkbox" id="twNewChat">' +
@@ -109,6 +125,13 @@
 
   const body = document.getElementById('twRows');
   const newChatCheckbox = document.getElementById('twNewChat');
+  const referenceCheckbox = document.getElementById('twShowReference');
+  referenceCheckbox.checked = showReference;
+  referenceCheckbox.addEventListener('change', () => {
+    showReference = referenceCheckbox.checked;
+    localStorage.setItem(REFERENCE_KEY, String(showReference));
+    render();
+  });
   newChatCheckbox.checked = localStorage.getItem(CHAT_KEY) === 'true';
   newChatCheckbox.addEventListener('change', () => {
     localStorage.setItem(CHAT_KEY, String(newChatCheckbox.checked));
@@ -123,9 +146,17 @@
       '<span>Working <strong>' + stats.working + '</strong></span>' +
       '<span>Failed <strong>' + stats.failed + '</strong></span>';
 
+    const visibleFields = FIELDS.filter(field => field[0] !== 'reference' || showReference);
+    const colWidths = [38, ...visibleFields.map(field => COLUMN_WIDTHS[field[0]]), 120, 125];
+    document.getElementById('twColumns').innerHTML = colWidths.map(width =>
+      '<col style="width:' + width + 'px">').join('');
+    document.getElementById('twHeader').innerHTML =
+      '<th>#</th>' + visibleFields.map(field => '<th>' + esc(field[1]) + '</th>').join('') +
+      '<th>Status</th><th>Actions</th>';
+
     body.innerHTML = rows.map((row, i) =>
       '<tr><td class="tw-index">' + (i + 1) + '</td>' +
-      FIELDS.map(field => {
+      visibleFields.map(field => {
         const key = field[0];
         const value = esc(row[key] || '');
         return '<td><input data-i="' + i + '" data-k="' + key +
@@ -134,17 +165,33 @@
       }).join('') +
       '<td title="' + esc(row.error || row.output || '') + '">' +
         '<span class="tw-status-badge ' + esc(row.status || 'pending') + '">' + esc(row.status || 'pending') + '</span>' +
-      '</td></tr>'
+      '</td><td class="tw-action-cell"><button class="tw-retry" data-retry-index="' + i + '" ' +
+      ((running || busy || !row.id || !row.niche || !row.idea) ? 'disabled' : '') +
+      '>Retry Design</button></td></tr>'
     ).join('');
 
-    const recent = rows.filter(row => row.output || row.error);
+    const recent = rows.map((row, index) => ({ row, index })).filter(({row}) => row.output || row.error);
     document.getElementById('twOutputs').innerHTML = recent.length ?
-      recent.map(row =>
-        '<div class="tw-output-item' + (row.error ? ' failed' : '') + '">' +
-          '<strong>' + esc(row.id + ' · ' + row.niche) + '</strong>' +
-          '<span>' + esc(row.error || row.output) + '</span>' +
-        '</div>'
-      ).join('') : '<p class="tw-hint">No exported files or job errors yet.</p>';
+      recent.map(({row, index}) =>
+        '<article class="tw-output-item' + (row.error ? ' failed' : '') + '">' +
+          '<div class="tw-thumb">' +
+            (row.output
+              ? '<img class="tw-preview" data-preview-index="' + index + '" data-preview-version="' +
+                esc(row.completedAt || 'original') + '" alt="PNG preview for ' + esc(row.id) + '">'
+              : '<span>Generation not completed</span>') +
+          '</div>' +
+          '<div class="tw-card-head"><strong>' + esc(row.id + ' · ' + row.niche) + '</strong>' +
+            '<span class="tw-status-badge ' + esc(row.status || 'pending') + '">' +
+              esc(row.status || 'pending') + '</span></div>' +
+          (row.output ? '<span class="tw-card-path" title="' + esc(row.output) + '">' +
+            esc(row.output.split(/[\\/]/).pop()) + '</span>' : '') +
+          (row.error ? '<span class="tw-card-error">' + esc(row.error) + '</span>' : '') +
+          '<div class="tw-card-actions"><button data-retry-index="' + index + '"' +
+            ((running || busy || !row.id || !row.niche || !row.idea) ? ' disabled' : '') +
+            '>Retry Design</button></div>' +
+        '</article>'
+      ).join('') : '<p class="tw-hint">Completed PNGs will appear here with image previews.</p>';
+    hydratePreviews();
 
     document.getElementById('twSummary').textContent =
       rows.length + ' / 50 jobs · ' + (running ? (paused ? 'Paused' : 'Running') : 'Stopped') +
@@ -161,6 +208,59 @@
     document.getElementById('twClearFailed').disabled = busy || running;
     newChatCheckbox.disabled = running || busy;
   }
+
+  // Only small thumbnails cross the preload bridge, never full 4500x5400 images.
+  function hydratePreviews() {
+    for (const image of document.querySelectorAll('#twOutputs img.tw-preview')) {
+      const index = Number(image.dataset.previewIndex);
+      const row = rows[index];
+      if (!row || !row.output) continue;
+      const key = row.output + '|' + (row.completedAt || 'original');
+      image.dataset.cacheKey = key;
+      const cached = imageCache.get(key);
+      if (cached) {
+        image.src = cached;
+        continue;
+      }
+      window.zeroPOD.taskWorkload.preview(index).then(result => {
+        if (!image.isConnected || image.dataset.cacheKey !== key) return;
+        if (result?.src) {
+          imageCache.set(key, result.src);
+          image.src = result.src;
+        } else {
+          image.replaceWith(document.createTextNode('PNG file not found'));
+        }
+      }).catch(() => {
+        if (image.isConnected) image.replaceWith(document.createTextNode('Preview unavailable'));
+      });
+    }
+  }
+
+  async function startRetry(index) {
+    return act(async () => {
+      if (dirty) await save();
+      const current = await window.zeroPOD.taskWorkload.list();
+      if (current.running) throw new Error('Another job is running. Stop it before retrying a specific row.');
+      const row = current.rows[index];
+      if (!row) throw new Error('The selected job no longer exists.');
+      if (!row.id || !row.niche || !row.idea) throw new Error('ID, Niche and Idea are required for retry.');
+      if (newChatCheckbox.checked) {
+        document.getElementById('twImportNote').textContent = 'Preparing one fresh ChatGPT chat for this design retry…';
+        await window.zeroPOD.generation.newChat();
+      }
+      await window.zeroPOD.taskWorkload.retryRow(index);
+      document.getElementById('twImportNote').textContent =
+        'Retrying only row ' + (index + 1) + '. The previous PNG will be replaced only after successful export.';
+    });
+  }
+
+  function handleRetry(event) {
+    const button = event.target.closest('button[data-retry-index]');
+    if (!button || button.disabled) return;
+    startRetry(Number(button.dataset.retryIndex));
+  }
+  body.addEventListener('click', handleRetry);
+  document.getElementById('twOutputs').addEventListener('click', handleRetry);
 
   body.addEventListener('input', event => {
     const control = event.target;
