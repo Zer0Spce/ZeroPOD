@@ -80,10 +80,23 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     pause: () => ipcRenderer.invoke('task:pause'),
     stop: () => ipcRenderer.invoke('task:stop'),
     retryRow: index => ipcRenderer.invoke('task:retry-row', index),
+    retryRows: indices => ipcRenderer.invoke('task:retry-rows', indices),
     preview: index => ipcRenderer.invoke('task:preview', index),
     clear: status => ipcRenderer.invoke('task:clear', status),
     openOutputFolder: () => ipcRenderer.invoke('task:open-output-folder'),
     importXlsx: () => ipcRenderer.invoke('task:import-xlsx')
+  },
+  taskMarcin: {
+    list: () => ipcRenderer.invoke('marcin:list'),
+    set: rows => ipcRenderer.invoke('marcin:set',rows),
+    start: () => ipcRenderer.invoke('marcin:start'),
+    pause: () => ipcRenderer.invoke('marcin:pause'),
+    stop: () => ipcRenderer.invoke('marcin:stop'),
+    retryRows: indices => ipcRenderer.invoke('marcin:retry-rows',indices),
+    preview: index => ipcRenderer.invoke('marcin:preview',index),
+    clear: status => ipcRenderer.invoke('marcin:clear',status),
+    importXlsx: () => ipcRenderer.invoke('marcin:import-xlsx'),
+    openOutputFolder: () => ipcRenderer.invoke('marcin:open-output-folder')
   },
   automation: {
     list: () => ipcRenderer.invoke('automation:list'),
