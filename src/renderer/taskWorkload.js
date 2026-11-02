@@ -24,7 +24,8 @@
     '.tw-table .tw-check,.tw-table .tw-number{text-align:center}',
     '.tw-table input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent,#3b82f6)}',
     '.tw-status{font-weight:700;font-size:11px;color:#9bc2f1}',
-    '.tw-status.completed{color:#85ddb0}.tw-status.failed{color:#ffb4bc}',
+    '.tw-status.completed{color:#85ddb0}.tw-status.failed{color:#ffb4bc}.tw-status.manual-needed{color:#ffca82}',
+    '.tw-manual-note{font-size:10px;color:#ffca82;margin-top:5px;line-height:1.35;overflow-wrap:anywhere}',
     '.tw-toggle{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border,#29313c);background:var(--surface-2,#1b2027);border-radius:9px;padding:9px 12px;font-size:12px;font-weight:600;cursor:pointer}',
     '.tw-toggle input{width:18px;height:18px;margin:0;accent-color:var(--accent,#3b82f6)}',
     '.tw-newchat{margin:15px 0;background:var(--surface-2,#1b2027);border:1px solid var(--border,#29313c);border-radius:10px;padding:13px 16px}',
@@ -62,6 +63,8 @@
       '<button id="'+ids('Import')+'">Add List (.xlsx)</button>'+
       '<button id="'+ids('Save')+'">Save Queue</button>'+
       '<button id="'+ids('Open')+'">Open Output Folder</button>'+
+      '<button id="'+ids('CheckAll')+'">Check All</button>'+
+      '<button class="danger" id="'+ids('Delete')+'">Delete Selected</button>'+
       (spec.ref?'<label class="tw-toggle"><input type="checkbox" id="'+ids('Reference')+'">Show Reference Link</label>':'')+
       '</div><div class="tw-table-wrap" style="margin-top:15px"><table class="tw-table"><colgroup id="'+ids('Cols')+'"></colgroup><thead><tr id="'+ids('Header')+'"></tr></thead><tbody id="'+ids('Body')+'"></tbody></table></div>'+
       '<div class="tw-newchat"><label><input type="checkbox" id="'+ids('Chat')+'"><div><strong>New Chat</strong><p>Start each automation run in one fresh ChatGPT conversation. Every row in that run shares the same chat.</p></div></label></div>'+
@@ -85,25 +88,28 @@
       const cols=spec.fields.filter(f=>!spec.ref||f[0]!=='reference'||showRef);
       el('Cols').innerHTML=[40,35,...cols.map(f=>f[2]),115].map(w=>'<col style="width:'+w+'px">').join('');
       el('Header').innerHTML='<th class="tw-check">✓</th><th>#</th>'+cols.map(f=>'<th>'+esc(f[1])+'</th>').join('')+'<th>Status</th>';
-      body.innerHTML=rows.map((row,i)=>'<tr><td class="tw-check"><input type="checkbox" data-select="'+i+'"'+(selected.has(keyFor(row))?' checked':'')+(running?' disabled':'')+'></td><td class="tw-number">'+(i+1)+'</td>'+
+      body.innerHTML=rows.map((row,i)=>'<tr><td class="tw-check"><input type="checkbox" data-select="'+i+'"'+(selected.has(i)?' checked':'')+(running?' disabled':'')+'></td><td class="tw-number">'+(i+1)+'</td>'+
         cols.map(f=>{const val=esc(row[f[0]]||'');return '<td><input data-index="'+i+'" data-field="'+f[0]+'" value="'+val+'" title="'+val+'"'+(running?' disabled':'')+'></td>';}).join('')+
-        '<td title="'+esc(row.error||row.output||'')+'"><span class="tw-status '+esc(row.status||'pending')+'">'+esc(row.status||'pending')+'</span></td></tr>').join('');
+        '<td title="'+esc(row.manualNote||row.error||row.output||'')+'"><span class="tw-status '+esc(row.status||'pending')+'">'+esc(row.status==='manual-needed'?'Manual Needed':(row.status||'pending'))+'</span>'+(row.manualNote?'<div class="tw-manual-note">'+esc(row.manualNote)+'</div>':'')+'</td></tr>').join('');
       const count=status=>rows.filter(r=>r.status===status).length;
-      el('Stats').innerHTML='<span>Total <b>'+rows.length+'</b> / 50</span><span>Completed <b>'+count('completed')+'</b></span><span>Working <b>'+count('working')+'</b></span><span>Failed <b>'+count('failed')+'</b></span>';
-      const items=rows.map((row,i)=>({row,i})).filter(x=>x.row.output||x.row.error);
+      el('Stats').innerHTML='<span>Total <b>'+rows.length+'</b> / 50</span><span>Completed <b>'+count('completed')+'</b></span><span>Working <b>'+count('working')+'</b></span><span>Failed <b>'+count('failed')+'</b></span><span>Manual Needed <b>'+count('manual-needed')+'</b></span>';
+      const items=rows.map((row,i)=>({row,i})).filter(x=>x.row.output||x.row.error||x.row.manualNote);
       results.innerHTML=items.length?items.map(({row,i})=>
         '<article class="tw-card"><div class="tw-image">'+
         (row.output?'<img data-preview="'+i+'" alt="Image for '+esc(keyFor(row))+'">':'<span>Not generated</span>')+
         '</div><strong>'+esc(spec.ref?(row.id+' · '+row.niche):(row.no+' · '+row.name))+'</strong>'+
         '<small>'+esc(row.output?row.output.split(/[\\/]/).pop():'')+'</small>'+
-        '<small class="'+(row.error?'tw-error':'')+'">'+esc(row.error||row.status||'')+'</small></article>').join(''):'<p class="tw-hint">Finished PNGs will appear here.</p>';
+        '<small class="'+(row.error||row.manualNote?'tw-error':'')+'">'+esc(row.manualNote||row.error||row.status||'')+'</small></article>').join(''):'<p class="tw-hint">Finished PNGs will appear here.</p>';
       for(const img of results.querySelectorAll('[data-preview]')){
         const i=Number(img.dataset.preview),r=rows[i],key=r.output+'|'+(r.completedAt||'');
         if(thumbs.has(key)){img.src=thumbs.get(key);continue;}
         api.preview(i).then(data=>{if(data&&data.src){thumbs.set(key,data.src);if(img.isConnected)img.src=data.src;}else if(img.isConnected)img.alt='PNG missing';}).catch(()=>{if(img.isConnected)img.alt='Preview unavailable';});
       }
       el('Summary').textContent=rows.length+' / 50 jobs · '+(running?(paused?'Paused':'Running'):'Stopped')+(dirty?' · Unsaved edits':'')+(selected.size?' · '+selected.size+' selected':'');
-      ['Add','Import','Save','ClearCompleted','ClearFailed','Retry'].forEach(id=>{el(id).disabled=busy||running;});
+      ['Add','Import','Save','ClearCompleted','ClearFailed','Retry','CheckAll','Delete'].forEach(id=>{el(id).disabled=busy||running;});
+      el('CheckAll').textContent=rows.length>0&&selected.size===rows.length?'Uncheck All':'Check All';
+      el('CheckAll').disabled=busy||running||!rows.length;
+      el('Delete').disabled=busy||running||!selected.size;
       el('Add').disabled=busy||running||rows.length>=50;
       el('Retry').disabled=busy||running||!selected.size;
       el('Start').disabled=busy||running;
@@ -113,7 +119,7 @@
       chat.disabled=busy||running;
     }
     function selectionClean(){
-      const known=new Set(rows.map(keyFor));for(const k of selected)if(!known.has(k))selected.delete(k);
+      for(const i of selected)if(!Number.isInteger(i)||i<0||i>=rows.length)selected.delete(i);
     }
     async function refresh(force=false){
       if(dirty&&!force)return;
@@ -138,16 +144,31 @@
     body.addEventListener('change',e=>{
       const x=e.target;if(x.dataset.select===undefined)return;
       const row=rows[Number(x.dataset.select)];if(!row)return;
-      if(x.checked)selected.add(keyFor(row));else selected.delete(keyFor(row));render();
+      const i=Number(x.dataset.select);if(x.checked)selected.add(i);else selected.delete(i);render();
     });
     el('Add').onclick=()=>{if(running||busy||rows.length>=50)return;rows.push(Object.fromEntries(spec.fields.map(f=>[f[0],''])));dirty=true;render();};
     el('Save').onclick=()=>act(save);
     el('Import').onclick=()=>act(async()=>{
       if(dirty)await save();
       const added=await api.importXlsx();if(added.canceled)return;
-      rows=added.snapshot.rows;dirty=false;el('Note').textContent='Imported '+added.added+' design(s) from '+added.file+(added.skipped?' · '+added.skipped+' duplicate IDs skipped':'');
+      rows=added.snapshot.rows;dirty=false;selected.clear();el('Note').textContent='Imported '+added.added+' design(s) from '+added.file+(added.skipped?' · '+added.skipped+' duplicate IDs skipped':'');
     });
     el('Open').onclick=()=>act(()=>api.openOutputFolder());
+    el('CheckAll').onclick=()=>{
+      if(running||busy)return;
+      if(selected.size===rows.length)selected.clear();
+      else{selected.clear();rows.forEach((_,i)=>selected.add(i));}
+      render();
+    };
+    el('Delete').onclick=()=>act(async()=>{
+      if(!selected.size)throw Error('Select the jobs to delete.');
+      if(dirty)await save();
+      const indexes=[...selected].sort((a,b)=>a-b);
+      if(!window.confirm('Delete '+indexes.length+' selected job(s) and their matching exported PNG files? This cannot be undone.'))return;
+      const removed=await api.deleteRows(indexes);
+      rows=removed.snapshot.rows;selected.clear();dirty=false;
+      el('Note').textContent='Deleted '+removed.deletedRows+' job(s) and '+removed.deletedFiles+' PNG(s).'+(removed.keptFiles?' '+removed.keptFiles+' files were kept because they could not be safely matched.':'');
+    });
     el('Start').onclick=()=>act(async()=>{
       if(dirty)await save();
       if(!rows.some(r=>r.status!=='completed'))throw Error('No pending designs.');
@@ -161,7 +182,7 @@
     el('ClearFailed').onclick=()=>act(()=>api.clear('failed'));
     el('Retry').onclick=()=>act(async()=>{
       if(dirty)await save();
-      const positions=rows.map((r,i)=>selected.has(keyFor(r))?i:-1).filter(i=>i>=0);
+      const positions=rows.map((r,i)=>selected.has(i)?i:-1).filter(i=>i>=0);
       if(!positions.length)throw Error('Select designs using the row checkboxes.');
       if(chat.checked)await window.zeroPOD.generation.newChat();
       await api.retryRows(positions);
