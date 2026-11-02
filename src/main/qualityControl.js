@@ -33,7 +33,14 @@ function validateMetadata(metadata, allProjects = [], currentProjectId = null) {
     seen.add(key);
   }
 
-  if (title.length > 100) warnings.push('Title is longer than 100 characters; consider shortening it.');
+  // SEO title/tag checks only. Description requirements and validation stay unchanged.
+  if (title.length > 65) warnings.push('SEO: Redbubble recommends a natural descriptive title around 50 characters. This title may be too long.');
+  if (title && title.length < 18) warnings.push('SEO: This title may be too short to identify a distinct subject or niche.');
+  if (/\\b(?:t[- ]?shirt|hoodie|sticker|mug|poster|shirt)\\b/i.test(title)) warnings.push('SEO: Avoid product types in artwork titles; Redbubble adds the product context automatically.');
+  if (/\\b(?:retro design|graphic design|funny quote design)\\b/i.test(title)) warnings.push('SEO: Replace generic title padding with more specific artwork details.');
+  for (const tag of [mainTag, ...supportingTags]) {
+    if (tag.length > 50) errors.push('Tag exceeds the 50-character Redbubble limit: ' + tag);
+  }
   if (description.length > 500) warnings.push('Description is long; Redbubble copy may be cleaner if shortened.');
 
   const duplicate = allProjects.find((project) => project.id !== currentProjectId && canonical(project.metadata?.title) && canonical(project.metadata?.title) === canonical(title));
