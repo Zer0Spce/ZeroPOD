@@ -171,15 +171,15 @@
     });
     el('Start').onclick=()=>act(async()=>{
       if(dirty)await save();
-      if(!rows.some(r=>r.status!=='completed'))throw Error('No pending designs.');
+      if(!rows.some(r=>!['completed','manual-needed'].includes(r.status)))throw Error('No runnable designs. Fix a Manual Needed source and use Retry Design on that row.');
       if(chat.checked){await window.zeroPOD.generation.newChat();}
       await api.start();
     });
     el('Pause').onclick=()=>act(()=>api.pause());
     el('Resume').onclick=()=>act(()=>api.start());
     el('Stop').onclick=()=>act(()=>api.stop());
-    el('ClearCompleted').onclick=()=>act(()=>api.clear('completed'));
-    el('ClearFailed').onclick=()=>act(()=>api.clear('failed'));
+    el('ClearCompleted').onclick=()=>act(async()=>{await api.clear('completed');selected.clear();});
+    el('ClearFailed').onclick=()=>act(async()=>{await api.clear('failed');selected.clear();});
     el('Retry').onclick=()=>act(async()=>{
       if(dirty)await save();
       const positions=rows.map((r,i)=>selected.has(i)?i:-1).filter(i=>i>=0);
