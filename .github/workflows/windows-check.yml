@@ -78,6 +78,7 @@ jobs:
           node scripts/taskWorkloadRetrySmoke.js
           node scripts/taskAnukMarcinSmoke.js
           node scripts/taskSelectionManualSmoke.js
+          node scripts/taskMarcinPromptOnlySmoke.js
           npm run check
 
       - name: Build unpacked Windows package
