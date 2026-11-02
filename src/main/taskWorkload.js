@@ -27,7 +27,7 @@ class TaskWorkload {
  load(){try{this.rows=JSON.parse(fs.readFileSync(this.file,'utf8')).rows||[]}catch{this.rows=[]}for(const row of this.rows)if(row.status==='working')row.status='pending';this.save()}
  save(){fs.mkdirSync(path.dirname(this.file),{recursive:true});fs.writeFileSync(this.file,JSON.stringify({rows:this.rows},null,2))}
  snapshot(){return {rows:this.rows,running:this.running,paused:this.paused,outputDir:this.outputRoot}}
- setRows(rows){if(this.running)throw Error('Pause or stop before editing the queue.');if(!Array.isArray(rows)||rows.length>50)throw Error('Maximum 50 jobs');this.rows=rows.map((r,i)=>{const row=Object.fromEntries(this.keys.map(k=>[k,String(r[k]||'').trim()]));const old=this.rows[i];const unchanged=old&&this.keys.every(k=>old[k]===row[k]);const sameOutput=old&&(this.mode==='marcin'?old.no===row.no:(old.id===row.id&&old.niche===row.niche));return {...row,status:unchanged?old.status:'pending',output:sameOutput?old.output:null,error:unchanged?old.error:null,completedAt:sameOutput?old.completedAt:null,projectId:unchanged?old.projectId:null}});this.save();return this.snapshot()}
+ setRows(rows){if(this.running)throw Error('Pause or stop before editing the queue.');if(!Array.isArray(rows)||rows.length>50)throw Error('Maximum 50 jobs');this.rows=rows.map((r,i)=>{const row=Object.fromEntries(this.keys.map(k=>[k,String(r[k]||'').trim()]));const old=this.rows[i];const unchanged=old&&this.keys.every(k=>old[k]===row[k]);const sameOutput=old&&(this.mode==='marcin'?old.no===row.no:(old.id===row.id&&old.niche===row.niche));return {...row,status:unchanged?old.status:'pending',output:sameOutput?old.output:null,error:unchanged?old.error:null,completedAt:sameOutput?old.completedAt:null,projectId:unchanged?old.projectId:null,manualNote:unchanged?(old.manualNote||null):null}});this.save();return this.snapshot()}
  appendRows(rows){
   if(this.running)throw Error('Stop Task Workload before importing an Excel list.');
   if(!Array.isArray(rows))throw Error('Invalid Excel import.');
@@ -39,7 +39,7 @@ class TaskWorkload {
    this.assertRow(row);
    const id=row[this.keyField].toLowerCase();
    if(seen.has(id)){skipped++;continue}
-   seen.add(id);additions.push({...row,status:'pending',output:null,error:null});
+   seen.add(id);additions.push({...row,status:'pending',output:null,error:null,manualNote:null});
   }
   if(this.rows.length+additions.length>50)throw Error('Task Workload supports 50 rows total. Clear old jobs or import fewer rows.');
   this.rows.push(...additions);this.save();
@@ -51,7 +51,7 @@ class TaskWorkload {
   const row=this.rows[index];
   this.assertRow(row);
   row.retryRequested=true;
-  row.status='pending';row.error=null;
+  row.status='pending';row.error=null;row.manualNote=null;
   this.stopRequested=false;this.paused=false;this.running=true;
   this.save();
   // A retry is a one-row run; other pending/failed rows are left untouched.
@@ -65,9 +65,34 @@ class TaskWorkload {
   if(!indexes.length)throw Error('No valid rows selected.');
   const targets=indexes.map(i=>this.rows[i]);targets.forEach(r=>this.assertRow(r));
   if(TaskWorkload.active?.running&&TaskWorkload.active!==this)throw Error('Another Task tab is running.');
-  for(const r of targets){r.retryRequested=true;r.status='pending';r.error=null}
+  for(const r of targets){r.retryRequested=true;r.status='pending';r.error=null;r.manualNote=null}
   this.stopRequested=false;this.paused=false;this.running=true;TaskWorkload.active=this;this.save();
   this.loop(targets).catch(()=>{});return this.snapshot();
+ }
+ deleteRows(indices){
+  if(this.running)throw Error('Stop the running queue before deleting selected jobs.');
+  if(!Array.isArray(indices)||!indices.length)throw Error('Select jobs to delete.');
+  const indexes=[...new Set(indices)].filter(i=>Number.isInteger(i)&&i>=0&&i<this.rows.length).sort((a,b)=>a-b);
+  if(!indexes.length)throw Error('No valid jobs selected.');
+  const targetSet=new Set(indexes);
+  const survivors=this.rows.filter((_,i)=>!targetSet.has(i));
+  const remainingOutputs=new Set(survivors.map(r=>r.output?path.resolve(r.output):null).filter(Boolean));
+  const roots=[path.resolve(this.outputRoot)];
+  if(this.mode==='anuk')roots.push(path.resolve(path.join(app.getPath('documents'),'ZeroPOD','Task Workload')));
+  let deletedFiles=0,keptFiles=0;
+  for(const i of indexes){
+   const row=this.rows[i];if(!row.output)continue;
+   const output=path.resolve(row.output);
+   const basename=this.mode==='marcin'?(safeTitle(row.no)+' '+safeTitle(row.name)+'.png'):(safe(row.id)+'_'+safe(row.niche)+'.png');
+   const isOwned=roots.some(root=>output.startsWith(root+path.sep));
+   const validName=path.basename(output).toLowerCase()===basename.toLowerCase();
+   if(!isOwned||!validName||remainingOutputs.has(output)){keptFiles++;continue}
+   if(!fs.existsSync(output))continue;
+   if(fs.lstatSync(output).isSymbolicLink()){keptFiles++;continue}
+   fs.rmSync(output,{force:false});deletedFiles++;
+  }
+  this.rows=survivors;this.save();
+  return {deletedRows:indexes.length,deletedFiles,keptFiles,snapshot:this.snapshot()};
  }
  clear(status){if(this.running)throw Error('Stop queue before clearing.');this.rows=this.rows.filter(r=>r.status!==status);this.save();return this.snapshot()}
  pause(){this.paused=true;return this.snapshot()}
@@ -78,7 +103,11 @@ class TaskWorkload {
   this.stopRequested=false;this.paused=false;this.running=true;TaskWorkload.active=this;
   this.loop().catch(()=>{});return this.snapshot()
  }
- async loop(targetRows=this.rows){try{for(const row of targetRows){if(this.stopRequested)break;while(this.paused&&!this.stopRequested)await new Promise(r=>setTimeout(r,300));if(this.stopRequested)break;if(row.status==='completed'&&!row.retryRequested)continue;row.status='working';row.error=null;this.save();try{await this.process(row,{replaceExisting:Boolean(row.retryRequested)});row.status='completed';row.completedAt=new Date().toISOString()}catch(e){row.status='failed';row.error=String(e.message||e)}row.retryRequested=false;this.save()}}finally{this.running=false;this.paused=false;if(TaskWorkload.active===this)TaskWorkload.active=null;this.save()}}
+ async loop(targetRows=this.rows){try{for(const row of targetRows){if(this.stopRequested)break;while(this.paused&&!this.stopRequested)await new Promise(r=>setTimeout(r,300));if(this.stopRequested)break;if(['completed','manual-needed'].includes(row.status)&&!row.retryRequested)continue;row.status='working';row.error=null;row.manualNote=null;this.save();try{await this.process(row,{replaceExisting:Boolean(row.retryRequested)});row.status='completed';row.completedAt=new Date().toISOString()}catch(e){
+    if(this.mode==='marcin'&&e.code==='MANUAL_NEEDED'){
+     row.status='manual-needed';row.manualNote='Manual Needed — '+String(e.message||'Source design not available');row.error=null;
+    }else{row.status='failed';row.error=String(e.message||e)}
+   }row.retryRequested=false;this.save()}}finally{this.running=false;this.paused=false;if(TaskWorkload.active===this)TaskWorkload.active=null;this.save()}}
  async process(row,{replaceExisting=false}={}){
   this.assertRow(row);
   const filename=this.mode==='marcin'?(safeTitle(row.no)+' '+safeTitle(row.name)+'.png'):(safe(row.id)+'_'+safe(row.niche)+'.png');
@@ -131,11 +160,19 @@ class TaskWorkload {
  }
  async referenceImage(row,url){
   if(this.mode==='marcin'){
-   if(!/^https?:\/\//i.test(url))throw Error('Link Source must be a valid URL.');
-   const {resolver}=require('./sourceImageIpc');
-   const found=await resolver.resolve(url);
-   if(!found?.path||!fs.existsSync(found.path))throw Error('Could not download the source design image.');
-   return found.path;
+   try{
+    if(!/^https?:\/\//i.test(url))throw Error('Link Source is missing or invalid.');
+    const {resolver}=require('./sourceImageIpc');
+    const found=await resolver.resolve(url);
+    if(!found?.path||!fs.existsSync(found.path))throw Error('Source design image was not found.');
+    const file=await sharp(found.path).metadata();
+    if(!file.width||!file.height||file.width<120||file.height<120)throw Error('Source design image is too small or invalid.');
+    return found.path;
+   }catch(error){
+    const manual=new Error(String(error.message||'Could not retrieve source image.'));
+    manual.code='MANUAL_NEEDED';
+    throw manual;
+   }
   }
   const local=row.reference&&!/^https?:\/\//i.test(row.reference)?row.reference:(!/^https?:\/\//i.test(row.idea)&&fs.existsSync(row.idea)?row.idea:'');
   if(local&&fs.existsSync(local))return local;
