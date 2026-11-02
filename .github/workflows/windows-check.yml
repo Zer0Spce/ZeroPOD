@@ -55,6 +55,8 @@ jobs:
           node --check src/renderer/automationCapacity50.js
           node --check src/renderer/automationHeaderLock.js
           node --check src/renderer/promptSettings.js
+          node --check src/main/metadataController.js
+          node --check src/main/qualityControl.js
           node --check src/main/taskWorkload.js
           node --check src/main/taskMarcinSpreadsheet.js
           node --check src/main/main.js
@@ -79,6 +81,7 @@ jobs:
           node scripts/taskAnukMarcinSmoke.js
           node scripts/taskSelectionManualSmoke.js
           node scripts/taskMarcinPromptOnlySmoke.js
+          node scripts/redbubbleSeoTitlesTagsSmoke.js
           npm run check
 
       - name: Build unpacked Windows package
