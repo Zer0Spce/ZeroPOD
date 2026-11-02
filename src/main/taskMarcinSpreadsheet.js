@@ -14,6 +14,9 @@ function parseSheet(sheet){
   const get=k=>c[k]?cellText(record.getCell(c[k])):'';
   const row={no:String(get('no')).replace(/\.0+$/,'').trim(),name:get('name'),market:optionalText(get('market')),mainKeyword:optionalText(get('mainKeyword')),subNiche:optionalText(get('subNiche')),linkSource:optionalText(get('linkSource'))};
   if(!Object.values(row).some(Boolean))return;
+  // Blank allocation rows in client sheets can contain a No. without a job.
+  // Ignore them rather than stopping the whole import.
+  if(row.no&&![row.name,row.market,row.mainKeyword,row.subNiche,row.linkSource].some(Boolean))return;
   if(!row.no||!row.name||!row.linkSource)throw Error('Excel row '+i+' needs No., Name and Link Source.');
   if(!/^https?:\/\//i.test(row.linkSource))throw Error('Invalid Link Source URL in row '+i);
   rows.push(row);if(rows.length>50)throw Error('Maximum 50 jobs per list.');
