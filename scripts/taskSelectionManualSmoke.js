@@ -50,27 +50,33 @@ async function run(){
     assert.strictEqual(marcin.rows[0].status,'manual-needed','explicit retry must be allowed and return to Manual Needed if source stays missing');
     assert.strictEqual(generated,1,'other jobs must remain completed on selected retry');
 
-    // Delete only the checked job and its exact matching exported PNG.
+    // Deleting queue records NEVER deletes any user PNG, even if it exactly
+    // matches a selected job's expected output filename.
     const folder=marcin.outputDir;fs.mkdirSync(folder,{recursive:true});
     const target=path.join(folder,'137921 Second Design.png');fs.writeFileSync(target,'PNG');
     marcin.rows[1].output=target;marcin.save();
     const keep=path.join(folder,'untouched.png');fs.writeFileSync(keep,'PNG');
     const deleted=marcin.deleteRows([1,1]);
     assert.strictEqual(deleted.deletedRows,1);
-    assert.strictEqual(deleted.deletedFiles,1);
-    assert.strictEqual(fs.existsSync(target),false);
+    assert.strictEqual(fs.readFileSync(target,'utf8'),'PNG','Marcin output PNG must remain');
     assert.strictEqual(fs.existsSync(keep),true);
     assert.strictEqual(marcin.rows.length,1);
     assert.strictEqual(marcin.rows[0].status,'manual-needed');
 
-    // A row referencing some other location must never delete that file.
-    const outside=path.join(dir,'elsewhere.png');fs.writeFileSync(outside,'KEEP');
-    anuk.setRows([{id:'I-TEST',niche:'art',idea:'design'}]);
-    anuk.rows[0].output=outside;anuk.save();
-    const cautious=anuk.deleteRows([0]);
-    assert.strictEqual(cautious.deletedFiles,0);
-    assert.strictEqual(cautious.keptFiles,1);
-    assert.strictEqual(fs.readFileSync(outside,'utf8'),'KEEP');
+    // The same rule applies to Anuk and to legacy absolute/undated output paths.
+    const anukFolder=anuk.outputDir;fs.mkdirSync(anukFolder,{recursive:true});
+    const anukPng=path.join(anukFolder,'I-TEST_art.png');fs.writeFileSync(anukPng,'ANUK PNG');
+    const otherPng=path.join(dir,'elsewhere.png');fs.writeFileSync(otherPng,'KEEP');
+    anuk.setRows([{id:'I-TEST',niche:'art',idea:'design'},{id:'I-SECOND',niche:'art',idea:'design'}]);
+    anuk.rows[0].output=anukPng;
+    anuk.rows[1].output=otherPng;
+    anuk.save();
+    const removedAnuk=anuk.deleteRows([1,0]);
+    assert.strictEqual(removedAnuk.deletedRows,2);
+    assert.strictEqual(anuk.rows.length,0);
+    assert.strictEqual(fs.readFileSync(anukPng,'utf8'),'ANUK PNG','Anuk output PNG must remain');
+    assert.strictEqual(fs.readFileSync(otherPng,'utf8'),'KEEP','External files must remain');
+
     assert.throws(()=>marcin.deleteRows([]),/Select jobs/);
     console.log('Task select/delete, no-only Excel skips, Manual Needed and next-row continuation: OK');
   }finally{
