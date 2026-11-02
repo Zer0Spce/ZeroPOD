@@ -164,10 +164,10 @@
       if(!selected.size)throw Error('Select the jobs to delete.');
       if(dirty)await save();
       const indexes=[...selected].sort((a,b)=>a-b);
-      if(!window.confirm('Delete '+indexes.length+' selected job(s) and their matching exported PNG files? This cannot be undone.'))return;
+      if(!window.confirm('Remove '+indexes.length+' selected job(s) from this task list? Exported PNG files will be kept.'))return;
       const removed=await api.deleteRows(indexes);
       rows=removed.snapshot.rows;selected.clear();dirty=false;
-      el('Note').textContent='Deleted '+removed.deletedRows+' job(s) and '+removed.deletedFiles+' PNG(s).'+(removed.keptFiles?' '+removed.keptFiles+' files were kept because they could not be safely matched.':'');
+      el('Note').textContent='Removed '+removed.deletedRows+' row(s) from the queue. All generated PNGs remain saved in their output folders.';
     });
     el('Start').onclick=()=>act(async()=>{
       if(dirty)await save();
