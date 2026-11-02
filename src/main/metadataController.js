@@ -44,12 +44,23 @@ class MetadataController {
       '}',
       '',
       'SEO REQUIREMENTS:',
-      '- Title: original, descriptive, natural, buyer-friendly, and centered on the strongest niche/search phrase.',
-      '- Put the strongest relevant keyword naturally near the beginning of the title when it reads well.',
-      '- Main Tag: exactly 1 high-intent primary keyword phrase that best describes the design and likely buyer search.',
-      '- Supporting Tags: exactly 14 unique supporting keyword phrases.',
-      '- Supporting tags should cover closely related niche terms, audience terms, gift/buyer intent, theme, humor/style/occasion terms when genuinely relevant, and useful long-tail variations.',
-      '- Avoid duplicate tags, near-duplicate tags, keyword stuffing, vague one-word filler, and irrelevant traffic-bait terms.',
+      'TITLE SEO 2.0 — improve only the title and tags. Preserve the existing description workflow and schema.',
+      '- Title: target about 45–60 characters and 6–9 naturally flowing words; shorter is fine when the exact slogan needs fewer words.',
+      '- Front-load one precise phrase that a buyer would naturally search for. Use the actual subject, slogan or activity before optional style qualifiers.',
+      '- Preserve the exact wording of a meaningful slogan and do not invent subjects or keywords absent from the approved artwork.',
+      '- Avoid keyword chains, repeated adjectives, boilerplate endings such as "Retro Design", "Graphic Design", "Funny Quote Design", and generic padding.',
+      '- Never insert merchandise names like T-Shirt, Shirt, Hoodie, Sticker, Mug, or Poster in an artwork title.',
+      '- Keep titles distinct and descriptive rather than recycling the same template across unrelated designs.',
+      'TAG SEO 2.0 — choose relevance and actual search intent over filling a quota with weak words.',
+      '- Brainstorm at least 20 realistic buyer queries internally. Select the most relevant 15 without listing your research or claiming search volumes.',
+      '- Main Tag: exactly one specific, high-intent subject/search phrase that accurately identifies this finished artwork.',
+      '- Supporting Tags: exactly 14 unique terms or short phrases, maximum 50 characters per tag, ordered from most relevant to least.',
+      '- Put the 10 strongest tags first, covering subject or slogan, clear niche, activity, specific style, occasion and audience ONLY where genuinely represented.',
+      '- Mix concise core terms with useful two- or three-word phrases; avoid full sentences and long stuffed keyword strings.',
+      '- Do not repeat plural/singular variants or near-identical combinations simply to reach 15 tags.',
+      '- Omit weak fillers such as design, graphic, trendy, best seller, hot sale, women, men, kids, and gift unless the specific artwork clearly warrants that term.',
+      '- Do not add unrelated popular niches, copyrighted brands, celebrities, or competitor names merely to attract clicks.',
+      '- Use the Amazon reference as niche context, never copy its title/tags. Prefer Redbubble buyer-search language if it can be verified; never invent ranking, volume, or competition metrics.',
       '- Description: short, natural, persuasive, and readable; explain what the design is and who it is for while naturally using the main niche language.',
       '- Metadata must describe the APPROVED DESIGN, not merely the Amazon product.',
       '- Keep everything search-friendly but human-readable.',
@@ -58,7 +69,9 @@ class MetadataController {
       '',
       'QUALITY CHECK BEFORE RESPONDING:',
       '- Exactly 1 mainTag.',
-      '- Exactly 14 supportingTags.',
+      '- Exactly 14 supportingTags, each at most 50 characters; mainTag at most 50 characters.',
+      '- Title is natural, specific and avoids product names and templated keyword padding.',
+      '- Put truly relevant tags first; the first 10 should be especially strong.',
       '- No duplicates ignoring capitalization/plurals.',
       '- Title, tags, and description all match the attached approved design and the Amazon-derived niche.',
       '- optimizationMode must equal exactly "POD WINNER".',
@@ -126,6 +139,9 @@ class MetadataController {
     }
 
     const normalizedMain = this.normalizeTag(mainTag);
+    if (normalizedMain.length > 50) {
+      throw new Error('Main tag exceeds Redbubble’s 50-character tag limit.');
+    }
     const mainKey = this.canonicalTag(normalizedMain);
     const seen = new Set();
     const uniqueTags = [];
@@ -133,6 +149,9 @@ class MetadataController {
     for (const rawTag of tags) {
       const tag = this.normalizeTag(rawTag);
       const key = this.canonicalTag(tag);
+      if (tag.length > 50) {
+        throw new Error('A supporting tag exceeds Redbubble’s 50-character limit: ' + tag);
+      }
       if (!tag || !key || key === mainKey || seen.has(key)) continue;
       seen.add(key);
       uniqueTags.push(tag);
@@ -319,7 +338,10 @@ class MetadataController {
       'Fix ONLY your immediately previous metadata response.',
       `Validation problem: ${parseError.message}`,
       'Return ONLY corrected valid JSON using keys title, mainTag, supportingTags, description, optimizationMode.',
-      'supportingTags must contain exactly 14 unique useful phrases and optimizationMode must be "POD WINNER".',
+      'Keep the description unchanged from your previous response. Fix title/tags only, unless a field is completely missing.',
+      'Make the title natural and specific (aim for about 45–60 characters) without product terms or keyword stuffing.',
+      'mainTag and each supporting tag must be at most 50 characters. supportingTags must contain exactly 14 distinct relevant phrases, ordered by relevance.',
+      'optimizationMode must be "POD WINNER".',
       'No markdown and no commentary.'
     ].join('\n');
 
