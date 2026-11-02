@@ -104,13 +104,9 @@ class TaskWorkload {
   if(fs.existsSync(target)&&!(replaceExisting&&priorIsOwnOutput))throw Error('Output already exists: '+filename);
   const reference=this.mode==='marcin'?row.linkSource:(/^https?:\/\//i.test(row.reference)?row.reference:/^https?:\/\//i.test(row.idea)?row.idea:'');
   const imagePath=await this.referenceImage(row,reference);
-  const prompt=this.mode==='marcin'?[
-  this.chatgpt.buildPrompt(),'TASK [MARCIN] INSTRUCTIONS',
-  'Source design: '+row.linkSource,'Name: '+row.name,
-  'Market: '+(row.market||'unspecified'),'Main niche / keyword: '+row.mainKeyword,'Sub niche: '+row.subNiche,
-  'Use the attached product design as a visual reference; make a distinct original POD design, not a direct copy.',
-  'Genuine transparent background. Keep the composition suitable for the existing Redbubble 4500x5400 export.'
- ].filter(Boolean).join('\n'):[
+  // Task [Marcin] sends only the resolved reference image plus the active
+  // ZeroPOD prompt. Never append link, row data, or additional instructions.
+  const prompt=this.mode==='marcin'?this.chatgpt.buildPrompt():[
   this.chatgpt.buildPrompt(),'TASK [ANUK] DESIGN INSTRUCTIONS:',
   'Niche: '+row.niche,'Idea: '+row.idea,
   row.text&&!/^(none|nothing)$/i.test(row.text)?'Required image text (copy EXACTLY): '+row.text:'Do not invent a slogan or text unless explicitly specified in the idea or reference.',
@@ -119,7 +115,10 @@ class TaskWorkload {
  ].filter(Boolean).join('\n');
   // Use a per-instance prompt override only during submission; restore before async image capture.
   const original=this.chatgpt.buildPrompt;this.chatgpt.buildPrompt=()=>prompt;
-  let result;try{result=await this.chatgpt.start({referencePath:imagePath,sourceUrl:reference,reviewNotes:this.mode==='marcin'?'Generate an original POD design using the source as visual inspiration.':row.difference})}finally{this.chatgpt.buildPrompt=original}
+  const payload=this.mode==='marcin'
+    ? {referencePath:imagePath,sourceUrl:'',reviewNotes:''}
+    : {referencePath:imagePath,sourceUrl:reference,reviewNotes:row.difference};
+  let result;try{result=await this.chatgpt.start(payload)}finally{this.chatgpt.buildPrompt=original}
   row.projectId=result.projectId;this.save();
   let project;for(let n=0;n<240;n++){project=this.projects.read(result.projectId);if(project.status==='awaiting-review'&&project.generatedImagePath&&fs.existsSync(project.generatedImagePath))break;if(project.status==='chatgpt-recovery-needed')throw Error(project.chatgptError?.message||'Generation failed');await new Promise(r=>setTimeout(r,1500))}
   if(project.status!=='awaiting-review')throw Error('Image generation timed out');
