@@ -70,29 +70,16 @@ class TaskWorkload {
   this.loop(targets).catch(()=>{});return this.snapshot();
  }
  deleteRows(indices){
+  // Remove selected queue records ONLY. Exported PNGs and dated folders are permanent
+  // user outputs and must never be deleted by a queue-management action.
   if(this.running)throw Error('Stop the running queue before deleting selected jobs.');
   if(!Array.isArray(indices)||!indices.length)throw Error('Select jobs to delete.');
   const indexes=[...new Set(indices)].filter(i=>Number.isInteger(i)&&i>=0&&i<this.rows.length).sort((a,b)=>a-b);
   if(!indexes.length)throw Error('No valid jobs selected.');
-  const targetSet=new Set(indexes);
-  const survivors=this.rows.filter((_,i)=>!targetSet.has(i));
-  const remainingOutputs=new Set(survivors.map(r=>r.output?path.resolve(r.output):null).filter(Boolean));
-  const roots=[path.resolve(this.outputRoot)];
-  if(this.mode==='anuk')roots.push(path.resolve(path.join(app.getPath('documents'),'ZeroPOD','Task Workload')));
-  let deletedFiles=0,keptFiles=0;
-  for(const i of indexes){
-   const row=this.rows[i];if(!row.output)continue;
-   const output=path.resolve(row.output);
-   const basename=this.mode==='marcin'?(safeTitle(row.no)+' '+safeTitle(row.name)+'.png'):(safe(row.id)+'_'+safe(row.niche)+'.png');
-   const isOwned=roots.some(root=>output.startsWith(root+path.sep));
-   const validName=path.basename(output).toLowerCase()===basename.toLowerCase();
-   if(!isOwned||!validName||remainingOutputs.has(output)){keptFiles++;continue}
-   if(!fs.existsSync(output))continue;
-   if(fs.lstatSync(output).isSymbolicLink()){keptFiles++;continue}
-   fs.rmSync(output,{force:false});deletedFiles++;
-  }
-  this.rows=survivors;this.save();
-  return {deletedRows:indexes.length,deletedFiles,keptFiles,snapshot:this.snapshot()};
+  const removed=new Set(indexes);
+  this.rows=this.rows.filter((_,i)=>!removed.has(i));
+  this.save();
+  return {deletedRows:indexes.length,snapshot:this.snapshot()};
  }
  clear(status){if(this.running)throw Error('Stop queue before clearing.');this.rows=this.rows.filter(r=>r.status!==status);this.save();return this.snapshot()}
  pause(){this.paused=true;return this.snapshot()}
