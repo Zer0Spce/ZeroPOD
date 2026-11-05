@@ -57,7 +57,9 @@
     const valid=r=>spec.ref?Boolean(r.id&&r.niche&&r.idea):Boolean(r.no&&r.name&&r.linkSource);
     root.innerHTML=
       '<div class="tw-top"><div><div class="eyebrow">LOCAL PNG PRODUCTION</div><h2>'+esc(spec.name)+'</h2>'+
-      '<p class="muted">Generate → Vectorize → 4500×5400 transparent PNG. Dated output folders. No manual review or publishing.</p></div><div class="tw-stats" id="'+ids('Stats')+'"></div></div>'+
+      '<p class="muted">Generate → Vectorize → 4500×5400 transparent PNG. Dated output folders. No manual review or publishing.'+
+      (spec.ref?' Supplied reference images/links are used to understand the original concept and apply your Difference from Original instructions, even when the Reference Link column is hidden.':'')+
+      '</p></div><div class="tw-stats" id="'+ids('Stats')+'"></div></div>'+
       '<div class="tw-panel"><div class="tw-controls">'+
       '<button id="'+ids('Add')+'">+ Add Row</button>'+
       '<button id="'+ids('Import')+'">Add List (.xlsx)</button>'+
