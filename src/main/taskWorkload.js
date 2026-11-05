@@ -106,7 +106,7 @@ class TaskWorkload {
   const imagePath=await this.referenceImage(row,reference);
   // Task [Marcin] sends only the resolved reference image plus the active
   // ZeroPOD prompt. Never append link, row data, or additional instructions.
-  const hasVisualReference=this.mode==='anuk'&&Boolean((row.reference||'').trim()||/^https?:\/\//i.test(row.idea||''));
+  const hasVisualReference=this.mode==='anuk'&&Boolean((row.reference||'').trim()||/^https?:\/\//i.test(row.idea||'')||fs.existsSync(row.idea||''));
   // Marcin remains strictly image + active ZeroPOD prompt only.
   // Anuk uses the attached original image as concept input, then creates a
   // distinct variation governed by the job's Idea, exact text and changes.
