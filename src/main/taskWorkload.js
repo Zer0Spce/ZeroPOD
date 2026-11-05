@@ -106,13 +106,28 @@ class TaskWorkload {
   const imagePath=await this.referenceImage(row,reference);
   // Task [Marcin] sends only the resolved reference image plus the active
   // ZeroPOD prompt. Never append link, row data, or additional instructions.
+  const hasVisualReference=this.mode==='anuk'&&Boolean((row.reference||'').trim()||/^https?:\/\//i.test(row.idea||''));
+  // Marcin remains strictly image + active ZeroPOD prompt only.
+  // Anuk uses the attached original image as concept input, then creates a
+  // distinct variation governed by the job's Idea, exact text and changes.
   const prompt=this.mode==='marcin'?this.chatgpt.buildPrompt():[
-  this.chatgpt.buildPrompt(),'TASK [ANUK] DESIGN INSTRUCTIONS:',
-  'Niche: '+row.niche,'Idea: '+row.idea,
-  row.text&&!/^(none|nothing)$/i.test(row.text)?'Required image text (copy EXACTLY): '+row.text:'Do not invent a slogan or text unless explicitly specified in the idea or reference.',
-  row.reference?'Reference: '+row.reference:'',row.difference?'Changes from original: '+row.difference:'',
-  'Create one finished POD design. Real alpha transparency; no checkerboard.'
- ].filter(Boolean).join('\n');
+    this.chatgpt.buildPrompt(),
+    'TASK [ANUK] — REFERENCE-BASED ORIGINAL DESIGN VARIATION',
+    hasVisualReference
+      ? 'STUDY THE ATTACHED REFERENCE IMAGE FIRST. Understand its subject, niche, visual motifs, meaning or joke, and any existing slogan. Use it as the concept and inspiration for a NEW, distinct design; do not simply reproduce its layout or copy its artwork.'
+      : 'If the attachment is blank, derive the design concept entirely from the Idea and Niche below.',
+    'Niche: '+row.niche,
+    'Design idea / intended direction: '+row.idea,
+    row.text&&!/^(none|nothing|n\/a)$/i.test(row.text)
+      ? 'EXACT OUTPUT WORDING (overrides any slogan in reference): '+row.text+'. Copy precisely; do not add, remove, or change words, spelling, or punctuation.'
+      : 'When the reference has a slogan, preserve that exact slogan unless the Idea or Changes specifically say otherwise. If no slogan is present or requested, do not add text.',
+    row.difference
+      ? 'REQUIRED CHANGES / VERSION RELATIVE TO THE ORIGINAL (apply these visibly, not just tiny adjustments): '+row.difference
+      : 'Create a visually different original version of the concept with new styling, typography, composition or supporting elements while preserving its recognizable idea.',
+    'Priority: exact Text in Image > requested Changes / Version > Idea / Niche > original reference styling.',
+    'Keep the reference concept and requested changes coherent. Do not copy watermarks, marketplace mockups, backgrounds, brand logos or unrequested trademarks.',
+    'Produce only one clean, POD-friendly design with genuine transparency (not a fake checkerboard).'
+  ].filter(Boolean).join('\n');
   // Use a per-instance prompt override only during submission; restore before async image capture.
   const original=this.chatgpt.buildPrompt;this.chatgpt.buildPrompt=()=>prompt;
   const payload=this.mode==='marcin'
@@ -160,11 +175,58 @@ class TaskWorkload {
     throw manual;
    }
   }
-  const local=row.reference&&!/^https?:\/\//i.test(row.reference)?row.reference:(!/^https?:\/\//i.test(row.idea)&&fs.existsSync(row.idea)?row.idea:'');
-  if(local&&fs.existsSync(local))return local;
-  if(url){const response=await fetch(url,{signal:AbortSignal.timeout(30000)});if(response.ok&&/^image\//i.test(response.headers.get('content-type')||'')){const bytes=Buffer.from(await response.arrayBuffer());const dest=path.join(app.getPath('temp'),'zeropod-task-'+Date.now()+'.png');await sharp(bytes).png().toFile(dest);return dest}}
-  // Text-only jobs use a blank white reference; generation instructions supply the actual concept.
-  const dest=path.join(app.getPath('temp'),'zeropod-task-blank.png');if(!fs.existsSync(dest))await sharp({create:{width:800,height:1000,channels:4,background:'#ffffff'}}).png().toFile(dest);return dest;
+  // Anuk prioritizes the explicit Reference Link field (even when the column
+  // is visually hidden). Historic jobs may also use an image URL/path in Idea.
+  const explicit=String(row.reference||'').trim();
+  const idea=String(row.idea||'').trim();
+  const candidate=explicit||( (/^https?:\/\//i.test(idea)||fs.existsSync(idea))?idea:'' );
+  if(candidate){
+   const isWeb=/^https?:\/\//i.test(candidate);
+   if(!isWeb){
+    let file=candidate;
+    if(/^file:\/\//i.test(candidate))file=require('url').fileURLToPath(candidate);
+    if(!fs.existsSync(file)||!fs.statSync(file).isFile()){
+     throw Error('Task [Anuk] reference file not found: '+candidate);
+    }
+    try{
+     const metadata=await sharp(file).metadata();
+     if(!metadata.width||!metadata.height||metadata.width<120||metadata.height<120)throw Error('Image is too small.');
+    }catch(error){throw Error('Task [Anuk] reference is not a usable image: '+error.message)}
+    return file;
+   }
+   // Direct image URLs: download the image, not an HTML page or link string.
+   // Marketplace/product URLs: reuse the proven product image resolver.
+   if(/\.(?:png|jpe?g|webp|gif|avif)(?:[?#]|$)/i.test(candidate)){
+    try{
+     const response=await fetch(candidate,{signal:AbortSignal.timeout(30000)});
+     if(response.ok&&/^image\//i.test(response.headers.get('content-type')||'')){
+      const bytes=Buffer.from(await response.arrayBuffer());
+      const metadata=await sharp(bytes).metadata();
+      if(metadata.width>=220&&metadata.height>=220){
+       const dest=path.join(app.getPath('temp'),'zeropod-anuk-ref-'+process.pid+'-'+Date.now()+'-'+Math.random().toString(16).slice(2)+'.png');
+       await sharp(bytes).png().toFile(dest);
+       return dest;
+      }
+     }
+    }catch{/* Page resolver below may still find the actual reference. */}
+   }
+   try{
+    const {resolver}=require('./sourceImageIpc');
+    const resolved=await resolver.resolve(candidate);
+    if(!resolved?.path||!fs.existsSync(resolved.path))throw Error('No image found on the reference page.');
+    const meta=await sharp(resolved.path).metadata();
+    if(!meta.width||!meta.height||meta.width<220||meta.height<220)throw Error('Resolved reference image is too small.');
+    return resolved.path;
+   }catch(error){
+    // Do not silently substitute a white canvas when the user specified a
+    // reference: it would lose the original concept and produce the wrong job.
+    throw Error('Task [Anuk] could not retrieve the reference design for '+(row.id||'this job')+': '+error.message);
+   }
+  }
+  // Idea-only jobs continue to work exactly as before.
+  const dest=path.join(app.getPath('temp'),'zeropod-task-blank.png');
+  if(!fs.existsSync(dest))await sharp({create:{width:800,height:1000,channels:4,background:'#ffffff'}}).png().toFile(dest);
+  return dest;
  }
 }
 module.exports={TaskWorkload};
