@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld('zeroPOD', {
   automateList: {
     snapshot: () => ipcRenderer.invoke('automate-list:snapshot'),
     importFile: () => ipcRenderer.invoke('automate-list:import-file'),
+    attachImage: (itemId) => ipcRenderer.invoke('automate-list:attach-image', itemId),
+    openSource: (itemId) => ipcRenderer.invoke('automate-list:open-source', itemId),
     start: () => ipcRenderer.invoke('automate-list:start'),
     pause: () => ipcRenderer.invoke('automate-list:pause'),
     stop: () => ipcRenderer.invoke('automate-list:stop'),
