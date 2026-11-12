@@ -124,6 +124,7 @@ require('./flyingResearchPaginationPatch');
 require('./flyingResearchInfiniteScrollPatch');
 require('./flyingResearchIpc');
 require('./automateListReliabilityPatch');
+require('./automateListMultiMarketplacePatch');
 require('./automateListIpc');
 require('./storeCachePatch');
 require('./interactionPerformancePatch');
