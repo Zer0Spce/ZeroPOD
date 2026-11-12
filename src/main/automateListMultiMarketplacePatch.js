@@ -88,7 +88,7 @@ AutomateListFeature.prototype.processItem = async function processMultiMarketpla
       sourcePlatform: source,
       title: item.title || productTitle(item.url, source),
       status: 'needs-image',
-      reason: 'Open the listing and attach a saved reference image. Automatic scraping is not enabled for ' + source + '.'
+      reason: 'Attach a reference image you own or are authorized to use. Automatic scraping is not enabled for ' + source + '.'
     });
     return;
   }
