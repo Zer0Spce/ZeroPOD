@@ -33,11 +33,11 @@
       section.id = 'automateList';
       section.className = 'view';
       section.innerHTML = `
-        <div class="eyebrow">FILE → AMAZON → AUTOMATION</div>
+        <div class="eyebrow">FILE → PRODUCT LINKS → AUTOMATION</div>
         <div class="heading-row">
           <div>
             <h2>Automate List</h2>
-            <p class="muted">Upload an Excel or text list of up to 30 Amazon POD links. ZeroPOD retries temporary Amazon/image failures automatically, then sends the product shirt image + original Amazon link into Automation.</p>
+            <p class="muted">Import up to 30 product URLs from Amazon, Etsy, Redbubble, TeePublic, and other sites. Amazon keeps automatic image retrieval. For other sources, open the listing and attach a saved reference image to send it into Automation.</p>
           </div>
           <div id="automateListState" class="queue-state">Stopped</div>
         </div>
@@ -50,7 +50,7 @@
           <button class="secondary" id="automateListClear">Clear List</button>
         </div>
         <div class="panel">
-          <div class="heading-row"><div><h3>Imported file</h3><p id="automateListMessage" class="muted">Upload a list containing Amazon product links.</p></div></div>
+          <div class="heading-row"><div><h3>Imported file</h3><p id="automateListMessage" class="muted">Upload a list containing product links.</p></div></div>
           <div id="automateListSource" class="automate-list-source">No list file loaded yet.</div>
           <div id="automateListSummary" class="automate-list-summary"></div>
           <div class="automate-list-capacity">
@@ -60,11 +60,11 @@
         </div>
         <div class="automation-table-wrap">
           <table class="automate-list-table">
-            <thead><tr><th>#</th><th>Amazon Link</th><th>Product</th><th>Status</th><th>Result</th></tr></thead>
+            <thead><tr><th>#</th><th>Source Link</th><th>Product</th><th>Status</th><th>Result</th></tr></thead>
             <tbody id="automateListRows"></tbody>
           </table>
         </div>
-        <p class="muted automation-footnote">Amazon reliability: each valid ASIN gets up to 3 automatic attempts, including a clean /dp/ASIN fallback, extra image selectors, browser-session image download, and a final product-image screenshot fallback. Use Retry Skipped to re-run temporary failures. Invalid URLs and duplicates stay skipped. CAPTCHA/login is never bypassed; ZeroPOD pauses for normal human verification.</p>`;
+        <p class="muted automation-footnote">Amazon retains its existing retry and image-extraction workflow. Etsy, Redbubble, TeePublic, and other sources accept the original product URL with a manually saved reference image. No login, CAPTCHA, or anti-bot bypass is attempted. Ensure you have permission to use reference images and generate original artwork.</p>`;
       const automationSection = document.getElementById('automation');
       if (automationSection) automationSection.insertAdjacentElement('afterend', section);
       else document.querySelector('main.content')?.appendChild(section);
@@ -103,7 +103,8 @@
   function statusLabel(status) {
     return ({
       pending: 'Pending',
-      checking: 'Checking Amazon',
+      checking: 'Checking source',
+      'needs-image': 'Needs image',
       'waiting-space': 'Waiting for space',
       added: 'Sent to Automation',
       skipped: 'Skipped',
@@ -140,7 +141,8 @@
         ['Sent', counts.added || 0],
         ['Skipped', counts.skipped || 0],
         ['Retryable', retryableSkipped],
-        ['Attention', counts['needs-attention'] || 0]
+        ['Attention', counts['needs-attention'] || 0],
+        ['Needs image', counts['needs-image'] || 0]
       ];
       summary.innerHTML = stats.map(([label, value]) => `<span><strong>${value}</strong> ${label}</span>`).join('');
     }
@@ -157,10 +159,10 @@
           : '';
         return `<tr>
           <td>${index + 1}</td>
-          <td class="automate-link-cell"><div class="automate-link" title="${escapeHtml(item.url)}">${escapeHtml(item.url)}</div>${item.asin ? `<small>${escapeHtml(item.marketplace || '')} · ${escapeHtml(item.asin)}</small>` : ''}</td>
+          <td class="automate-link-cell"><div class="automate-link" title="${escapeHtml(item.url)}">${escapeHtml(item.url)}</div><small>${escapeHtml(item.sourcePlatform || item.marketplace || 'Product link')}${item.asin ? ` · ${escapeHtml(item.asin)}` : ''}</small></td>
           <td>${item.title ? escapeHtml(item.title) : '<span class="muted">—</span>'}</td>
           <td><span class="automate-status ${badgeClass}">${escapeHtml(statusLabel(item.status))}</span></td>
-          <td class="automate-result">${detail ? escapeHtml(detail) : '<span class="muted">Waiting</span>'}</td>
+          <td class="automate-result">${detail ? escapeHtml(detail) : '<span class="muted">Waiting</span>'}<div class="automate-source-actions"><button type="button" data-open-source="${escapeHtml(item.id)}">Open listing</button>${item.status === 'needs-image' || (item.status === 'skipped' && item.retryable !== false) ? `<button type="button" data-attach-image="${escapeHtml(item.id)}">Attach image</button>` : ''}</div></td>
         </tr>`;
       }).join('') : '<tr><td colspan="5"><div class="empty small-empty">Upload an Excel or text list to begin.</div></td></tr>';
     }
@@ -216,6 +218,16 @@
 
   ensureUI();
 
+  document.getElementById('automateListRows')?.addEventListener('click', async (event) => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button.dataset.openSource) {
+      await runAction(button, () => api.openSource(button.dataset.openSource), 'Opening…');
+    } else if (button.dataset.attachImage) {
+      await runAction(button, () => api.attachImage(button.dataset.attachImage), 'Choosing image…');
+    }
+  });
+
   document.getElementById('automateListUpload')?.addEventListener('click', async (event) => {
     const result = await runAction(event.currentTarget, () => api.importFile(), 'Reading file…');
     if (result?.canceled) return;
@@ -251,6 +263,9 @@
     .automate-list-table td:first-child{border-left:1px solid var(--border);border-radius:10px 0 0 10px;width:36px;color:var(--muted)}
     .automate-list-table td:last-child{border-right:1px solid var(--border);border-radius:0 10px 10px 0}
     .automate-link-cell{max-width:360px}.automate-link{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.automate-link-cell small{display:block;color:var(--muted);margin-top:5px}
+    .automate-source-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+    .automate-source-actions button{border:1px solid var(--border);border-radius:7px;background:var(--surface-2);color:var(--text);padding:5px 8px;font-size:11px;cursor:pointer}
+    .automate-source-actions button:disabled{opacity:.6;cursor:wait}
     .automate-status{display:inline-flex;padding:5px 9px;border-radius:999px;border:1px solid var(--border);font-size:11px;white-space:nowrap}
     .automate-ok{border-color:rgba(47,207,120,.45);color:#78e8a7;background:rgba(47,207,120,.08)}
     .automate-skip{color:var(--muted)}
