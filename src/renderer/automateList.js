@@ -37,7 +37,7 @@
         <div class="heading-row">
           <div>
             <h2>Automate List</h2>
-            <p class="muted">Import up to 30 product URLs from Amazon, Etsy, Redbubble, TeePublic, and other sites. Amazon keeps automatic image retrieval. For other sources, open the listing and attach a saved reference image to send it into Automation.</p>
+            <p class="muted">Import up to 30 product URLs from Amazon, Etsy, Redbubble, TeePublic, and other sites. Amazon keeps automatic image retrieval. For other sources, open the listing and attach a reference image you have permission to use, then send it into Automation.</p>
           </div>
           <div id="automateListState" class="queue-state">Stopped</div>
         </div>
