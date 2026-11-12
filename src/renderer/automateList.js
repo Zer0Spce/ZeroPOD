@@ -205,7 +205,7 @@
     try {
       const result = await action();
       if (result?.snapshot) render(result.snapshot);
-      else if (result && !result.canceled) render(result);
+      else if (result?.items && !result.canceled) render(result);
       return result;
     } catch (error) {
       alert(error.message || error);
