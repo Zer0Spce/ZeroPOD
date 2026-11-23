@@ -80,6 +80,7 @@ jobs:
           node scripts/taskSelectionManualSmoke.js
           node scripts/taskMarcinPromptOnlySmoke.js
           node scripts/taskAnukReferenceConceptSmoke.js
+          node scripts/chatgptSequentialReferenceSmoke.js
           npm run check
 
       - name: Build unpacked Windows package
