@@ -132,7 +132,13 @@ async function attachmentState(page, beforeSources) {
     });
     const sources = images.map((img) => img.currentSrc || img.src || '').filter(Boolean);
     const newImage = sources.some((src) => !baselineSet.has(src));
-    const attachmentNode = [...document.querySelectorAll('[data-testid*="attachment" i], [data-testid*="upload" i], [data-testid*="file" i], button[aria-label*="remove" i], button[title*="remove" i]')].some(near);
+    const attachmentElements = [...document.querySelectorAll('[data-testid*="attachment" i], [data-testid*="upload" i], [data-testid*="file" i], button[aria-label*="remove" i], button[title*="remove" i]')].filter(near);
+    const attachmentNode = attachmentElements.length > 0;
+    const attachmentCount = attachmentElements.length;
+    const attachmentLabels = attachmentElements.map(el =>
+      [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-testid'), el.textContent]
+        .filter(Boolean).join(' ')
+    ).filter(Boolean);
     const busy = [...document.querySelectorAll('[role="progressbar"], [aria-busy="true"], [data-state="loading"], [data-testid*="uploading" i], [data-testid*="progress" i]')].some(near);
     const send = [...document.querySelectorAll('button[data-testid="send-button"], button[data-testid*="send" i], button[aria-label*="send" i]')].find(near);
     const sendEnabled = Boolean(send && !send.disabled && send.getAttribute('aria-disabled') !== 'true');
@@ -142,17 +148,22 @@ async function attachmentState(page, beforeSources) {
       for (let i = 0; node && i < 6; i += 1, node = node.parentElement) text += ` ${node.innerText || ''}`;
     }
     const failed = /upload failed|failed to upload|couldn['’]t upload|unsupported file|file too large/i.test(text);
-    return { newImage, attachmentNode, busy, sendEnabled, failed };
-  }, beforeSources).catch(() => ({ newImage: false, attachmentNode: false, busy: false, sendEnabled: false, failed: false }));
+    return { newImage, attachmentNode, attachmentCount, attachmentLabels, busy, sendEnabled, failed };
+  }, beforeSources).catch(() => ({ newImage: false, attachmentNode: false, attachmentCount: 0, attachmentLabels: [], busy: false, sendEnabled: false, failed: false }));
 }
 
 async function findComposerFileInput(page) {
-  // Prefer image-accepting inputs. Passing the file bytes directly avoids Windows
-  // path handoff delays and makes local acceptance effectively immediate.
-  const imageInput = page.locator('input[type="file"][accept*="image" i]').first();
-  if (await imageInput.count()) return imageInput;
-  const generic = page.locator('input[type="file"]').first();
-  if (await generic.count()) return generic;
+  // ChatGPT may leave hidden <input type=file> elements from previous messages.
+  // The FIRST input is often stale on job #2. Prefer the newest active image
+  // input; never assume the oldest hidden input belongs to the live composer.
+  const inputs = page.locator('input[type="file"]');
+  const count = await inputs.count();
+  for (let index = count - 1; index >= 0; index -= 1) {
+    const input = inputs.nth(index);
+    const accept = await input.getAttribute('accept').catch(() => '');
+    if (accept && !/(?:image|\\.png|\\.jpe?g|\\.webp|\\.gif)/i.test(accept)) continue;
+    if (await input.isEnabled().catch(() => true)) return input;
+  }
   return null;
 }
 
@@ -211,17 +222,62 @@ async function injectFast(page, referencePath) {
   throw new Error('ChatGPT composer is ready, but ZeroPOD could not access its image upload control.');
 }
 
+function hasNewReferenceEvidence(state, baseline) {
+  const changedLabel = (state.attachmentLabels || []).some(label =>
+    !(baseline.attachmentLabels || []).includes(label)
+  );
+  return Boolean(state.newImage
+    || state.attachmentCount > (baseline.attachmentCount || 0)
+    || (changedLabel && state.attachmentCount > 0));
+}
+
+async function waitForReferenceEvidence(page, beforeSources, baseline, timeoutMs = 12000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const state = await attachmentState(page, beforeSources);
+    if (state.failed) throw new Error('ChatGPT reported that the reference image upload failed.');
+    if (hasNewReferenceEvidence(state, baseline) && !state.busy) return true;
+    await wait(160);
+  }
+  return false;
+}
+
 ChatGPTController.prototype.attachReference = async function attachReferenceLive(page, referencePath) {
   await this.assertNoHumanGate(page);
-  if (!(await composerVisible(this, page, 1000))) throw new Error('ChatGPT composer is not ready for the reference image.');
+  pendingUploads.delete(page);
+  if (!(await composerVisible(this, page, 2000))) throw new Error('ChatGPT composer is not ready for the reference image.');
 
-  const beforeSources = await allImageSources(page);
-  const method = await injectFast(page, referencePath);
-  pendingUploads.set(page, { referencePath, beforeSources, method, injectedAt: Date.now() });
-
-  // setInputFiles/fileChooser.setFiles returning means Chrome accepted the local
-  // file bytes. Do not block prompt entry behind the remote upload/preview.
-  return true;
+  // Only allow a new prompt to be pasted once its actual image is visible in
+  // the active composer. If Chrome accepted bytes into a stale input, refresh
+  // the SAME conversation (not New Chat) and attach to its new composer.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0) {
+      await this.assertNoHumanGate(page);
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 25000 });
+      await this.ensureReady(page);
+    }
+    const beforeSources = await allImageSources(page);
+    const baseline = await attachmentState(page, beforeSources);
+    let method = '';
+    try {
+      method = await injectFast(page, referencePath);
+    } catch (error) {
+      if (attempt === 1) throw error;
+      continue;
+    }
+    const ready = await waitForReferenceEvidence(
+      page, beforeSources, baseline, attempt === 0 ? 12000 : 25000
+    );
+    if (ready) {
+      pendingUploads.set(page, { referencePath, beforeSources, method, injectedAt: Date.now() });
+      return true;
+    }
+  }
+  throw new Error(
+    'ChatGPT accepted the reference file but did not show its preview after two attempts. ' +
+    'ZeroPOD refreshed the existing conversation once. Nothing was sent without the image; ' +
+    'select this row and use Retry Design.'
+  );
 };
 
 async function composerText(composer) {
@@ -297,16 +353,19 @@ async function waitForUploadReady(page, pending, timeoutMs = 15000) {
 
 ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, composer) {
   const pending = pendingUploads.get(page);
-  if (pending) await waitForUploadReady(page, pending, 15000);
+  try {
+    if (pending) await waitForUploadReady(page, pending, 25000);
+    const result = await previousSendPrompt.call(this, page, composer);
 
-  const result = await previousSendPrompt.call(this, page, composer);
-  pendingUploads.delete(page);
-
-  // Snapshot after Send so the user's uploaded reference image cannot be confused
-  // with the later assistant-generated artwork.
-  await wait(180);
-  postSendBaselines.set(page, new Set(await allImageSources(page)));
-  return result;
+    // Snapshot after Send so the reference image cannot be confused with
+    // the new assistant-generated artwork in the next consecutive job.
+    await wait(180);
+    postSendBaselines.set(page, new Set(await allImageSources(page)));
+    return result;
+  } finally {
+    // Never leak an attachment state from one row into another.
+    pendingUploads.delete(page);
+  }
 };
 
 ChatGPTController.prototype.snapshotAssistantState = async function snapshotAssistantStateLive(page) {
@@ -452,4 +511,4 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
   throw new Error(`ChatGPT did not expose a capturable generated image within 6 minutes.${suffix}`);
 };
 
-module.exports = {};
+module.exports = { findComposerFileInput, hasNewReferenceEvidence, waitForReferenceEvidence };
