@@ -269,7 +269,7 @@ ChatGPTController.prototype.attachReference = async function attachReferenceLive
       page, beforeSources, baseline, attempt === 0 ? 12000 : 25000
     );
     if (ready) {
-      pendingUploads.set(page, { referencePath, beforeSources, method, injectedAt: Date.now() });
+      pendingUploads.set(page, { referencePath, beforeSources, baseline, method, injectedAt: Date.now() });
       return true;
     }
   }
@@ -342,7 +342,9 @@ async function waitForUploadReady(page, pending, timeoutMs = 15000) {
   while (Date.now() - started < timeoutMs) {
     const state = await attachmentState(page, pending.beforeSources);
     if (state.failed) throw new Error('ChatGPT reported that the reference image upload failed.');
-    if (state.newImage || state.attachmentNode) sawAttachment = true;
+    // A prior message may still show an attachment tile near the composer.
+    // Only evidence NEW since this row's upload can authorize sending.
+    if (hasNewReferenceEvidence(state, pending.baseline || {})) sawAttachment = true;
     if (sawAttachment && !state.busy && state.sendEnabled) return true;
     await wait(100);
   }
