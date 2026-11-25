@@ -26,7 +26,7 @@ class FakePage {
  locator(selector){
   if(selector==='input[type="file"]')return {count:async()=>this.inputs.length,nth:i=>this.inputs[i]};
   if(selector==='img')return {evaluateAll:async()=>[...this.history,...(this.preview?[this.preview]:[])].map(src=>({src,currentSrc:src}))};
-  if(selector.includes('button[data-testid="send-button"]'))return {first:()=>({waitFor:async()=>{},click:async()=>{
+  if(selector.includes('button[data-testid="send-button"]'))return {first:()=>({count:async()=>1,waitFor:async()=>{},click:async()=>{
    this.sent++;
    if(this.preview)this.history.push(this.preview);
    // The second submission intentionally has no observable user-role node.
@@ -63,7 +63,7 @@ async function run(){
   const patch=require('../src/main/chatgptLiveReliabilityPatch');
   Module._load=originalLoad;
   let clock=0;
-  Date.now=()=>{clock+=3000;return clock};
+  Date.now=()=>{clock+=1000;return clock};
   const controller=new FakeChatGPTController(),page=new FakePage();
   controller.projects={getProjectDir:()=>root,update:()=>{}};
   controller.saveGeneratedAsset=async()=>({savePath:path.join(root,'generated.png'),metadata:{width:1024,height:1024},mime:'image/png'});
@@ -100,7 +100,11 @@ async function run(){
   // If Chrome never shows the image on either attempt, fail closed; do not send.
   page.inputs=[new FakeInput(page,'stale-fourth',false)];
   page.activateOnReload=false;
-  await assert.rejects(()=>controller.attachReference(page,ref),/after two attempts.*Nothing was sent without the image/);
+  assert.strictEqual(await controller.attachReference(page,ref),true,'paste must remain available even while preview is delayed');
+  // Accelerate the 90s safety deadline in this failure case.
+  Date.now=()=>{clock+=10000;return clock};
+  await assert.rejects(()=>controller.sendPrompt(page,{evaluate:async()=> 'test prompt'}),/never showed its attachment preview/);
+  Date.now=()=>{clock+=1000;return clock};
   assert.strictEqual(page.reloads,2);
   assert.strictEqual(page.sent,3,'missing attachment must never send a text-only prompt');
 
