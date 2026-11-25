@@ -155,6 +155,15 @@ async function run() {
     assert.throws(() => workload.retryRow(99), /not found/i);
     assert.throws(() => workload.retryRow(-1), /not found/i);
 
+    // Reimport with no saved output association: preserve the existing file.
+    const originalOutput=first.output;
+    const reimported={id:'I-261028-15',niche:'antlers',idea:'fresh design'};
+    fs.writeFileSync(exported,'PNG-REIMPORTED');
+    await workload.process(reimported);
+    assert.strictEqual(fs.readFileSync(originalOutput,'utf8'),'PNG-THIRD');
+    assert.ok(reimported.output.endsWith('__v2.png'));
+    assert.strictEqual(fs.readFileSync(reimported.output,'utf8'),'PNG-REIMPORTED');
+
     // Never allow the preview IPC to read an arbitrary file path.
     workload.rows[0].output = source;
     await assert.rejects(() => workload.preview(0), /Invalid Task Workload output path/);
