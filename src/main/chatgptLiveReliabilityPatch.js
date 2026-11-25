@@ -107,7 +107,7 @@ ChatGPTController.prototype.ensureReady = async function ensureReadyLive(page) {
 
 async function attachmentState(page, beforeSources) {
   return page.evaluate((baseline) => {
-    const composer = document.querySelector('#prompt-textarea, [data-testid="composer-text-input"], textarea[placeholder*="Message" i], textarea, [contenteditable="true"]');
+    const composer = ['#prompt-textarea','[data-testid="composer-text-input"]','textarea[placeholder*="Message" i]','[contenteditable="true"]','textarea'].flatMap(sel=>[...document.querySelectorAll(sel)]).find(el=>el.getClientRects().length);
     const baselineSet = new Set(baseline || []);
     const visible = (element) => {
       if (!(element instanceof Element)) return false;
@@ -117,7 +117,7 @@ async function attachmentState(page, beforeSources) {
     };
     const composerRect = composer?.getBoundingClientRect?.() || null;
     const near = (element) => {
-      if (!visible(element) || element.closest('[data-message-author-role]')) return false;
+      if (!visible(element) || element.closest('[data-message-author-role], [data-turn="user"], [data-turn="assistant"]')) return false;
       if (!composerRect) return false;
       const rect = element.getBoundingClientRect();
       return rect.bottom >= composerRect.top - 420
@@ -237,7 +237,7 @@ async function waitForReferenceEvidence(page, beforeSources, baseline, timeoutMs
   while (Date.now() - started < timeoutMs) {
     const state = await attachmentState(page, beforeSources);
     if (state.failed) throw new Error('ChatGPT reported that the reference image upload failed.');
-    if (hasNewReferenceEvidence(state, baseline) && !state.busy) return true;
+    if (hasNewReferenceEvidence(state, baseline)) return true;
     await wait(160);
   }
   return false;
@@ -251,7 +251,6 @@ ChatGPTController.prototype.attachReference = async function attachReferenceLive
     await this.ensureReady(page);
   }
   dirtyPages.add(page);
-  await waitForIdle(page);
   if (!(await composerVisible(this, page, 2000))) throw new Error('ChatGPT composer is not ready for the reference image.');
 
   // Only allow a new prompt to be pasted once its actual image is visible in
@@ -279,9 +278,11 @@ ChatGPTController.prototype.attachReference = async function attachReferenceLive
       continue;
     }
     const ready = await waitForReferenceEvidence(
-      page, beforeSources, baseline, attempt === 0 ? 45000 : 60000
+      page, beforeSources, baseline, attempt === 0 ? 3000 : 12000
     );
-    if (ready) {
+    if (ready || attempt === 1) {
+      // A successful file injection is enough to paste text. Remote upload
+      // confirmation is checked only before Send, not before prompt entry.
       pendingUploads.set(page, { referencePath, beforeSources, baseline, method, injectedAt: Date.now() });
       return true;
     }
@@ -302,7 +303,7 @@ async function composerText(composer) {
 
 ChatGPTController.prototype.fillPrompt = async function fillPromptLive(page, prompt) {
   await this.assertNoHumanGate(page);
-  const composer = await composerVisible(this, page, 1600);
+  const composer = await composerVisible(this, page, 10000);
   if (!composer) throw new Error('ChatGPT composer disappeared before the generation prompt could be pasted.');
 
   // Avoid locator.fill() here: on the current ChatGPT contenteditable it can sit on
@@ -358,7 +359,7 @@ async function waitForUploadReady(page, pending, timeoutMs = 90000) {
     // A prior message may still show an attachment tile near the composer.
     // Only evidence NEW since this row's upload can authorize sending.
     if (hasNewReferenceEvidence(state, pending.baseline || {})) sawAttachment = true;
-    if (sawAttachment && !state.busy && state.sendEnabled) return true;
+    if (hasNewReferenceEvidence(state, pending.baseline || {}) && !state.busy && state.sendEnabled) return true;
     await wait(100);
   }
   throw new Error(sawAttachment
@@ -382,7 +383,7 @@ async function conversationState(page) {
       }));
       return {role,id,index,images,busy:[...el.querySelectorAll('[aria-busy="true"],[role="progressbar"],[data-state="loading"]')].some(visible)};
     });
-    const composer = document.querySelector('#prompt-textarea, [data-testid="composer-text-input"]');
+    const composer = ['#prompt-textarea','[data-testid="composer-text-input"]','textarea[placeholder*="Message" i]','[contenteditable="true"]','textarea'].flatMap(sel=>[...document.querySelectorAll(sel)]).find(visible);
     const draft = String(composer?.value ?? composer?.innerText ?? composer?.textContent ?? '').trim();
     const busy = [...document.querySelectorAll('button[data-testid="stop-button"],button[aria-label*="stop generating" i],button[aria-label*="cancel generation" i],button[aria-label="Stop response" i]')].some(visible);
     return {turns,draft,busy,composerPresent:!!composer};
@@ -417,7 +418,8 @@ ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, com
   postSendBaselines.delete(page);
   try {
     if (pending) await waitForUploadReady(page, pending, 90000);
-    const before = await waitForIdle(page);
+    const before = await conversationState(page);
+    if (before.busy) throw new Error('ChatGPT is still generating the previous response. Prompt was not sent.');
     const prompt = await composerText(composer);
     if (!prompt.trim()) throw new Error('Cannot submit an empty generation prompt.');
     const assistants = assistantTurns(before);
@@ -429,9 +431,13 @@ ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, com
     };
     // Prefer the actual composer send button. The legacy broad send selector
     // can click unrelated controls, reporting success without submitting.
-    const button = page.locator('button[data-testid="send-button"]:visible, button[aria-label="Send prompt" i]:visible, button[aria-label="Send message" i]:visible').first();
-    await button.waitFor({state:'visible',timeout:15000});
-    await button.click({timeout:15000});
+    const button = page.locator('button[data-testid="send-button"]:visible, button[aria-label="Send prompt" i]:visible, button[aria-label="Send message" i]:visible, button[aria-label="Send" i]:visible').first();
+    if (await button.count()) {
+      await button.click({timeout:15000});
+    } else {
+      // Restore the working native keyboard path for alternate composer builds.
+      await composer.press('Enter');
+    }
     const deadline = Date.now() + 60000;
     while (Date.now() < deadline) {
       const state = await conversationState(page);
