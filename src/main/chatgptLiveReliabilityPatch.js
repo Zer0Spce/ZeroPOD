@@ -155,86 +155,54 @@ async function attachmentState(page, beforeSources, referencePath) {
 }
 
 async function findComposerFileInput(page) {
-  const composer = page.locator('#prompt-textarea:visible, [data-testid="composer-text-input"]:visible, textarea[placeholder*="Message" i]:visible').first();
-  if (!(await composer.count())) return null;
-  const root = composer.locator('xpath=ancestor::form[1]');
-  if (await root.count()) {
-    const image = root.locator('input[type="file"][accept*="image" i]').last();
-    if (await image.count()) return image;
-    const generic = root.locator('input[type="file"]').last();
-    if (await generic.count()) return generic;
-  }
-  // Never select a global file input: previous assistant image editors may own it.
-  return null;
+  const inputs = page.locator('input[type="file"]');
+  const candidates = await inputs.evaluateAll(nodes => nodes.map((el,index)=>{
+    if (el.disabled || el.closest('[data-message-author-role], [role="dialog"]')) return null;
+    const accept = String(el.accept || '');
+    if (accept && !/image|png|jpe?g|webp|\*\/\*/i.test(accept)) return null;
+    const composer = document.querySelector('#prompt-textarea, [data-testid="composer-text-input"]');
+    let score = /image/i.test(accept) ? 10 : 0;
+    for(let p=el.parentElement, depth=0;p&&depth<8;p=p.parentElement,depth++){
+      if(composer && p.contains(composer)){score+=100-depth*10;break;}
+    }
+    return {index,score};
+  }).filter(Boolean).sort((a,b)=>b.score-a.score||b.index-a.index)).catch(()=>[]);
+  return candidates.length ? inputs.nth(candidates[0].index) : null;
 }
 
 async function setInputBytes(input, referencePath) {
-  const buffer = fs.readFileSync(referencePath);
-  await input.setInputFiles({
-    name: path.basename(referencePath),
-    mimeType: mimeFromPath(referencePath),
-    buffer
-  }, { timeout: 3500 });
+  await input.setInputFiles(referencePath, { timeout: 10000 });
 }
 
 async function injectFast(page, referencePath) {
-  let input = await findComposerFileInput(page);
-  if (input) {
-    await setInputBytes(input, referencePath);
-    return 'memory-file-input';
-  }
-
-  const plus = page.locator('button[data-testid="composer-plus-btn"]:visible, form button[aria-label*="add files" i]:visible, form button[aria-label*="attach" i]:visible').last();
+  const plus = page.locator('button[data-testid="composer-plus-btn"]:visible, button[aria-label*="add files" i]:visible, button[aria-label*="attach" i]:visible').last();
   if (await plus.count()) {
-    await plus.click({ timeout: 1500 }).catch(() => {});
-    await wait(120);
-    input = await findComposerFileInput(page);
-    if (input) {
-      await setInputBytes(input, referencePath);
-      return 'composer-plus-file-input';
+    const directChooser = page.waitForEvent('filechooser',{timeout:1200}).catch(()=>null);
+    await plus.click({timeout:3000}).catch(()=>{});
+    const direct = await directChooser;
+    if(direct){await direct.setFiles(referencePath);return 'composer-chooser';}
+    const menu = page.getByRole('menuitem',{name:/upload|photo|file/i}).or(page.getByRole('button',{name:/upload from computer|add photos|add files|photos.*files/i})).or(page.getByText(/upload from computer|add photos(?:\s*&\s*| and )files/i)).and(page.locator(':visible')).last();
+    if(await menu.count()){
+      const chooserPromise=page.waitForEvent('filechooser',{timeout:4000}).catch(()=>null);
+      await menu.click({timeout:3000}).catch(()=>{});
+      const chooser=await chooserPromise;
+      if(chooser){await chooser.setFiles(referencePath);return 'upload-menu-chooser';}
     }
+    await page.keyboard.press('Escape').catch(()=>{});
   }
-
-  const menuItems = [
-    page.getByRole('menuitem', { name: /upload|photo|file/i }).first(),
-    page.getByRole('button', { name: /upload from computer|add photos|add files|photos.*files/i }).first(),
-    page.getByText(/upload from computer|add photos(?:\s*&\s*| and )files/i).first()
-  ];
-
-  for (const item of menuItems) {
-    try {
-      await item.waitFor({ state: 'visible', timeout: 2000 });
-      const chooserPromise = page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null);
-      await item.click({ timeout: 3000 });
-      const chooser = await chooserPromise;
-      if (chooser) {
-        const buffer = fs.readFileSync(referencePath);
-        await chooser.setFiles({ name: path.basename(referencePath), mimeType: mimeFromPath(referencePath), buffer });
-        return 'native-file-chooser-memory';
-      }
-      input = await findComposerFileInput(page);
-      if (input) {
-        await setInputBytes(input, referencePath);
-        return 'upload-menu-file-input';
-      }
-    } catch {}
-  }
-
-  throw new Error('ChatGPT composer is ready, but ZeroPOD could not access its image upload control.');
+  const input=await findComposerFileInput(page);
+  if(input){await setInputBytes(input,referencePath);return 'active-file-input';}
+  throw new Error('ChatGPT image upload control unavailable after checking attachment menu and eligible file inputs.');
 }
 
 ChatGPTController.prototype.attachReference = async function attachReferenceLive(page, referencePath) {
   await this.assertNoHumanGate(page);
-  if (!(await composerVisible(this, page, 1000))) throw new Error('ChatGPT composer is not ready for the reference image.');
-
+  if (!(await composerVisible(this,page,5000))) throw new Error('ChatGPT composer is not ready for the reference image.');
   pendingUploads.delete(page);
   postSendBaselines.delete(page);
-  const beforeSources = await allImageSources(page);
-  const method = await injectFast(page, referencePath);
-  pendingUploads.set(page, { referencePath, beforeSources, method, injectedAt: Date.now() });
-
-  // setInputFiles/fileChooser.setFiles returning means Chrome accepted the local
-  // file bytes. Do not block prompt entry behind the remote upload/preview.
+  const beforeSources=await allImageSources(page);
+  const method=await injectFast(page,referencePath);
+  pendingUploads.set(page,{referencePath,beforeSources,method,injectedAt:Date.now()});
   return true;
 };
 
