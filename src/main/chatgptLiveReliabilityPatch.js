@@ -355,6 +355,39 @@ async function generatedDomCandidates(page, baselineSources) {
   }, [...baselineSources]).catch(() => []);
 }
 
+async function downloadLatestArtwork(controller,page,projectId,baseline) {
+  const messages=page.locator('[data-message-author-role="assistant"]');
+  const count=await messages.count();
+  if(!count) return null;
+  const latest=messages.last();
+  const id=await latest.evaluate((n,i)=>n.getAttribute('data-message-id')||n.closest('[data-message-id]')?.getAttribute('data-message-id')||'assistant-'+i,count-1);
+  if(baseline.ids?.has(id)||count<baseline.count) return null;
+  const turn=latest.locator('xpath=ancestor::article[1]');
+  const scope=await turn.count()?turn:latest;
+  const image=scope.locator('img');
+  if(!(await image.count())) return null;
+  const download=scope.locator('button[aria-label*="download" i], button[title*="download" i], a[download], [data-testid*="download" i]').and(page.locator(':visible')).last();
+  if(!(await download.count())) return null;
+  const pending=page.waitForEvent('download',{timeout:15000}).catch(()=>null);
+  await download.click({timeout:4000}).catch(()=>{});
+  const file=await pending;
+  if(!file)return null;
+  const projectDir=controller.projects.getProjectDir(projectId);
+  const temp=path.join(projectDir,'capture-download-'+Date.now()+'.tmp');
+  try {
+    await file.saveAs(temp);
+    const meta=await sharp(temp,{failOn:'error'}).metadata();
+    if(!['png','jpeg','webp'].includes(meta.format)||meta.width<384||meta.height<384)throw Error('Downloaded artwork is invalid');
+    await sharp(temp,{failOn:'error'}).stats();
+    const {isReferenceImage}=require('./chatgptReferenceImageFilterPatch');
+    if(await isReferenceImage(temp,controller.projects.read(projectId).referencePath))throw Error('Download matched reference image');
+    const savePath=controller.nextDraftPath(projectDir,meta.format==='jpeg'?'.jpg':'.'+meta.format);
+    fs.renameSync(temp,savePath);
+    controller.projects.update(projectId,{status:'awaiting-review',generatedImagePath:savePath,generatedImage:{mime:'image/'+meta.format,width:meta.width,height:meta.height,hasAlpha:!!meta.hasAlpha,source:'native-download'},automationStep:'Ready for review',chatgptError:null});
+    return {ok:true,path:savePath,method:'native-download'};
+  } finally {fs.rmSync(temp,{force:true});}
+}
+
 async function saveNetworkBytes(controller, projectId, asset) {
   const projectDir = controller.projects.getProjectDir(projectId);
   const savePath = controller.nextDraftPath(projectDir, asset.format?.ext || '.png');
@@ -389,7 +422,7 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
   const deadline = Date.now() + 360000;
   let lastError = null;
   let lastProgress = 0;
-  let stableSource = '', stableSince = 0;
+  let stableSource = '', stableSince = 0, lastDownloadAttempt = 0;
 
   step('Waiting for ChatGPT image');
 
@@ -401,6 +434,13 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
     // fetch that exact img/blob source directly. Never click browser Download.
     const candidates = await generatedDomCandidates(page, baselineSources);
     const busy = await page.locator('button[data-testid="stop-button"]:visible, button[aria-label*="stop generating" i]:visible, button[aria-label*="stop streaming" i]:visible').count();
+    if (!busy && Date.now()-lastDownloadAttempt>20000) {
+      lastDownloadAttempt=Date.now();
+      try {
+        const downloaded=await downloadLatestArtwork(this,page,projectId,baseline);
+        if(downloaded){postSendBaselines.delete(page);step('Ready for review');return downloaded;}
+      } catch(error){lastError=error;}
+    }
     const source = candidates[0]?.src || '';
     if (source !== stableSource || busy) {
       stableSource = source;
