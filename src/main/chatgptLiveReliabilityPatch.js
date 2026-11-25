@@ -167,9 +167,9 @@ async function setInputBytes(input, referencePath, filename) {
   }, { timeout: 3500 });
 }
 
-async function injectFast(page, referencePath, filename) {
+async function injectFast(page, referencePath, filename, menuFirst = false) {
   let input = await findComposerFileInput(page);
-  if (input) {
+  if (input && !menuFirst) {
     await setInputBytes(input, referencePath, filename);
     return 'memory-file-input';
   }
@@ -179,7 +179,7 @@ async function injectFast(page, referencePath, filename) {
     await plus.click({ timeout: 1500 }).catch(() => {});
     await wait(120);
     input = await findComposerFileInput(page);
-    if (input) {
+    if (input && !menuFirst) {
       await setInputBytes(input, referencePath, filename);
       return 'composer-plus-file-input';
     }
@@ -352,7 +352,8 @@ ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, com
         const beforeSources=await allImageSources(page);
         const old=await attachmentState(page,beforeSources,filename);
         if(old.attachmentNode) throw new Error('Old attachment survived reload; remove it before retrying.');
-        await pasteReference(composer,pending.referencePath,filename);
+        try { await injectFast(page,pending.referencePath,filename,true); }
+        catch { await pasteReference(composer,pending.referencePath,filename); }
         composer=await this.fillPrompt(page,prompt);
         pending={...pending,beforeSources,filename};
         status=await waitForUploadReady(page,pending,90000);
@@ -405,7 +406,7 @@ async function generatedDomCandidates(page, submission) {
       if(/placeholder|preview|loading|generating|blurry|progressive/i.test(alt)||img.closest('[aria-busy="true"],[data-state="loading"],[data-testid*="placeholder" i]')) continue;
       let imageControls=false;
       for(let node=img.parentElement;node && node!==turn.parentElement;node=node.parentElement) {
-        if([...node.querySelectorAll('button,[role="button"],a[download]')].some(el=>visible(el)&&imageAction(el))) {imageControls=true;break;}
+        if([...node.querySelectorAll('button,[role="button"],a[download]')].some(el=>visible(el)&&(imageAction(el)||(node!==turn&&node.querySelectorAll('img').length===1&&/^download$/i.test((el.getAttribute('aria-label')||el.getAttribute('title')||'').trim()))))) {imageControls=true;break;}
         if(node===turn)break;
       }
       // Image-specific final controls OR finished response toolbar with an
@@ -424,10 +425,16 @@ async function fingerprint(input) {
 function fingerprintDistance(a,b) {
   const x=Buffer.from(a,'base64'),y=Buffer.from(b,'base64');
   if(!x.length||x.length!==y.length)return Infinity;
-  let total=0;for(let i=0;i<x.length;i++)total+=Math.abs(x[i]-y[i]);return total/x.length;
+  let total=0,active=0;
+  for(let i=0;i<x.length;i+=3) {
+    const ink=Math.min(x[i],x[i+1],x[i+2],y[i],y[i+1],y[i+2])<243;
+    if(!ink) continue;
+    total+=Math.abs(x[i]-y[i])+Math.abs(x[i+1]-y[i+1])+Math.abs(x[i+2]-y[i+2]);active+=3;
+  }
+  return active?total/active:0;
 }
 async function historicalFingerprints(controller, projectId) {
-  const history=controller.projects.list?.({includeArchived:true})||[];
+  const history=(controller.projects.list?.({includeArchived:true})||[]).slice(0,100);
   const fingerprints=[];
   for(const project of history) {
     if(project.id===projectId)continue;

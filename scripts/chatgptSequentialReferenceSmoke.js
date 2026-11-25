@@ -33,6 +33,17 @@ const {generatedDomCandidates,fingerprintDistance,attachmentState}=require('../s
  assert.equal(upload.newImage,true);assert.equal(upload.sendEnabled,true);
  assert.equal((await attachmentState(page,['https://example.test/upload.png'],'test.png')).newImage,false,'old chat pictures cannot prove a new upload');
  assert.equal(fingerprintDistance(Buffer.from([1,2,3]).toString('base64'),Buffer.from([1,2,3]).toString('base64')),0);
+ const {assertDistinctOutput}=require('../src/main/taskWorkload');
+ const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),sharp=require('sharp');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'zeropod-duplicate-'));
+ try{
+  const a=path.join(dir,'a.png'),b=path.join(dir,'b.png'),c=path.join(dir,'c.png');
+  await sharp({create:{width:512,height:512,channels:3,background:'#999999'}}).png().toFile(a);
+  await sharp({create:{width:512,height:512,channels:3,background:'#9a9a9a'}}).png().toFile(b);
+  await sharp({create:{width:512,height:512,channels:3,background:'#ee2233'}}).png().toFile(c);
+  await assert.rejects(()=>assertDistinctOutput(b,[a]),/duplicates another job/);
+  await assertDistinctOutput(c,[a]);
+ }finally{fs.rmSync(dir,{recursive:true,force:true})}
  dom.window.close();
  console.log('Final image and attachment DOM regression checks passed');
 })().catch(e=>{console.error(e);process.exitCode=1});

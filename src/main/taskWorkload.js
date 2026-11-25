@@ -4,6 +4,21 @@ const safe=v=>String(v||'').trim().replace(/[^a-z0-9_-]+/gi,'_').replace(/^_+|_+
 const safeTitle=v=>String(v||'').trim().replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').slice(0,185).trim();
 const localDate=()=>{const d=new Date();return [d.getMonth()+1,d.getDate(),String(d.getFullYear()).slice(-2)].join('-')};
 const marcinFields=['no','name','market','mainKeyword','subNiche','linkSource'];
+async function assertDistinctOutput(candidate, existing) {
+ const pixels=file=>sharp(file,{failOn:'error'}).resize(32,32,{fit:'fill'}).flatten({background:'#ffffff'}).removeAlpha().raw().toBuffer();
+ const current=await pixels(candidate);
+ for(const file of existing){
+  if(!file||!fs.existsSync(file))continue;
+  let prior;try{prior=await pixels(file)}catch{continue}
+  if(current.length!==prior.length||!current.length)continue;
+  let total=0,active=0;
+  for(let i=0;i<current.length;i+=3){
+   if(Math.min(current[i],current[i+1],current[i+2],prior[i],prior[i+1],prior[i+2])>=243)continue;
+   total+=Math.abs(current[i]-prior[i])+Math.abs(current[i+1]-prior[i+1])+Math.abs(current[i+2]-prior[i+2]);active+=3;
+  }
+  if(!active||total/active<=2.5)throw Error('Final PNG duplicates another job. No output was overwritten or marked completed; check the ChatGPT draft and Vectorizer result.');
+ }
+}
 class TaskWorkload {
  constructor({projects,chatgpt,vectorizer,exporter,mode='anuk'}){Object.assign(this,{projects,chatgpt,vectorizer,exporter,mode});this.running=false;this.stopRequested=false;this.paused=false;this.busy=false;this.rows=[];this.load();}
  get keys(){return this.mode==='marcin'?marcinFields:FIELDS}
@@ -160,6 +175,10 @@ class TaskWorkload {
    if(info.format!=='png'||info.width!==4500||info.height!==5400||!info.hasAlpha)throw Error('Exported PNG failed 4500x5400 alpha verification.');
    // renameSync uses replacement semantics on Windows, avoiding an intermediate
    // missing-file state. If replacement fails, the original PNG is preserved.
+   if(this.mode==='anuk'&&project.generatedImage?.source==='verified-final-assistant-image'){
+    const existing=this.rows.filter(other=>other!==row&&other.output&&path.resolve(other.output)!==path.resolve(target)).map(other=>other.output);
+    await assertDistinctOutput(staged,existing);
+   }
    fs.renameSync(staged,target);
   }finally{if(fs.existsSync(staged))fs.rmSync(staged,{force:true})}
   const previous=row.output;row.output=target;
@@ -239,4 +258,4 @@ class TaskWorkload {
   return dest;
  }
 }
-module.exports={TaskWorkload};
+module.exports={TaskWorkload,assertDistinctOutput};
