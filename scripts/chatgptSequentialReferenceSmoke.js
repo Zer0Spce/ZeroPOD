@@ -7,7 +7,7 @@ class FakeChatGPTController {
  composerLocator(){return {waitFor:async()=>{},evaluate:async()=>''}}
  async ensureReady(page){return this.composerLocator(page)}
  async snapshotAssistantState(){return {count:0,imageSources:new Set()}}
- async sendPrompt(page){page.sent++;if(page.preview)page.history.push(page.preview);page.preview='';page.turns.push({role:'user',id:'user-'+page.sent,text:'test prompt'});return true}
+ async sendPrompt(page){throw Error('Legacy broad Send must not be called')}
 }
 class FakeInput {
  constructor(page,name,active=true){Object.assign(this,{page,name,active,uploads:0})}
@@ -26,12 +26,19 @@ class FakePage {
  locator(selector){
   if(selector==='input[type="file"]')return {count:async()=>this.inputs.length,nth:i=>this.inputs[i]};
   if(selector==='img')return {evaluateAll:async()=>[...this.history,...(this.preview?[this.preview]:[])].map(src=>({src,currentSrc:src}))};
+  if(selector.includes('button[data-testid="send-button"]'))return {first:()=>({waitFor:async()=>{},click:async()=>{
+   this.sent++;
+   if(this.preview)this.history.push(this.preview);
+   // The second submission intentionally has no observable user-role node.
+   if(this.sent!==2)this.turns.push({role:'user',id:'user-'+this.sent,index:this.turns.length,images:[{src:this.preview}],busy:false});
+   this.preview='';
+   this.turns.push({role:'assistant',id:'assistant-'+this.sent,index:this.turns.length,images:[{src:'blob:generated-'+this.sent,ready:true,width:1024,height:1024}],busy:false});
+  }})};
   if(selector.includes('composer-plus-btn'))return {count:async()=>0};
   throw Error('Unexpected selector: '+selector);
  }
  async evaluate(fn,baseline){
-  if (baseline === undefined) return this.turns;
-  if (!Array.isArray(baseline)) return [{id:'assistant-'+this.sent,src:'blob:generated-'+this.sent,width:1024,height:1024}];
+  if (baseline === undefined) return {turns:this.turns,draft:'',busy:false,composerPresent:true};
   const srcs=[...this.history,...(this.preview?[this.preview]:[])];
   const newImage=Boolean(this.preview&&!baseline.includes(this.preview));
   return {
@@ -104,6 +111,15 @@ async function run(){
   assert.strictEqual(patch.hasNewReferenceEvidence({
    newImage:true,attachmentCount:1,attachmentLabels:['new image']
   },{attachmentCount:1,attachmentLabels:['old image']}),true);
+  // Regression: old assistant images and user uploads cannot authorize capture.
+  const baseline={assistantCount:1,lastAssistantId:'old',userCount:1,known:new Set(['old','user-old']),sources:new Set(['blob:old'])};
+  const old={role:'assistant',id:'old',index:1,images:[{src:'blob:old',ready:true,width:1024,height:1024}],busy:false};
+  const user={role:'user',id:'user-old',index:0,images:[],busy:false};
+  assert.strictEqual(patch.freshAssistant({turns:[user,old]},baseline),null);
+  const fresh={role:'assistant',id:'new',index:2,images:[{src:'blob:old',ready:true,width:1024,height:1024},{src:'blob:fresh',ready:true,width:1024,height:1024}],busy:false};
+  const pageWith=state=>({evaluate:async()=>state});
+  assert.deepStrictEqual((await patch.generatedDomCandidates(pageWith({turns:[user,old,fresh],busy:false}),baseline)).map(x=>x.src),['blob:fresh']);
+  assert.deepStrictEqual(await patch.generatedDomCandidates(pageWith({turns:[user,old,fresh],busy:true}),baseline),[]);
   console.log('ChatGPT consecutive reference uploads: stale first input rejected, second job sent, reload recovery, failed upload never sent: OK');
  }finally{
   Date.now=originalNow;Module._load=originalLoad;
