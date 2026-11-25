@@ -316,9 +316,9 @@ async function generatedDomCandidates(page, baselineSources) {
     };
     const out = [];
     for (const img of document.querySelectorAll('img')) {
-      if (!visible(img) || !img.complete || img.naturalWidth < 768 || img.naturalHeight < 768) continue;
-      if (!img.closest('[data-message-author-role="assistant"]')) continue;
-      if (/preview|placeholder|loading|blur/i.test([img.alt, img.className, img.currentSrc].join(' '))) continue;
+      if (!visible(img) || !img.complete || img.naturalWidth < 384 || img.naturalHeight < 384) continue;
+      if (img.closest('[data-message-author-role="user"], form')) continue;
+      if (/placeholder|loading/i.test(img.alt || '')) continue;
       const src = img.currentSrc || img.src || '';
       if (!src || baselineSet.has(src)) continue;
       const rect = img.getBoundingClientRect();
@@ -344,7 +344,12 @@ async function generatedDomCandidates(page, baselineSources) {
       if (/edit|download|remove bg|erase|resize|share/i.test(`${surroundingText} ${actionText}`)) score += 9000;
       if (/oaiusercontent\.com|imagegen|dall|generated|blob:/i.test(src)) score += 5000;
       if (width >= 768 && height >= 768) score += 3500;
-      out.push({ src, width, height, score });
+      const turn = img.closest('article, [data-testid^="conversation-turn-"]');
+      const userTurn = turn?.querySelector('[data-message-author-role="user"]');
+      if (userTurn && !assistant) continue;
+      const finalActions = /download|edit image|share image/i.test(actionText);
+      if (!assistant && !finalActions) continue;
+      out.push({ src, width, height, score, finalActions });
     }
     return out.sort((a, b) => b.score - a.score).slice(0, 8);
   }, [...baselineSources]).catch(() => []);
@@ -380,7 +385,7 @@ async function saveNetworkBytes(controller, projectId, asset) {
 ChatGPTController.prototype.captureGeneratedImage = async function captureGeneratedImageLive(page, projectId, baseline, step) {
   const projectDir = this.projects.getProjectDir(projectId);
   const observer = baseline?.networkObserver;
-  const baselineSources = postSendBaselines.get(page) || baseline?.allImageSources || new Set();
+  const baselineSources = baseline?.allImageSources || new Set();
   const deadline = Date.now() + 360000;
   let lastError = null;
   let lastProgress = 0;
@@ -397,14 +402,12 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
     const candidates = await generatedDomCandidates(page, baselineSources);
     const busy = await page.locator('button[data-testid="stop-button"]:visible, button[aria-label*="stop generating" i]:visible, button[aria-label*="stop streaming" i]:visible').count();
     const source = candidates[0]?.src || '';
-    if (busy || !source || source !== stableSource) {
-      stableSource = busy ? '' : source;
+    if (source !== stableSource || busy) {
+      stableSource = source;
       stableSince = Date.now();
-      await wait(900);
-      continue;
     }
-    if (Date.now() - stableSince < 6000) { await wait(900); continue; }
-    for (const candidate of candidates.slice(0, 1)) {
+    const settled = !busy && source && Date.now() - stableSince >= 4000;
+    if (settled) for (const candidate of candidates) {
       try {
         step('Generated image detected');
         const saved = await this.saveGeneratedAsset(page, candidate.src, projectDir);
@@ -429,6 +432,30 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
       }
     }
 
+    // Network fallback is tied to a visible completed artwork URL, never the
+    // first arbitrary image response. The DOM thumbnail may be smaller than
+    // the downloaded original.
+    if (settled && observer?.assets?.length) {
+      for (const asset of observer.assets.filter(a => candidates.some(c => c.src === a.url))) {
+        try {
+          if (asset.metadata.width < 768 || asset.metadata.height < 768) continue;
+          const project = this.projects.read(projectId);
+          const { isReferenceImage } = require('./chatgptReferenceImageFilterPatch');
+          const temporary = this.nextDraftPath(projectDir, asset.format.ext);
+          fs.writeFileSync(temporary,asset.body);
+          let valid = false;
+          try {
+            await sharp(temporary,{failOn:'error'}).stats();
+            valid = !(await isReferenceImage(temporary,project.referencePath));
+          } finally {fs.rmSync(temporary,{force:true});}
+          if (!valid) continue;
+          const result = await saveNetworkBytes(this, projectId, asset);
+          postSendBaselines.delete(page);
+          step('Ready for review');
+          return result;
+        } catch(error) { lastError=error; }
+      }
+    }
     if (Date.now() - lastProgress > 3000) {
       step('Image generation in progress');
       lastProgress = Date.now();
