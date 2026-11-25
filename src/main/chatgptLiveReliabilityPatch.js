@@ -6,6 +6,7 @@ const { ChatGPTController } = require('./chatgptController');
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const pendingUploads = new WeakMap();
 const postSendBaselines = new WeakMap();
+const dirtyPages = new WeakSet();
 
 const previousSnapshot = ChatGPTController.prototype.snapshotAssistantState;
 const previousSendPrompt = ChatGPTController.prototype.sendPrompt;
@@ -245,6 +246,11 @@ async function waitForReferenceEvidence(page, beforeSources, baseline, timeoutMs
 ChatGPTController.prototype.attachReference = async function attachReferenceLive(page, referencePath) {
   await this.assertNoHumanGate(page);
   pendingUploads.delete(page);
+  if (dirtyPages.has(page)) {
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 });
+    await this.ensureReady(page);
+  }
+  dirtyPages.add(page);
   if (!(await composerVisible(this, page, 2000))) throw new Error('ChatGPT composer is not ready for the reference image.');
 
   // Only allow a new prompt to be pasted once its actual image is visible in
@@ -266,7 +272,7 @@ ChatGPTController.prototype.attachReference = async function attachReferenceLive
       continue;
     }
     const ready = await waitForReferenceEvidence(
-      page, beforeSources, baseline, attempt === 0 ? 12000 : 25000
+      page, beforeSources, baseline, attempt === 0 ? 45000 : 60000
     );
     if (ready) {
       pendingUploads.set(page, { referencePath, beforeSources, baseline, method, injectedAt: Date.now() });
@@ -336,7 +342,7 @@ ChatGPTController.prototype.fillPrompt = async function fillPromptLive(page, pro
   return composer;
 };
 
-async function waitForUploadReady(page, pending, timeoutMs = 15000) {
+async function waitForUploadReady(page, pending, timeoutMs = 90000) {
   const started = Date.now();
   let sawAttachment = false;
   while (Date.now() - started < timeoutMs) {
@@ -349,23 +355,41 @@ async function waitForUploadReady(page, pending, timeoutMs = 15000) {
     await wait(100);
   }
   throw new Error(sawAttachment
-    ? 'The reference image is visible in ChatGPT but did not become send-ready within 15 seconds. The prompt was left in the composer and was not sent without a confirmed image.'
+    ? 'The reference image is visible in ChatGPT but did not become send-ready within 90 seconds. The prompt was left in the composer and was not sent without a confirmed image.'
     : 'Chrome accepted the reference file, but ChatGPT never showed its attachment preview. The prompt was left in the composer and was not sent without the image.');
+}
+
+// Use actual message identities, not image URLs or network arrival order.
+async function conversationTurns(page) {
+  return page.evaluate(() => [...document.querySelectorAll('[data-message-author-role]')].map(el => ({
+    role: el.getAttribute('data-message-author-role'),
+    id: el.getAttribute('data-message-id') || el.closest('[data-message-id]')?.getAttribute('data-message-id') || '',
+    text: (el.innerText || '').replace(/\s+/g, ' ').trim()
+  })));
 }
 
 ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, composer) {
   const pending = pendingUploads.get(page);
   try {
-    if (pending) await waitForUploadReady(page, pending, 25000);
+    if (pending) await waitForUploadReady(page, pending, 90000);
+    const prompt = (await composerText(composer)).replace(/\s+/g, ' ').trim();
+    if (!prompt) throw new Error('Cannot submit an empty generation prompt.');
+    const before = await conversationTurns(page);
+    const known = new Set(before.map(turn => turn.id).filter(Boolean));
+    const sources = new Set(await allImageSources(page));
     const result = await previousSendPrompt.call(this, page, composer);
-
-    // Snapshot after Send so the reference image cannot be confused with
-    // the new assistant-generated artwork in the next consecutive job.
-    await wait(180);
-    postSendBaselines.set(page, new Set(await allImageSources(page)));
-    return result;
+    const deadline = Date.now() + 45000;
+    while (Date.now() < deadline) {
+      const turns = await conversationTurns(page);
+      const user = turns.filter(t => t.role === 'user').at(-1);
+      if (user?.id && !known.has(user.id) && user.text.includes(prompt)) {
+        postSendBaselines.set(page, { userId: user.id, known, sources });
+        return result;
+      }
+      await wait(250);
+    }
+    throw new Error('ChatGPT did not confirm a new user message matching this job. No image will be accepted.');
   } finally {
-    // Never leak an attachment state from one row into another.
     pendingUploads.delete(page);
   }
 };
@@ -375,142 +399,80 @@ ChatGPTController.prototype.snapshotAssistantState = async function snapshotAssi
   return { ...baseline, allImageSources: new Set(await allImageSources(page)) };
 };
 
-async function generatedDomCandidates(page, baselineSources) {
-  return page.evaluate((baseline) => {
-    const baselineSet = new Set(baseline || []);
-    const visible = (element) => {
-      const rect = element.getBoundingClientRect();
-      const style = getComputedStyle(element);
-      return rect.width >= 220 && rect.height >= 220 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) !== 0;
-    };
-    const out = [];
-    for (const img of document.querySelectorAll('img')) {
-      if (!visible(img)) continue;
-      const src = img.currentSrc || img.src || '';
-      if (!src || baselineSet.has(src)) continue;
-      const rect = img.getBoundingClientRect();
-      const width = img.naturalWidth || rect.width || 0;
-      const height = img.naturalHeight || rect.height || 0;
-      if (width < 256 || height < 256) continue;
-
-      let node = img;
-      let surroundingText = '';
-      let actionText = '';
-      let assistant = false;
-      for (let depth = 0; node && depth < 9; depth += 1, node = node.parentElement) {
-        if (node.getAttribute?.('data-message-author-role') === 'assistant') assistant = true;
-        const text = String(node.innerText || '');
-        if (text.length > surroundingText.length && text.length < 8000) surroundingText = text;
-        for (const button of node.querySelectorAll?.('button') || []) {
-          actionText += ` ${button.getAttribute('aria-label') || ''} ${button.getAttribute('title') || ''} ${button.innerText || ''}`;
-        }
-      }
-
-      let score = Math.min((width * height) / 1000, 8000);
-      if (assistant) score += 10000;
-      if (/edit|download|remove bg|erase|resize|share/i.test(`${surroundingText} ${actionText}`)) score += 9000;
-      if (/oaiusercontent\.com|imagegen|dall|generated|blob:/i.test(src)) score += 5000;
-      if (width >= 768 && height >= 768) score += 3500;
-      out.push({ src, width, height, score });
-    }
-    return out.sort((a, b) => b.score - a.score).slice(0, 8);
-  }, [...baselineSources]).catch(() => []);
-}
-
-async function saveNetworkBytes(controller, projectId, asset) {
-  const projectDir = controller.projects.getProjectDir(projectId);
-  const savePath = controller.nextDraftPath(projectDir, asset.format?.ext || '.png');
-  fs.writeFileSync(savePath, asset.body);
-  try {
-    const metadata = await sharp(savePath, { failOn: 'error' }).metadata();
-    if (!metadata.width || !metadata.height || metadata.width < 256 || metadata.height < 256) throw new Error('Captured image dimensions were invalid.');
-    controller.projects.update(projectId, {
-      status: 'awaiting-review',
-      generatedImagePath: savePath,
-      generatedImage: {
-        mime: asset.format?.mime || `image/${metadata.format || 'png'}`,
-        width: metadata.width,
-        height: metadata.height,
-        hasAlpha: Boolean(metadata.hasAlpha),
-        source: 'network-response'
-      },
-      automationStep: 'Ready for review',
-      chatgptError: null
-    });
-    return { ok: true, path: savePath, method: 'network-response' };
-  } catch (error) {
-    fs.rmSync(savePath, { force: true });
-    throw error;
-  }
+// Only images inside the assistant message following the confirmed user turn
+// may be saved. Never accept a global network asset or a user attachment.
+async function generatedDomCandidates(page, submission) {
+  return page.evaluate(({userId, known, sources}) => {
+    const messages = [...document.querySelectorAll('[data-message-author-role]')];
+    const idOf = el => el.getAttribute('data-message-id') || el.closest('[data-message-id]')?.getAttribute('data-message-id') || '';
+    const index = messages.findIndex(el => idOf(el) === userId && el.getAttribute('data-message-author-role') === 'user');
+    if (index < 0) return [];
+    const later = messages.slice(index + 1);
+    if (later.some(el => el.getAttribute('data-message-author-role') === 'user')) return [];
+    const assistant = later.filter(el => el.getAttribute('data-message-author-role') === 'assistant').at(-1);
+    const id = assistant && idOf(assistant);
+    if (!id || known.includes(id)) return [];
+    const visible = el => !!(el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+    if ([...document.querySelectorAll('button[data-testid="stop-button"],button[aria-label*="stop generating" i],button[aria-label*="cancel generation" i]')].some(visible)) return [];
+    if ([...assistant.querySelectorAll('[aria-busy="true"],[role="progressbar"],[data-state="loading"]')].some(visible)) return [];
+    return [...assistant.querySelectorAll('img')].filter(img => {
+      const src = img.currentSrc || img.src;
+      return img.closest('[data-message-author-role]') === assistant && img.complete && visible(img)
+        && img.naturalWidth >= 512 && img.naturalHeight >= 512 && src && !sources.includes(src);
+    }).map(img => ({id, src: img.currentSrc || img.src, width: img.naturalWidth, height: img.naturalHeight}))
+      .sort((x,y) => y.width*y.height - x.width*x.height);
+  }, {userId: submission.userId, known: [...submission.known], sources: [...submission.sources]});
 }
 
 ChatGPTController.prototype.captureGeneratedImage = async function captureGeneratedImageLive(page, projectId, baseline, step) {
+  const submission = postSendBaselines.get(page);
   const projectDir = this.projects.getProjectDir(projectId);
-  const observer = baseline?.networkObserver;
-  const baselineSources = postSendBaselines.get(page) || baseline?.allImageSources || new Set();
-  const deadline = Date.now() + 360000;
-  let lastError = null;
-  let lastProgress = 0;
-
-  step('Waiting for ChatGPT image');
-
-  while (Date.now() < deadline) {
-    await this.assertNoHumanGate(page);
-
-    // Fastest path: save the actual image bytes already observed on the network.
-    const networkAsset = observer?.assets?.[0];
-    if (networkAsset) {
-      try {
-        step('Generated image detected');
-        const saved = await saveNetworkBytes(this, projectId, networkAsset);
-        step('Ready for review');
-        postSendBaselines.delete(page);
-        return saved;
-      } catch (error) {
-        lastError = error;
-        observer.assets.shift();
+  const deadline = Date.now() + 330000;
+  const stable = new Map();
+  let lastError;
+  try {
+    if (!submission) throw new Error('Missing confirmed submission identity.');
+    step('Waiting for verified assistant artwork');
+    while (Date.now() < deadline) {
+      await this.assertNoHumanGate(page);
+      const candidates = await generatedDomCandidates(page, submission);
+      const active = new Set(candidates.map(c => c.id + '|' + c.src));
+      for (const key of stable.keys()) if (!active.has(key)) stable.delete(key);
+      for (const candidate of candidates) {
+        const key = candidate.id + '|' + candidate.src;
+        if (!stable.has(key)) stable.set(key, Date.now());
+        if (Date.now() - stable.get(key) < 1800) continue;
+        try {
+          const saved = await this.saveGeneratedAsset(page, candidate.src, projectDir);
+          // Recheck ownership after the download, before publishing project state.
+          const current = await generatedDomCandidates(page, submission);
+          if (!current.some(c => c.id === candidate.id && c.src === candidate.src)) {
+            fs.rmSync(saved.savePath, {force:true});
+            continue;
+          }
+          step('Generated image verified');
+          this.projects.update(projectId, {
+            status: 'awaiting-review', generatedImagePath: saved.savePath,
+            generatedImage: {mime:saved.mime,width:saved.metadata.width,height:saved.metadata.height,hasAlpha:Boolean(saved.metadata.hasAlpha),source:'verified-assistant-image',assistantMessageId:candidate.id,userMessageId:submission.userId},
+            automationStep:'Ready for review',chatgptError:null
+          });
+          dirtyPages.delete(page);
+          return {ok:true,path:saved.savePath,method:'verified-assistant-image'};
+        } catch (error) { lastError = error; }
       }
+      await wait(400);
     }
-
-    // Reliable UI fallback: once the large generated image is visibly present in
-    // ChatGPT (including the Edit/Download image viewer shown in live testing),
-    // fetch that exact img/blob source directly. Never click browser Download.
-    const candidates = await generatedDomCandidates(page, baselineSources);
-    for (const candidate of candidates) {
-      try {
-        step('Generated image detected');
-        const saved = await this.saveGeneratedAsset(page, candidate.src, projectDir);
-        this.projects.update(projectId, {
-          status: 'awaiting-review',
-          generatedImagePath: saved.savePath,
-          generatedImage: {
-            mime: saved.mime,
-            width: saved.metadata.width,
-            height: saved.metadata.height,
-            hasAlpha: Boolean(saved.metadata.hasAlpha),
-            source: candidate.src.startsWith('blob:') ? 'visible-blob' : 'visible-image-source'
-          },
-          automationStep: 'Ready for review',
-          chatgptError: null
-        });
-        step('Ready for review');
-        postSendBaselines.delete(page);
-        return { ok: true, path: saved.savePath, method: 'visible-generated-image' };
-      } catch (error) {
-        lastError = error;
-      }
+    throw new Error('No verified artwork in this job’s assistant response.' + (lastError ? ' ' + lastError.message : ''));
+  } catch (error) {
+    this.projects.update(projectId,{status:'chatgpt-recovery-needed',generatedImagePath:null,generatedImage:null,automationStep:'Image capture failed',chatgptError:{service:'chatgpt',step:'capture-generated-image',message:error.message}});
+    throw error;
+  } finally {
+    postSendBaselines.delete(page);
+    if (baseline?.networkObserver) {
+      baseline.networkObserver.generationStartedAt = 0;
+      baseline.networkObserver.assets = [];
     }
-
-    if (Date.now() - lastProgress > 3000) {
-      step('Image generation in progress');
-      lastProgress = Date.now();
-    }
-    await wait(280);
   }
-
-  postSendBaselines.delete(page);
-  const suffix = lastError ? ` Last capture error: ${lastError.message}` : '';
-  throw new Error(`ChatGPT did not expose a capturable generated image within 6 minutes.${suffix}`);
 };
 
 module.exports = { findComposerFileInput, hasNewReferenceEvidence, waitForReferenceEvidence };
