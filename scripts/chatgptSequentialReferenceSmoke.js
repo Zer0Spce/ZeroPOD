@@ -43,6 +43,16 @@ const {generatedDomCandidates,fingerprintDistance,attachmentState}=require('../s
   await sharp({create:{width:512,height:512,channels:3,background:'#ee2233'}}).png().toFile(c);
   await assert.rejects(()=>assertDistinctOutput(b,[a]),/duplicates another job/);
   await assertDistinctOutput(c,[a]);
+  // White designs on transparent backgrounds must not collapse into the
+  // same all-white fingerprint or be confused with the blank reference.
+  const whiteA=path.join(dir,'white-a.png'),whiteB=path.join(dir,'white-b.png'),blank=path.join(dir,'blank.png');
+  const transparent={width:512,height:512,channels:4,background:'#00000000'};
+  await sharp({create:transparent}).composite([{input:Buffer.from('<svg width="512" height="512"><rect x="10" y="10" width="200" height="180" fill="white"/></svg>')}]).png().toFile(whiteA);
+  await sharp({create:transparent}).composite([{input:Buffer.from('<svg width="512" height="512"><circle cx="380" cy="380" r="95" fill="white"/></svg>')}]).png().toFile(whiteB);
+  await sharp({create:{width:512,height:512,channels:4,background:'#ffffff'}}).png().toFile(blank);
+  await assertDistinctOutput(whiteB,[whiteA]);
+  const {isReferenceImage}=require('../src/main/chatgptReferenceImageFilterPatch');
+  assert.equal(await isReferenceImage(whiteA,blank),false);
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
  dom.window.close();
  console.log('Final image and attachment DOM regression checks passed');

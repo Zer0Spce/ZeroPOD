@@ -419,7 +419,7 @@ async function generatedDomCandidates(page, submission) {
 }
 
 async function fingerprint(input) {
-  const bytes=await sharp(input,{failOn:'error'}).rotate().resize(32,32,{fit:'fill'}).flatten({background:'#ffffff'}).removeAlpha().raw().toBuffer();
+  const bytes=await sharp(input,{failOn:'error'}).rotate().resize(32,32,{fit:'fill'}).flatten({background:'#767676'}).removeAlpha().raw().toBuffer();
   return bytes.toString('base64');
 }
 function fingerprintDistance(a,b) {
@@ -427,7 +427,7 @@ function fingerprintDistance(a,b) {
   if(!x.length||x.length!==y.length)return Infinity;
   let total=0,active=0;
   for(let i=0;i<x.length;i+=3) {
-    const ink=Math.min(x[i],x[i+1],x[i+2],y[i],y[i+1],y[i+2])<243;
+    const ink=[x[i],x[i+1],x[i+2],y[i],y[i+1],y[i+2]].some(v=>Math.abs(v-118)>12);
     if(!ink) continue;
     total+=Math.abs(x[i]-y[i])+Math.abs(x[i+1]-y[i+1])+Math.abs(x[i+2]-y[i+2]);active+=3;
   }

@@ -5,7 +5,7 @@ const safeTitle=v=>String(v||'').trim().replace(/[\\/:*?"<>|]+/g,' ').replace(/\
 const localDate=()=>{const d=new Date();return [d.getMonth()+1,d.getDate(),String(d.getFullYear()).slice(-2)].join('-')};
 const marcinFields=['no','name','market','mainKeyword','subNiche','linkSource'];
 async function assertDistinctOutput(candidate, existing) {
- const pixels=file=>sharp(file,{failOn:'error'}).resize(32,32,{fit:'fill'}).flatten({background:'#ffffff'}).removeAlpha().raw().toBuffer();
+ const pixels=file=>sharp(file,{failOn:'error'}).resize(32,32,{fit:'fill'}).flatten({background:'#767676'}).removeAlpha().raw().toBuffer();
  const current=await pixels(candidate);
  for(const file of existing){
   if(!file||!fs.existsSync(file))continue;
@@ -13,7 +13,7 @@ async function assertDistinctOutput(candidate, existing) {
   if(current.length!==prior.length||!current.length)continue;
   let total=0,active=0;
   for(let i=0;i<current.length;i+=3){
-   if(Math.min(current[i],current[i+1],current[i+2],prior[i],prior[i+1],prior[i+2])>=243)continue;
+   if(![current[i],current[i+1],current[i+2],prior[i],prior[i+1],prior[i+2]].some(v=>Math.abs(v-118)>12))continue;
    total+=Math.abs(current[i]-prior[i])+Math.abs(current[i+1]-prior[i+1])+Math.abs(current[i+2]-prior[i+2]);active+=3;
   }
   if(!active||total/active<=2.5)throw Error('Final PNG duplicates another job. No output was overwritten or marked completed; check the ChatGPT draft and Vectorizer result.');

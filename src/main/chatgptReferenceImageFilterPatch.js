@@ -16,7 +16,7 @@ async function normalizedPixels(input) {
   return sharp(input, { failOn: 'none' })
     .rotate()
     .resize(32, 32, { fit: 'fill', kernel: 'lanczos3' })
-    .flatten({ background: { r: 255, g: 255, b: 255 } })
+    .flatten({ background: { r: 118, g: 118, b: 118 } })
     .removeAlpha()
     .raw()
     .toBuffer();
