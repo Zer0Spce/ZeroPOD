@@ -369,7 +369,7 @@ async function waitForUploadReady(page, pending, timeoutMs = 90000) {
 async function conversationTurns(page) {
   return page.evaluate(() => [...document.querySelectorAll('[data-message-author-role]')].map(el => ({
     role: el.getAttribute('data-message-author-role'),
-    id: el.getAttribute('data-message-id') || el.closest('[data-message-id]')?.getAttribute('data-message-id') || '',
+    id: el.getAttribute('data-message-id') || el.closest('[data-message-id]')?.getAttribute('data-message-id') || el.closest('[data-testid^="conversation-turn-"]')?.getAttribute('data-testid') || '',
     text: (el.innerText || '').replace(/\s+/g, ' ').trim()
   })));
 }
@@ -383,19 +383,30 @@ ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, com
     if (!prompt) throw new Error('Cannot submit an empty generation prompt.');
     const before = await conversationTurns(page);
     const known = new Set(before.map(turn => turn.id).filter(Boolean));
+    const userCount = before.filter(t => t.role === 'user').length;
     const sources = new Set(await allImageSources(page));
     const result = await previousSendPrompt.call(this, page, composer);
     const deadline = Date.now() + 45000;
     while (Date.now() < deadline) {
       const turns = await conversationTurns(page);
-      const user = turns.filter(t => t.role === 'user').at(-1);
-      if (user?.id && !known.has(user.id) && user.text.includes(prompt)) {
-        postSendBaselines.set(page, { userId: user.id, known, sources });
+      const users = turns.filter(t => t.role === 'user');
+      const user = users.at(-1);
+      // Long messages may be collapsed, reformatted or rendered as an attachment.
+      // A newly appended user turn after Send is the boundary; do not require
+      // its entire visible text to match the composer verbatim.
+      const normalized = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const prefix = normalized(prompt).slice(0, 64);
+      const fresh = user && users.length === userCount + 1
+        && (!user.id || !known.has(user.id));
+      const matching = user && user.id && !known.has(user.id)
+        && normalized(user.text).includes(prefix);
+      if (fresh || matching) {
+        postSendBaselines.set(page, { userId: user.id || '', userOrdinal: users.length - 1, known, sources });
         return result;
       }
       await wait(250);
     }
-    throw new Error('ChatGPT did not confirm a new user message matching this job. No image will be accepted.');
+    throw new Error('ChatGPT did not observe a new user turn after Send. No image will be accepted.');
   } finally {
     pendingUploads.delete(page);
   }
@@ -409,16 +420,20 @@ ChatGPTController.prototype.snapshotAssistantState = async function snapshotAssi
 // Only images inside the assistant message following the confirmed user turn
 // may be saved. Never accept a global network asset or a user attachment.
 async function generatedDomCandidates(page, submission) {
-  return page.evaluate(({userId, known, sources}) => {
+  return page.evaluate(({userId, userOrdinal, known, sources}) => {
     const messages = [...document.querySelectorAll('[data-message-author-role]')];
-    const idOf = el => el.getAttribute('data-message-id') || el.closest('[data-message-id]')?.getAttribute('data-message-id') || '';
-    const index = messages.findIndex(el => idOf(el) === userId && el.getAttribute('data-message-author-role') === 'user');
+    const idOf = el => el.getAttribute('data-message-id') || el.closest('[data-message-id]')?.getAttribute('data-message-id') || el.closest('[data-testid^="conversation-turn-"]')?.getAttribute('data-testid') || '';
+    const users = messages.filter(el => el.getAttribute('data-message-author-role') === 'user');
+    const anchor = (userId && users.find(el => idOf(el) === userId)) || (users.length === userOrdinal + 1 ? users[userOrdinal] : null);
+    const index = messages.indexOf(anchor);
     if (index < 0) return [];
     const later = messages.slice(index + 1);
     if (later.some(el => el.getAttribute('data-message-author-role') === 'user')) return [];
     const assistant = later.filter(el => el.getAttribute('data-message-author-role') === 'assistant').at(-1);
-    const id = assistant && idOf(assistant);
-    if (!id || known.includes(id)) return [];
+    if (!assistant) return [];
+    const realId = idOf(assistant);
+    if (realId && known.includes(realId)) return [];
+    const id = realId || 'assistant-after-user-' + userOrdinal;
     const visible = el => !!(el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
     if ([...document.querySelectorAll('button[data-testid="stop-button"],button[aria-label*="stop generating" i],button[aria-label*="cancel generation" i]')].some(visible)) return [];
     if ([...assistant.querySelectorAll('[aria-busy="true"],[role="progressbar"],[data-state="loading"]')].some(visible)) return [];
@@ -428,7 +443,7 @@ async function generatedDomCandidates(page, submission) {
         && img.naturalWidth >= 512 && img.naturalHeight >= 512 && src && !sources.includes(src);
     }).map(img => ({id, src: img.currentSrc || img.src, width: img.naturalWidth, height: img.naturalHeight}))
       .sort((x,y) => y.width*y.height - x.width*x.height);
-  }, {userId: submission.userId, known: [...submission.known], sources: [...submission.sources]});
+  }, {userId: submission.userId, userOrdinal: submission.userOrdinal, known: [...submission.known], sources: [...submission.sources]});
 }
 
 ChatGPTController.prototype.captureGeneratedImage = async function captureGeneratedImageLive(page, projectId, baseline, step) {
