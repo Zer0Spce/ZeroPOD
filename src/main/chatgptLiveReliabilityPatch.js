@@ -117,8 +117,8 @@ async function attachmentState(page, beforeSources) {
     };
     const composerRect = composer?.getBoundingClientRect?.() || null;
     const near = (element) => {
-      if (!visible(element)) return false;
-      if (!composerRect) return true;
+      if (!visible(element) || element.closest('[data-message-author-role]')) return false;
+      if (!composerRect) return false;
       const rect = element.getBoundingClientRect();
       return rect.bottom >= composerRect.top - 420
         && rect.top <= composerRect.bottom + 180
@@ -264,6 +264,12 @@ ChatGPTController.prototype.attachReference = async function attachReferenceLive
     }
     const beforeSources = await allImageSources(page);
     const baseline = await attachmentState(page, beforeSources);
+    const composer = await composerVisible(this, page, 2000);
+    if (!composer) throw new Error('Composer disappeared before upload.');
+    if ((await composerText(composer)).trim() || (baseline.attachmentLabels || []).some(label => /remove (?:file|image|attachment)|delete (?:file|image|attachment)/i.test(label))) {
+      if (attempt === 0) continue;
+      throw new Error('Composer still contains an unsent draft or attachment after recovery. Clear it before retrying.');
+    }
     let method = '';
     try {
       method = await injectFast(page, referencePath);
@@ -370,6 +376,7 @@ async function conversationTurns(page) {
 
 ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, composer) {
   const pending = pendingUploads.get(page);
+  postSendBaselines.delete(page);
   try {
     if (pending) await waitForUploadReady(page, pending, 90000);
     const prompt = (await composerText(composer)).replace(/\s+/g, ' ').trim();
@@ -475,4 +482,4 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
   }
 };
 
-module.exports = { findComposerFileInput, hasNewReferenceEvidence, waitForReferenceEvidence };
+module.exports = { findComposerFileInput, hasNewReferenceEvidence, waitForReferenceEvidence, generatedDomCandidates };
