@@ -35,13 +35,66 @@ jobs:
         run: |
           node --check src/main/redbubbleUploadLimitPausePatch.js
           node --check src/main/redbubbleLimitCheckPatch.js
+          node --check src/main/backgroundChromeLaunchPatch.js
+          node --check src/main/spreadshirtNativeForegroundPatch.js
+          node --check src/main/spreadshirtTrueHiddenChromePatch.js
+          node --check src/main/spreadshirtPublishBrowserDebugPatch.js
+          node --check src/main/spreadshirtForbiddenMetadataRepairPatch.js
+          node --check src/main/spreadshirtExactGridPublishProofPatch.js
+          node --check src/main/spreadshirtSavePublishActionPatch.js
+          node --check src/main/spreadshirtCanonicalDesignIdentityPatch.js
+          node --check src/main/spreadshirtAutomationUploadRecoveryPatch.js
+          node --check src/main/automationSpreadshirtAttentionPatch.js
+          node --check src/main/automationPodTargetsPatch.js
+          node --check src/main/automationCapacity50MainPatch.js
+          node --check src/main/flyingResearchCacheUiPatch.js
+          node --check src/renderer/spreadshirtBetaPolish.js
+          node --check src/renderer/automationPodTargetsUi.js
+          node --check src/renderer/connectionsExtraServices.js
+          node --check src/renderer/flyingResearchCache.js
+          node --check src/renderer/automationCapacity50.js
+          node --check src/renderer/automationHeaderLock.js
+          node --check src/renderer/promptSettings.js
+          node --check src/main/taskWorkload.js
+          node --check src/main/taskMarcinSpreadsheet.js
+          node --check src/main/main.js
+          node --check src/main/preload.js
+          node --check src/main/taskWorkloadSpreadsheet.js
+          node --check src/renderer/taskWorkload.js
           node scripts/exportPlacementSmoke.js
+          node scripts/spreadshirtCreateNewSmoke.js
+          node scripts/spreadshirtNoStatusHandoffSmoke.js
+          node scripts/spreadshirtMarketplaceBridgeSmoke.js
+          node scripts/spreadshirtForbiddenMetadataSmoke.js
+          node scripts/spreadshirtSavePublishActionSmoke.js
+          node scripts/spreadshirtHiddenChromeSmoke.js
+          node scripts/spreadshirtBetaPolishSmoke.js
+          node scripts/automationMultiPodSmoke.js
+          node scripts/spreadshirtAutomationRecoverySmoke.js
+          node scripts/flyingResearchCacheSmoke.js
+          node scripts/automationCapacity50Smoke.js
+          node scripts/promptSettingsSmoke.js
+          node scripts/taskWorkloadSpreadsheetSmoke.js
+          node scripts/taskWorkloadRetrySmoke.js
+          node scripts/taskAnukMarcinSmoke.js
+          node scripts/taskSelectionManualSmoke.js
+          node scripts/taskMarcinPromptOnlySmoke.js
+          node scripts/taskAnukReferenceConceptSmoke.js
           npm run check
 
       - name: Build unpacked Windows package
         run: npm run package:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Verify Sharp native Windows binaries
+        shell: pwsh
+        run: |
+          $native = "dist/win-unpacked/resources/app.asar.unpacked/node_modules/@img/sharp-win32-x64/lib/sharp-win32-x64.node"
+          $vips = "dist/win-unpacked/resources/app.asar.unpacked/node_modules/@img/sharp-win32-x64/lib/libvips-42.dll"
+          if (-not (Test-Path $native)) { throw "Sharp native module missing from Windows package" }
+          if (-not (Test-Path $vips)) { throw "Sharp libvips DLL missing from Windows package" }
+          Write-Host "Sharp Windows native dependencies: present"
 
       - name: Upload unpacked fast-start artifact
         uses: actions/upload-artifact@v4

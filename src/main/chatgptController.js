@@ -188,7 +188,7 @@ class ChatGPTController {
 
   async getResponseAssetCandidates(messageLocator, baselineSources) {
     const candidates = await messageLocator.evaluate((message) => {
-      const turn = message.closest('article') || message.closest('[data-testid^="conversation-turn-"]') || message.parentElement || message;
+      const turn = message;
       const results = [];
       const add = (src, score, width = 0, height = 0, alt = '') => {
         if (!src || !/^((blob:|data:image\/|https?:\/\/))/i.test(src)) return;
@@ -196,8 +196,10 @@ class ChatGPTController {
       };
       for (const img of turn.querySelectorAll('img')) {
         const rect = img.getBoundingClientRect();
-        const width = img.naturalWidth || rect.width || 0;
-        const height = img.naturalHeight || rect.height || 0;
+        if (!img.complete || img.naturalWidth < 768 || img.naturalHeight < 768) continue;
+        const width = img.naturalWidth;
+        const height = img.naturalHeight;
+        if (/preview|placeholder|loading|blur/i.test(`${img.alt} ${img.className} ${img.currentSrc}`)) continue;
         const alt = img.alt || '';
         const primary = img.currentSrc || img.src || '';
         let score = Math.min(width * height / 1000, 5000);
@@ -282,9 +284,10 @@ class ChatGPTController {
     fs.writeFileSync(savePath, body);
     try {
       const metadata = await sharp(savePath, { failOn: 'error' }).metadata();
-      if (!metadata.width || !metadata.height || metadata.width < 256 || metadata.height < 256) {
+      if (!metadata.width || !metadata.height || metadata.width < 768 || metadata.height < 768) {
         throw new Error(`Generated image dimensions are invalid (${metadata.width || 0}×${metadata.height || 0}).`);
       }
+      await sharp(savePath, { failOn: 'error' }).stats();
       return { savePath, metadata, mime: format.mime };
     } catch (error) {
       fs.rmSync(savePath, { force: true });
@@ -298,13 +301,23 @@ class ChatGPTController {
     const response = await this.waitForNewAssistantResponse(page, baseline, step);
     const started = Date.now();
     let lastError = null;
+    let stableSource = '', stableSince = 0;
 
     while (Date.now() - started < 360000) {
       await this.assertNoHumanGate(page);
       const currentUrl = page.url();
       if (/^https:\/\/chatgpt\.com\/c\//i.test(currentUrl)) this.sessions.rememberThreadUrl('chatgpt', currentUrl);
       const candidates = await this.getResponseAssetCandidates(response, baseline.imageSources);
-      for (const candidate of candidates) {
+      const busy = await page.locator('button[data-testid="stop-button"]:visible, button[aria-label="Stop generating"]:visible, button[aria-label="Stop streaming"]:visible').count();
+      const candidateSource = candidates[0]?.src || '';
+      if (busy || !candidateSource || candidateSource !== stableSource) {
+        stableSource = busy ? '' : candidateSource;
+        stableSince = Date.now();
+        await wait(900);
+        continue;
+      }
+      if (Date.now() - stableSince < 6000) { await wait(900); continue; }
+      for (const candidate of candidates.slice(0, 1)) {
         try {
           step('Generated image detected');
           step('Saving generated image');

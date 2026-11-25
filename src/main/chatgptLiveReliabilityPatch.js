@@ -104,8 +104,8 @@ ChatGPTController.prototype.ensureReady = async function ensureReadyLive(page) {
   throw new Error('ChatGPT opened, but the message composer did not become ready. ZeroPOD did not paste the image or prompt into an unready page.');
 };
 
-async function attachmentState(page, beforeSources) {
-  return page.evaluate((baseline) => {
+async function attachmentState(page, beforeSources, referencePath) {
+  return page.evaluate(({baseline, filename}) => {
     const composer = document.querySelector('#prompt-textarea, [data-testid="composer-text-input"], textarea[placeholder*="Message" i], textarea, [contenteditable="true"]');
     const baselineSet = new Set(baseline || []);
     const visible = (element) => {
@@ -132,7 +132,7 @@ async function attachmentState(page, beforeSources) {
     });
     const sources = images.map((img) => img.currentSrc || img.src || '').filter(Boolean);
     const newImage = sources.some((src) => !baselineSet.has(src));
-    const attachmentNode = [...document.querySelectorAll('[data-testid*="attachment" i], [data-testid*="upload" i], [data-testid*="file" i], button[aria-label*="remove" i], button[title*="remove" i]')].some(near);
+    let attachmentNode = [...document.querySelectorAll('[data-testid*="attachment" i], [data-testid*="upload" i], [data-testid*="file" i], button[aria-label*="remove" i], button[title*="remove" i]')].some(near);
     const busy = [...document.querySelectorAll('[role="progressbar"], [aria-busy="true"], [data-state="loading"], [data-testid*="uploading" i], [data-testid*="progress" i]')].some(near);
     const send = [...document.querySelectorAll('button[data-testid="send-button"], button[data-testid*="send" i], button[aria-label*="send" i]')].find(near);
     const sendEnabled = Boolean(send && !send.disabled && send.getAttribute('aria-disabled') !== 'true');
@@ -141,86 +141,68 @@ async function attachmentState(page, beforeSources) {
       let node = composer;
       for (let i = 0; node && i < 6; i += 1, node = node.parentElement) text += ` ${node.innerText || ''}`;
     }
+    const scope = composer?.closest('form') || composer?.closest('[data-testid="composer"]') || composer?.parentElement?.parentElement?.parentElement;
+    if (scope) {
+      attachmentNode ||= [...scope.querySelectorAll('button, [role="button"], [data-testid], [title], [aria-label]')].some(el => {
+        const label = [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-testid')].filter(Boolean).join(' ');
+        return /remove.*(?:file|image|attachment)|(?:file|image|attachment).*remove|attachment-preview|file-preview/i.test(label) || (filename && label.toLowerCase().includes(filename.toLowerCase()));
+      });
+      if (filename && String(scope.innerText || '').toLowerCase().includes(filename.toLowerCase())) attachmentNode = true;
+    }
     const failed = /upload failed|failed to upload|couldn['’]t upload|unsupported file|file too large/i.test(text);
     return { newImage, attachmentNode, busy, sendEnabled, failed };
-  }, beforeSources).catch(() => ({ newImage: false, attachmentNode: false, busy: false, sendEnabled: false, failed: false }));
+  }, {baseline: beforeSources, filename: path.basename(referencePath || '')}).catch(() => ({ newImage: false, attachmentNode: false, busy: false, sendEnabled: false, failed: false }));
 }
 
 async function findComposerFileInput(page) {
-  // Prefer image-accepting inputs. Passing the file bytes directly avoids Windows
-  // path handoff delays and makes local acceptance effectively immediate.
-  const imageInput = page.locator('input[type="file"][accept*="image" i]').first();
-  if (await imageInput.count()) return imageInput;
-  const generic = page.locator('input[type="file"]').first();
-  if (await generic.count()) return generic;
-  return null;
+  const inputs = page.locator('input[type="file"]');
+  const candidates = await inputs.evaluateAll(nodes => nodes.map((el,index)=>{
+    if (el.disabled || el.closest('[data-message-author-role], [role="dialog"]')) return null;
+    const accept = String(el.accept || '');
+    if (accept && !/image|png|jpe?g|webp|\*\/\*/i.test(accept)) return null;
+    const composer = document.querySelector('#prompt-textarea, [data-testid="composer-text-input"]');
+    let score = /image/i.test(accept) ? 10 : 0;
+    for(let p=el.parentElement, depth=0;p&&depth<8;p=p.parentElement,depth++){
+      if(composer && p.contains(composer)){score+=100-depth*10;break;}
+    }
+    return {index,score};
+  }).filter(Boolean).sort((a,b)=>b.score-a.score||b.index-a.index)).catch(()=>[]);
+  return candidates.length ? inputs.nth(candidates[0].index) : null;
 }
 
 async function setInputBytes(input, referencePath) {
-  const buffer = fs.readFileSync(referencePath);
-  await input.setInputFiles({
-    name: path.basename(referencePath),
-    mimeType: mimeFromPath(referencePath),
-    buffer
-  }, { timeout: 3500 });
+  await input.setInputFiles(referencePath, { timeout: 10000 });
 }
 
 async function injectFast(page, referencePath) {
-  let input = await findComposerFileInput(page);
-  if (input) {
-    await setInputBytes(input, referencePath);
-    return 'memory-file-input';
-  }
-
-  const plus = page.locator('button[data-testid="composer-plus-btn"]:visible, button[aria-label*="add" i]:visible').first();
+  const plus = page.locator('button[data-testid="composer-plus-btn"]:visible, button[aria-label*="add files" i]:visible, button[aria-label*="attach" i]:visible').last();
   if (await plus.count()) {
-    await plus.click({ timeout: 1500 }).catch(() => {});
-    await wait(120);
-    input = await findComposerFileInput(page);
-    if (input) {
-      await setInputBytes(input, referencePath);
-      return 'composer-plus-file-input';
+    const directChooser = page.waitForEvent('filechooser',{timeout:1200}).catch(()=>null);
+    await plus.click({timeout:3000}).catch(()=>{});
+    const direct = await directChooser;
+    if(direct){await direct.setFiles(referencePath);return 'composer-chooser';}
+    const menu = page.getByRole('menuitem',{name:/upload|photo|file/i}).or(page.getByRole('button',{name:/upload from computer|add photos|add files|photos.*files/i})).or(page.getByText(/upload from computer|add photos(?:\s*&\s*| and )files/i)).and(page.locator(':visible')).last();
+    if(await menu.count()){
+      const chooserPromise=page.waitForEvent('filechooser',{timeout:4000}).catch(()=>null);
+      await menu.click({timeout:3000}).catch(()=>{});
+      const chooser=await chooserPromise;
+      if(chooser){await chooser.setFiles(referencePath);return 'upload-menu-chooser';}
     }
+    await page.keyboard.press('Escape').catch(()=>{});
   }
-
-  const menuItems = [
-    page.getByRole('menuitem', { name: /upload|photo|file/i }).first(),
-    page.getByRole('button', { name: /upload from computer|add photos|add files|photos.*files/i }).first(),
-    page.getByText(/upload from computer|add photos(?:\s*&\s*| and )files/i).first()
-  ];
-
-  for (const item of menuItems) {
-    try {
-      await item.waitFor({ state: 'visible', timeout: 350 });
-      const chooserPromise = page.waitForEvent('filechooser', { timeout: 1200 }).catch(() => null);
-      await item.click({ timeout: 900 });
-      const chooser = await chooserPromise;
-      if (chooser) {
-        const buffer = fs.readFileSync(referencePath);
-        await chooser.setFiles({ name: path.basename(referencePath), mimeType: mimeFromPath(referencePath), buffer });
-        return 'native-file-chooser-memory';
-      }
-      input = await findComposerFileInput(page);
-      if (input) {
-        await setInputBytes(input, referencePath);
-        return 'upload-menu-file-input';
-      }
-    } catch {}
-  }
-
-  throw new Error('ChatGPT composer is ready, but ZeroPOD could not access its image upload control.');
+  const input=await findComposerFileInput(page);
+  if(input){await setInputBytes(input,referencePath);return 'active-file-input';}
+  throw new Error('ChatGPT image upload control unavailable after checking attachment menu and eligible file inputs.');
 }
 
 ChatGPTController.prototype.attachReference = async function attachReferenceLive(page, referencePath) {
   await this.assertNoHumanGate(page);
-  if (!(await composerVisible(this, page, 1000))) throw new Error('ChatGPT composer is not ready for the reference image.');
-
-  const beforeSources = await allImageSources(page);
-  const method = await injectFast(page, referencePath);
-  pendingUploads.set(page, { referencePath, beforeSources, method, injectedAt: Date.now() });
-
-  // setInputFiles/fileChooser.setFiles returning means Chrome accepted the local
-  // file bytes. Do not block prompt entry behind the remote upload/preview.
+  if (!(await composerVisible(this,page,5000))) throw new Error('ChatGPT composer is not ready for the reference image.');
+  pendingUploads.delete(page);
+  postSendBaselines.delete(page);
+  const beforeSources=await allImageSources(page);
+  const method=await injectFast(page,referencePath);
+  pendingUploads.set(page,{referencePath,beforeSources,method,injectedAt:Date.now()});
   return true;
 };
 
@@ -280,24 +262,24 @@ ChatGPTController.prototype.fillPrompt = async function fillPromptLive(page, pro
   return composer;
 };
 
-async function waitForUploadReady(page, pending, timeoutMs = 15000) {
+async function waitForUploadReady(page, pending, timeoutMs = 60000) {
   const started = Date.now();
   let sawAttachment = false;
   while (Date.now() - started < timeoutMs) {
-    const state = await attachmentState(page, pending.beforeSources);
+    const state = await attachmentState(page, pending.beforeSources, pending.referencePath);
     if (state.failed) throw new Error('ChatGPT reported that the reference image upload failed.');
     if (state.newImage || state.attachmentNode) sawAttachment = true;
     if (sawAttachment && !state.busy && state.sendEnabled) return true;
     await wait(100);
   }
   throw new Error(sawAttachment
-    ? 'The reference image is visible in ChatGPT but did not become send-ready within 15 seconds. The prompt was left in the composer and was not sent without a confirmed image.'
+    ? 'The reference image is visible in ChatGPT but did not become send-ready within 60 seconds. The prompt was left in the composer and was not sent without a confirmed image.'
     : 'Chrome accepted the reference file, but ChatGPT never showed its attachment preview. The prompt was left in the composer and was not sent without the image.');
 }
 
 ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, composer) {
   const pending = pendingUploads.get(page);
-  if (pending) await waitForUploadReady(page, pending, 15000);
+  if (pending) await waitForUploadReady(page, pending, 60000);
 
   const result = await previousSendPrompt.call(this, page, composer);
   pendingUploads.delete(page);
@@ -310,6 +292,16 @@ ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, com
 };
 
 ChatGPTController.prototype.snapshotAssistantState = async function snapshotAssistantStateLive(page) {
+  // Rehydrate the SAME conversation between jobs, removing stale editor and
+  // composer state without starting a new chat or losing the thread history.
+  const thread = page.url();
+  if (validThread(this, thread)) {
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 });
+    await this.assertNoHumanGate(page);
+    await this.locateComposer(page);
+  }
+  const stop = page.locator('button[data-testid="stop-button"]:visible, button[aria-label*="stop generating" i]:visible, button[aria-label*="stop streaming" i]:visible');
+  await stop.first().waitFor({state:'hidden',timeout:60000});
   const baseline = await previousSnapshot.call(this, page);
   return { ...baseline, allImageSources: new Set(await allImageSources(page)) };
 };
@@ -324,7 +316,9 @@ async function generatedDomCandidates(page, baselineSources) {
     };
     const out = [];
     for (const img of document.querySelectorAll('img')) {
-      if (!visible(img)) continue;
+      if (!visible(img) || !img.complete || img.naturalWidth < 384 || img.naturalHeight < 384) continue;
+      if (img.closest('[data-message-author-role="user"], form')) continue;
+      if (/placeholder|loading/i.test(img.alt || '')) continue;
       const src = img.currentSrc || img.src || '';
       if (!src || baselineSet.has(src)) continue;
       const rect = img.getBoundingClientRect();
@@ -350,10 +344,48 @@ async function generatedDomCandidates(page, baselineSources) {
       if (/edit|download|remove bg|erase|resize|share/i.test(`${surroundingText} ${actionText}`)) score += 9000;
       if (/oaiusercontent\.com|imagegen|dall|generated|blob:/i.test(src)) score += 5000;
       if (width >= 768 && height >= 768) score += 3500;
-      out.push({ src, width, height, score });
+      const turn = img.closest('article, [data-testid^="conversation-turn-"]');
+      const userTurn = turn?.querySelector('[data-message-author-role="user"]');
+      if (userTurn && !assistant) continue;
+      const finalActions = /download|edit image|share image/i.test(actionText);
+      if (!assistant && !finalActions) continue;
+      out.push({ src, width, height, score, finalActions });
     }
     return out.sort((a, b) => b.score - a.score).slice(0, 8);
   }, [...baselineSources]).catch(() => []);
+}
+
+async function downloadLatestArtwork(controller,page,projectId,baseline) {
+  const messages=page.locator('[data-message-author-role="assistant"]');
+  const count=await messages.count();
+  if(!count) return null;
+  const latest=messages.last();
+  const id=await latest.evaluate((n,i)=>n.getAttribute('data-message-id')||n.closest('[data-message-id]')?.getAttribute('data-message-id')||'assistant-'+i,count-1);
+  if(baseline.ids?.has(id)||count<baseline.count) return null;
+  const turn=latest.locator('xpath=ancestor::article[1]');
+  const scope=await turn.count()?turn:latest;
+  const image=scope.locator('img');
+  if(!(await image.count())) return null;
+  const download=scope.locator('button[aria-label*="download" i], button[title*="download" i], a[download], [data-testid*="download" i]').and(page.locator(':visible')).last();
+  if(!(await download.count())) return null;
+  const pending=page.waitForEvent('download',{timeout:15000}).catch(()=>null);
+  await download.click({timeout:4000}).catch(()=>{});
+  const file=await pending;
+  if(!file)return null;
+  const projectDir=controller.projects.getProjectDir(projectId);
+  const temp=path.join(projectDir,'capture-download-'+Date.now()+'.tmp');
+  try {
+    await file.saveAs(temp);
+    const meta=await sharp(temp,{failOn:'error'}).metadata();
+    if(!['png','jpeg','webp'].includes(meta.format)||meta.width<384||meta.height<384)throw Error('Downloaded artwork is invalid');
+    await sharp(temp,{failOn:'error'}).stats();
+    const {isReferenceImage}=require('./chatgptReferenceImageFilterPatch');
+    if(await isReferenceImage(temp,controller.projects.read(projectId).referencePath))throw Error('Download matched reference image');
+    const savePath=controller.nextDraftPath(projectDir,meta.format==='jpeg'?'.jpg':'.'+meta.format);
+    fs.renameSync(temp,savePath);
+    controller.projects.update(projectId,{status:'awaiting-review',generatedImagePath:savePath,generatedImage:{mime:'image/'+meta.format,width:meta.width,height:meta.height,hasAlpha:!!meta.hasAlpha,source:'native-download'},automationStep:'Ready for review',chatgptError:null});
+    return {ok:true,path:savePath,method:'native-download'};
+  } finally {fs.rmSync(temp,{force:true});}
 }
 
 async function saveNetworkBytes(controller, projectId, asset) {
@@ -386,36 +418,36 @@ async function saveNetworkBytes(controller, projectId, asset) {
 ChatGPTController.prototype.captureGeneratedImage = async function captureGeneratedImageLive(page, projectId, baseline, step) {
   const projectDir = this.projects.getProjectDir(projectId);
   const observer = baseline?.networkObserver;
-  const baselineSources = postSendBaselines.get(page) || baseline?.allImageSources || new Set();
+  const baselineSources = baseline?.allImageSources || new Set();
   const deadline = Date.now() + 360000;
   let lastError = null;
   let lastProgress = 0;
+  let stableSource = '', stableSince = 0, lastDownloadAttempt = 0;
 
   step('Waiting for ChatGPT image');
 
   while (Date.now() < deadline) {
     await this.assertNoHumanGate(page);
 
-    // Fastest path: save the actual image bytes already observed on the network.
-    const networkAsset = observer?.assets?.[0];
-    if (networkAsset) {
-      try {
-        step('Generated image detected');
-        const saved = await saveNetworkBytes(this, projectId, networkAsset);
-        step('Ready for review');
-        postSendBaselines.delete(page);
-        return saved;
-      } catch (error) {
-        lastError = error;
-        observer.assets.shift();
-      }
-    }
-
     // Reliable UI fallback: once the large generated image is visibly present in
     // ChatGPT (including the Edit/Download image viewer shown in live testing),
     // fetch that exact img/blob source directly. Never click browser Download.
     const candidates = await generatedDomCandidates(page, baselineSources);
-    for (const candidate of candidates) {
+    const busy = await page.locator('button[data-testid="stop-button"]:visible, button[aria-label*="stop generating" i]:visible, button[aria-label*="stop streaming" i]:visible').count();
+    if (!busy && Date.now()-lastDownloadAttempt>20000) {
+      lastDownloadAttempt=Date.now();
+      try {
+        const downloaded=await downloadLatestArtwork(this,page,projectId,baseline);
+        if(downloaded){postSendBaselines.delete(page);step('Ready for review');return downloaded;}
+      } catch(error){lastError=error;}
+    }
+    const source = candidates[0]?.src || '';
+    if (source !== stableSource || busy) {
+      stableSource = source;
+      stableSince = Date.now();
+    }
+    const settled = !busy && source && Date.now() - stableSince >= 4000;
+    if (settled) for (const candidate of candidates) {
       try {
         step('Generated image detected');
         const saved = await this.saveGeneratedAsset(page, candidate.src, projectDir);
@@ -440,6 +472,30 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
       }
     }
 
+    // Network fallback is tied to a visible completed artwork URL, never the
+    // first arbitrary image response. The DOM thumbnail may be smaller than
+    // the downloaded original.
+    if (settled && observer?.assets?.length) {
+      for (const asset of observer.assets.filter(a => candidates.some(c => c.src === a.url))) {
+        try {
+          if (asset.metadata.width < 768 || asset.metadata.height < 768) continue;
+          const project = this.projects.read(projectId);
+          const { isReferenceImage } = require('./chatgptReferenceImageFilterPatch');
+          const temporary = this.nextDraftPath(projectDir, asset.format.ext);
+          fs.writeFileSync(temporary,asset.body);
+          let valid = false;
+          try {
+            await sharp(temporary,{failOn:'error'}).stats();
+            valid = !(await isReferenceImage(temporary,project.referencePath));
+          } finally {fs.rmSync(temporary,{force:true});}
+          if (!valid) continue;
+          const result = await saveNetworkBytes(this, projectId, asset);
+          postSendBaselines.delete(page);
+          step('Ready for review');
+          return result;
+        } catch(error) { lastError=error; }
+      }
+    }
     if (Date.now() - lastProgress > 3000) {
       step('Image generation in progress');
       lastProgress = Date.now();
@@ -449,7 +505,9 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
 
   postSendBaselines.delete(page);
   const suffix = lastError ? ` Last capture error: ${lastError.message}` : '';
-  throw new Error(`ChatGPT did not expose a capturable generated image within 6 minutes.${suffix}`);
+  const error = new Error(`ChatGPT did not expose a capturable generated image within 6 minutes.${suffix}`);
+  this.projects.update(projectId,{status:'chatgpt-recovery-needed',chatgptError:{message:error.message},automationStep:'Image capture failed'});
+  throw error;
 };
 
 module.exports = {};
