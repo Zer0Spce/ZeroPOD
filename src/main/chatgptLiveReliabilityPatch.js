@@ -266,9 +266,9 @@ ChatGPTController.prototype.attachReference = async function attachReferenceLive
     const baseline = await attachmentState(page, beforeSources);
     const composer = await composerVisible(this, page, 2000);
     if (!composer) throw new Error('Composer disappeared before upload.');
-    if ((await composerText(composer)).trim() || (baseline.attachmentLabels || []).some(label => /remove (?:file|image|attachment)|delete (?:file|image|attachment)/i.test(label))) {
+    if ((baseline.attachmentLabels || []).some(label => /remove (?:file|image|attachment)|delete (?:file|image|attachment)/i.test(label))) {
       if (attempt === 0) continue;
-      throw new Error('Composer still contains an unsent draft or attachment after recovery. Clear it before retrying.');
+      throw new Error('Composer still contains an old attachment after recovery. Remove it before retrying.');
     }
     let method = '';
     try {
@@ -306,6 +306,7 @@ ChatGPTController.prototype.fillPrompt = async function fillPromptLive(page, pro
   const composer = await composerVisible(this, page, 10000);
   if (!composer) throw new Error('ChatGPT composer disappeared before the generation prompt could be pasted.');
 
+  // Existing draft text is replaced below; it must not block a new paste.
   // Avoid locator.fill() here: on the current ChatGPT contenteditable it can sit on
   // actionability checks for ~30 seconds. keyboard.insertText sends one immediate
   // input operation and preserves newlines without per-character typing delays.
@@ -403,16 +404,6 @@ function freshAssistant(state, submission) {
   if (users.length === submission.userCount + 1 && users.at(-1).index >= candidate.index) return null;
   return candidate;
 }
-async function waitForIdle(page, timeout = 330000) {
-  const end = Date.now() + timeout;
-  while (Date.now() < end) {
-    const state = await conversationState(page);
-    if (!state.busy && !assistantTurns(state).at(-1)?.busy && state.composerPresent) return state;
-    await wait(350);
-  }
-  throw new Error('Previous ChatGPT response is still active. No new prompt was sent.');
-}
-
 ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, composer) {
   const pending = pendingUploads.get(page);
   postSendBaselines.delete(page);
