@@ -128,6 +128,21 @@ class TaskWorkload {
     'Keep the reference concept and requested changes coherent. Do not copy watermarks, marketplace mockups, backgrounds, brand logos or unrequested trademarks.',
     'Produce only one clean, POD-friendly design with genuine transparency (not a fake checkerboard).'
   ].filter(Boolean).join('\n');
+  // Reset stale ChatGPT composer/editor state only between Anuk submissions.
+  // Keep the same conversation URL and the original #558 upload/capture pipeline.
+  if(this.mode==='anuk'&&this.anukSubmitted&&this.chatgpt.sessions){
+   const {page}=await this.chatgpt.sessions.ensureService('chatgpt');
+   const thread=page.url();
+   if(/^https:\/\/chatgpt\.com\/c\/[^/?#]+/i.test(thread)){
+    await this.chatgpt.assertNoHumanGate(page);
+    await page.reload({waitUntil:'domcontentloaded',timeout:45000});
+    await this.chatgpt.assertNoHumanGate(page);
+    await this.chatgpt.locateComposer(page);
+    await page.locator('button[data-testid="stop-button"]:visible').first().waitFor({state:'hidden',timeout:60000});
+    await page.waitForTimeout(1500);
+   }
+  }
+  if(this.mode==='anuk')this.anukSubmitted=true;
   // Use a per-instance prompt override only during submission; restore before async image capture.
   const original=this.chatgpt.buildPrompt;this.chatgpt.buildPrompt=()=>prompt;
   const payload=this.mode==='marcin'
