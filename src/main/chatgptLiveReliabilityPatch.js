@@ -155,12 +155,16 @@ async function attachmentState(page, beforeSources, referencePath) {
 }
 
 async function findComposerFileInput(page) {
-  // Prefer image-accepting inputs. Passing the file bytes directly avoids Windows
-  // path handoff delays and makes local acceptance effectively immediate.
-  const imageInput = page.locator('input[type="file"][accept*="image" i]').first();
-  if (await imageInput.count()) return imageInput;
-  const generic = page.locator('input[type="file"]').first();
-  if (await generic.count()) return generic;
+  const composer = page.locator('#prompt-textarea:visible, [data-testid="composer-text-input"]:visible, textarea[placeholder*="Message" i]:visible').first();
+  if (!(await composer.count())) return null;
+  const root = composer.locator('xpath=ancestor::form[1]');
+  if (await root.count()) {
+    const image = root.locator('input[type="file"][accept*="image" i]').last();
+    if (await image.count()) return image;
+    const generic = root.locator('input[type="file"]').last();
+    if (await generic.count()) return generic;
+  }
+  // Never select a global file input: previous assistant image editors may own it.
   return null;
 }
 
@@ -180,7 +184,7 @@ async function injectFast(page, referencePath) {
     return 'memory-file-input';
   }
 
-  const plus = page.locator('button[data-testid="composer-plus-btn"]:visible, button[aria-label*="add" i]:visible').first();
+  const plus = page.locator('button[data-testid="composer-plus-btn"]:visible, form button[aria-label*="add files" i]:visible, form button[aria-label*="attach" i]:visible').last();
   if (await plus.count()) {
     await plus.click({ timeout: 1500 }).catch(() => {});
     await wait(120);
@@ -199,9 +203,9 @@ async function injectFast(page, referencePath) {
 
   for (const item of menuItems) {
     try {
-      await item.waitFor({ state: 'visible', timeout: 350 });
-      const chooserPromise = page.waitForEvent('filechooser', { timeout: 1200 }).catch(() => null);
-      await item.click({ timeout: 900 });
+      await item.waitFor({ state: 'visible', timeout: 2000 });
+      const chooserPromise = page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null);
+      await item.click({ timeout: 3000 });
       const chooser = await chooserPromise;
       if (chooser) {
         const buffer = fs.readFileSync(referencePath);
@@ -223,6 +227,8 @@ ChatGPTController.prototype.attachReference = async function attachReferenceLive
   await this.assertNoHumanGate(page);
   if (!(await composerVisible(this, page, 1000))) throw new Error('ChatGPT composer is not ready for the reference image.');
 
+  pendingUploads.delete(page);
+  postSendBaselines.delete(page);
   const beforeSources = await allImageSources(page);
   const method = await injectFast(page, referencePath);
   pendingUploads.set(page, { referencePath, beforeSources, method, injectedAt: Date.now() });
@@ -318,6 +324,16 @@ ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, com
 };
 
 ChatGPTController.prototype.snapshotAssistantState = async function snapshotAssistantStateLive(page) {
+  // Rehydrate the SAME conversation between jobs, removing stale editor and
+  // composer state without starting a new chat or losing the thread history.
+  const thread = page.url();
+  if (validThread(this, thread)) {
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 });
+    await this.assertNoHumanGate(page);
+    await this.locateComposer(page);
+  }
+  const stop = page.locator('button[data-testid="stop-button"]:visible, button[aria-label*="stop generating" i]:visible, button[aria-label*="stop streaming" i]:visible');
+  await stop.first().waitFor({state:'hidden',timeout:60000});
   const baseline = await previousSnapshot.call(this, page);
   return { ...baseline, allImageSources: new Set(await allImageSources(page)) };
 };
