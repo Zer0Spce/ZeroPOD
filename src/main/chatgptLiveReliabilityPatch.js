@@ -251,6 +251,7 @@ ChatGPTController.prototype.attachReference = async function attachReferenceLive
     await this.ensureReady(page);
   }
   dirtyPages.add(page);
+  await waitForIdle(page);
   if (!(await composerVisible(this, page, 2000))) throw new Error('ChatGPT composer is not ready for the reference image.');
 
   // Only allow a new prompt to be pasted once its actual image is visible in
@@ -366,12 +367,49 @@ async function waitForUploadReady(page, pending, timeoutMs = 90000) {
 }
 
 // Use actual message identities, not image URLs or network arrival order.
-async function conversationTurns(page) {
-  return page.evaluate(() => [...document.querySelectorAll('[data-message-author-role]')].map(el => ({
-    role: el.getAttribute('data-message-author-role'),
-    id: el.getAttribute('data-message-id') || el.closest('[data-message-id]')?.getAttribute('data-message-id') || el.closest('[data-testid^="conversation-turn-"]')?.getAttribute('data-testid') || '',
-    text: (el.innerText || '').replace(/\s+/g, ' ').trim()
-  })));
+// One browser snapshot: supports message-role nodes and newer turn wrappers.
+async function conversationState(page) {
+  return page.evaluate(() => {
+    const visible = el => !!(el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+    const selector = '[data-message-author-role], [data-turn="assistant"], [data-turn="user"]';
+    const nodes = [...document.querySelectorAll(selector)].filter(el => !el.parentElement?.closest(selector));
+    const turns = nodes.map((el, index) => {
+      const role = el.getAttribute('data-message-author-role') || el.getAttribute('data-turn');
+      const id = el.getAttribute('data-message-id') || el.querySelector('[data-message-id]')?.getAttribute('data-message-id') || el.closest('[data-message-id]')?.getAttribute('data-message-id') || el.closest('[data-testid^="conversation-turn-"]')?.getAttribute('data-testid') || '';
+      const images = [...el.querySelectorAll('img')].map(img => ({
+        src: img.currentSrc || img.src || '', width:img.naturalWidth, height:img.naturalHeight,
+        ready: img.complete && visible(img), alt:img.alt || ''
+      }));
+      return {role,id,index,images,busy:[...el.querySelectorAll('[aria-busy="true"],[role="progressbar"],[data-state="loading"]')].some(visible)};
+    });
+    const composer = document.querySelector('#prompt-textarea, [data-testid="composer-text-input"]');
+    const draft = String(composer?.value ?? composer?.innerText ?? composer?.textContent ?? '').trim();
+    const busy = [...document.querySelectorAll('button[data-testid="stop-button"],button[aria-label*="stop generating" i],button[aria-label*="cancel generation" i],button[aria-label="Stop response" i]')].some(visible);
+    return {turns,draft,busy,composerPresent:!!composer};
+  });
+}
+function assistantTurns(state) { return state.turns.filter(t => t.role === 'assistant'); }
+function freshAssistant(state, submission) {
+  const assistants = assistantTurns(state);
+  // Require an appended assistant turn, not an existing turn with a changed URL.
+  if (assistants.length <= submission.assistantCount) return null;
+  const candidate = assistants.at(-1);
+  if (candidate.id && submission.known.has(candidate.id)) return null;
+  const prior = assistants[submission.assistantCount - 1];
+  if (submission.lastAssistantId && prior?.id && prior.id !== submission.lastAssistantId) return null;
+  const users = state.turns.filter(t => t.role === 'user');
+  if (users.length > submission.userCount + 1) return null;
+  if (users.length === submission.userCount + 1 && users.at(-1).index >= candidate.index) return null;
+  return candidate;
+}
+async function waitForIdle(page, timeout = 330000) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    const state = await conversationState(page);
+    if (!state.busy && !assistantTurns(state).at(-1)?.busy && state.composerPresent) return state;
+    await wait(350);
+  }
+  throw new Error('Previous ChatGPT response is still active. No new prompt was sent.');
 }
 
 ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, composer) {
@@ -379,34 +417,34 @@ ChatGPTController.prototype.sendPrompt = async function sendPromptLive(page, com
   postSendBaselines.delete(page);
   try {
     if (pending) await waitForUploadReady(page, pending, 90000);
-    const prompt = (await composerText(composer)).replace(/\s+/g, ' ').trim();
-    if (!prompt) throw new Error('Cannot submit an empty generation prompt.');
-    const before = await conversationTurns(page);
-    const known = new Set(before.map(turn => turn.id).filter(Boolean));
-    const userCount = before.filter(t => t.role === 'user').length;
-    const sources = new Set(await allImageSources(page));
-    const result = await previousSendPrompt.call(this, page, composer);
-    const deadline = Date.now() + 45000;
+    const before = await waitForIdle(page);
+    const prompt = await composerText(composer);
+    if (!prompt.trim()) throw new Error('Cannot submit an empty generation prompt.');
+    const assistants = assistantTurns(before);
+    const submission = {
+      assistantCount:assistants.length, lastAssistantId:assistants.at(-1)?.id || '',
+      userCount:before.turns.filter(t=>t.role==='user').length,
+      known:new Set(before.turns.map(t=>t.id).filter(Boolean)),
+      sources:new Set(await allImageSources(page))
+    };
+    // Prefer the actual composer send button. The legacy broad send selector
+    // can click unrelated controls, reporting success without submitting.
+    const button = page.locator('button[data-testid="send-button"]:visible, button[aria-label="Send prompt" i]:visible, button[aria-label="Send message" i]:visible').first();
+    await button.waitFor({state:'visible',timeout:15000});
+    await button.click({timeout:15000});
+    const deadline = Date.now() + 60000;
     while (Date.now() < deadline) {
-      const turns = await conversationTurns(page);
-      const users = turns.filter(t => t.role === 'user');
-      const user = users.at(-1);
-      // Long messages may be collapsed, reformatted or rendered as an attachment.
-      // A newly appended user turn after Send is the boundary; do not require
-      // its entire visible text to match the composer verbatim.
-      const normalized = value => String(value || '').replace(/\s+/g, ' ').trim();
-      const prefix = normalized(prompt).slice(0, 64);
-      const fresh = user && users.length === userCount + 1
-        && (!user.id || !known.has(user.id));
-      const matching = user && user.id && !known.has(user.id)
-        && normalized(user.text).includes(prefix);
-      if (fresh || matching) {
-        postSendBaselines.set(page, { userId: user.id || '', userOrdinal: users.length - 1, known, sources });
-        return result;
+      const state = await conversationState(page);
+      // Some ChatGPT UI builds do not expose a user-role node. Composer
+      // clearance, a new assistant response, or active generation prove the
+      // submission progressed; final capture still requires new assistant art.
+      if (freshAssistant(state,submission) || state.busy || (state.composerPresent && !state.draft)) {
+        postSendBaselines.set(page, submission);
+        return true;
       }
       await wait(250);
     }
-    throw new Error('ChatGPT did not observe a new user turn after Send. No image will be accepted.');
+    throw new Error('Send was clicked but the composer did not clear and no generation started. Check ChatGPT before retrying.');
   } finally {
     pendingUploads.delete(page);
   }
@@ -417,33 +455,17 @@ ChatGPTController.prototype.snapshotAssistantState = async function snapshotAssi
   return { ...baseline, allImageSources: new Set(await allImageSources(page)) };
 };
 
-// Only images inside the assistant message following the confirmed user turn
-// may be saved. Never accept a global network asset or a user attachment.
+// Never save global network assets. Only an appended, idle assistant turn
+// can authorize a candidate, excluding every pre-send and user image source.
 async function generatedDomCandidates(page, submission) {
-  return page.evaluate(({userId, userOrdinal, known, sources}) => {
-    const messages = [...document.querySelectorAll('[data-message-author-role]')];
-    const idOf = el => el.getAttribute('data-message-id') || el.closest('[data-message-id]')?.getAttribute('data-message-id') || el.closest('[data-testid^="conversation-turn-"]')?.getAttribute('data-testid') || '';
-    const users = messages.filter(el => el.getAttribute('data-message-author-role') === 'user');
-    const anchor = (userId && users.find(el => idOf(el) === userId)) || (users.length === userOrdinal + 1 ? users[userOrdinal] : null);
-    const index = messages.indexOf(anchor);
-    if (index < 0) return [];
-    const later = messages.slice(index + 1);
-    if (later.some(el => el.getAttribute('data-message-author-role') === 'user')) return [];
-    const assistant = later.filter(el => el.getAttribute('data-message-author-role') === 'assistant').at(-1);
-    if (!assistant) return [];
-    const realId = idOf(assistant);
-    if (realId && known.includes(realId)) return [];
-    const id = realId || 'assistant-after-user-' + userOrdinal;
-    const visible = el => !!(el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
-    if ([...document.querySelectorAll('button[data-testid="stop-button"],button[aria-label*="stop generating" i],button[aria-label*="cancel generation" i]')].some(visible)) return [];
-    if ([...assistant.querySelectorAll('[aria-busy="true"],[role="progressbar"],[data-state="loading"]')].some(visible)) return [];
-    return [...assistant.querySelectorAll('img')].filter(img => {
-      const src = img.currentSrc || img.src;
-      return img.closest('[data-message-author-role]') === assistant && img.complete && visible(img)
-        && img.naturalWidth >= 512 && img.naturalHeight >= 512 && src && !sources.includes(src);
-    }).map(img => ({id, src: img.currentSrc || img.src, width: img.naturalWidth, height: img.naturalHeight}))
-      .sort((x,y) => y.width*y.height - x.width*x.height);
-  }, {userId: submission.userId, userOrdinal: submission.userOrdinal, known: [...submission.known], sources: [...submission.sources]});
+  const state = await conversationState(page);
+  const assistant = freshAssistant(state, submission);
+  if (!assistant || state.busy || assistant.busy) return [];
+  const excluded = new Set(submission.sources);
+  for (const turn of state.turns) if (turn !== assistant) for (const image of turn.images) excluded.add(image.src);
+  return assistant.images.filter(img=>img.src && img.ready && img.width>=512 && img.height>=512 && !excluded.has(img.src))
+    .map(img=>({...img,id:assistant.id || 'assistant-'+assistant.index}))
+    .sort((x,y)=>y.width*y.height-x.width*x.height);
 }
 
 ChatGPTController.prototype.captureGeneratedImage = async function captureGeneratedImageLive(page, projectId, baseline, step) {
@@ -475,7 +497,7 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
           step('Generated image verified');
           this.projects.update(projectId, {
             status: 'awaiting-review', generatedImagePath: saved.savePath,
-            generatedImage: {mime:saved.mime,width:saved.metadata.width,height:saved.metadata.height,hasAlpha:Boolean(saved.metadata.hasAlpha),source:'verified-assistant-image',assistantMessageId:candidate.id,userMessageId:submission.userId},
+            generatedImage: {mime:saved.mime,width:saved.metadata.width,height:saved.metadata.height,hasAlpha:Boolean(saved.metadata.hasAlpha),source:'verified-assistant-image',assistantMessageId:candidate.id,userTurnCountBeforeSend:submission.userCount},
             automationStep:'Ready for review',chatgptError:null
           });
           dirtyPages.delete(page);
@@ -497,4 +519,4 @@ ChatGPTController.prototype.captureGeneratedImage = async function captureGenera
   }
 };
 
-module.exports = { findComposerFileInput, hasNewReferenceEvidence, waitForReferenceEvidence, generatedDomCandidates };
+module.exports = { findComposerFileInput, hasNewReferenceEvidence, waitForReferenceEvidence, generatedDomCandidates, freshAssistant };
