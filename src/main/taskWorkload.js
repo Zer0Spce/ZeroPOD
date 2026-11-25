@@ -99,9 +99,19 @@ class TaskWorkload {
   this.assertRow(row);
   const filename=this.mode==='marcin'?(safeTitle(row.no)+' '+safeTitle(row.name)+'.png'):(safe(row.id)+'_'+safe(row.niche)+'.png');
   if(this.mode==='marcin'?(!safeTitle(row.no)||!safeTitle(row.name)):(!safe(row.id)||!safe(row.niche)))throw Error('Invalid output filename.');
-  fs.mkdirSync(this.outputDir,{recursive:true});const target=path.join(this.outputDir,filename);
-  const priorIsOwnOutput=Boolean(row.output&&path.resolve(row.output)===path.resolve(target));
-  if(fs.existsSync(target)&&!(replaceExisting&&priorIsOwnOutput))throw Error('Output already exists: '+filename);
+  fs.mkdirSync(this.outputDir,{recursive:true});let target=path.join(this.outputDir,filename);
+  const stem=path.basename(filename,'.png');
+  // Reuse an output explicitly owned by this row on Retry. If a reimported
+  // row collides with an untracked existing PNG, preserve it and use a version.
+  const prior=row.output?path.resolve(row.output):null;
+  const ownPrior=prior&&path.dirname(prior)===path.resolve(this.outputDir)
+    && (path.basename(prior)===filename || (path.basename(prior).startsWith(stem+'__v') && /^\d+\.png$/i.test(path.basename(prior).slice(stem.length+3))));
+  if(replaceExisting&&ownPrior)target=prior;
+  else if(fs.existsSync(target)){
+   let version=2;
+   while(fs.existsSync(path.join(this.outputDir,stem+'__v'+version+'.png')))version++;
+   target=path.join(this.outputDir,stem+'__v'+version+'.png');
+  }
   const reference=this.mode==='marcin'?row.linkSource:(/^https?:\/\//i.test(row.reference)?row.reference:/^https?:\/\//i.test(row.idea)?row.idea:'');
   const imagePath=await this.referenceImage(row,reference);
   // Task [Marcin] sends only the resolved reference image plus the active
