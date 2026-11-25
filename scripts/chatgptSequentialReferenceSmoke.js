@@ -4,10 +4,10 @@ const fs=require('fs'),os=require('os'),path=require('path'),Module=require('mod
 class FakeChatGPTController {
  constructor(){this.sessions={};}
  async assertNoHumanGate(){}
- composerLocator(){return {waitFor:async()=>{}}}
+ composerLocator(){return {waitFor:async()=>{},evaluate:async()=>''}}
  async ensureReady(page){return this.composerLocator(page)}
  async snapshotAssistantState(){return {count:0,imageSources:new Set()}}
- async sendPrompt(page){page.sent++;if(page.preview)page.history.push(page.preview);page.preview='';return true}
+ async sendPrompt(page){page.sent++;if(page.preview)page.history.push(page.preview);page.preview='';page.turns.push({role:'user',id:'user-'+page.sent,text:'test prompt'});return true}
 }
 class FakeInput {
  constructor(page,name,active=true){Object.assign(this,{page,name,active,uploads:0})}
@@ -21,7 +21,7 @@ class FakeInput {
  }
 }
 class FakePage {
- constructor(){this.history=[];this.preview='';this.sequence=0;this.sent=0;this.reloads=0;this.uploadChoices=[];
+ constructor(){this.turns=[];this.history=[];this.preview='';this.sequence=0;this.sent=0;this.reloads=0;this.uploadChoices=[];
   this.inputs=[new FakeInput(this,'initial')];this.activateOnReload=true;}
  locator(selector){
   if(selector==='input[type="file"]')return {count:async()=>this.inputs.length,nth:i=>this.inputs[i]};
@@ -30,6 +30,8 @@ class FakePage {
   throw Error('Unexpected selector: '+selector);
  }
  async evaluate(fn,baseline){
+  if (baseline === undefined) return this.turns;
+  if (!Array.isArray(baseline)) return [{id:'assistant-'+this.sent,src:'blob:generated-'+this.sent,width:1024,height:1024}];
   const srcs=[...this.history,...(this.preview?[this.preview]:[])];
   const newImage=Boolean(this.preview&&!baseline.includes(this.preview));
   return {
@@ -56,17 +58,22 @@ async function run(){
   let clock=0;
   Date.now=()=>{clock+=3000;return clock};
   const controller=new FakeChatGPTController(),page=new FakePage();
+  controller.projects={getProjectDir:()=>root,update:()=>{}};
+  controller.saveGeneratedAsset=async()=>({savePath:path.join(root,'generated.png'),metadata:{width:1024,height:1024},mime:'image/png'});
+  const complete=()=>controller.captureGeneratedImage(page,'project',{},()=>{});
   // First reference works: image must be attached and confirmed before send.
   assert.strictEqual(await controller.attachReference(page,ref),true);
   assert.deepStrictEqual(page.uploadChoices,['initial']);
-  await controller.sendPrompt(page,{});
+  await controller.sendPrompt(page,{evaluate:async()=> 'test prompt'});
+  await complete();
   assert.strictEqual(page.sent,1);
   assert.strictEqual(page.reloads,0);
 
   // Consecutive job: the earliest input is stale. A fresh later input must win.
   page.inputs=[new FakeInput(page,'stale-first',false),new FakeInput(page,'live-second',true)];
   assert.strictEqual(await controller.attachReference(page,ref),true);
-  await controller.sendPrompt(page,{});
+  await controller.sendPrompt(page,{evaluate:async()=> 'test prompt'});
+  await complete();
   assert.strictEqual(page.sent,2,'second row must actually submit');
   assert.deepStrictEqual(page.uploadChoices,['initial','live-second']);
   assert.strictEqual(page.reloads,0);
@@ -79,7 +86,8 @@ async function run(){
   assert.strictEqual(await controller.attachReference(page,ref),true);
   assert.strictEqual(page.reloads,1,'failed attachment should trigger one fresh composer reload');
   assert.deepStrictEqual(page.uploadChoices.slice(-2),['stale-third','reloaded-1']);
-  await controller.sendPrompt(page,{});
+  await controller.sendPrompt(page,{evaluate:async()=> 'test prompt'});
+  await complete();
   assert.strictEqual(page.sent,3);
 
   // If Chrome never shows the image on either attempt, fail closed; do not send.
