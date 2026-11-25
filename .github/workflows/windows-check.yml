@@ -15,6 +15,7 @@ on:
       - feature/auto-png-top-placement
       - feature/wide-top-placement-fix
       - feature/strong-top-placement
+      - feature/anuk-second-image-upload-recovery-11-23-26
 
 jobs:
   check:
