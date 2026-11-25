@@ -120,6 +120,26 @@ async function run(){
   const pageWith=state=>({evaluate:async()=>state});
   assert.deepStrictEqual((await patch.generatedDomCandidates(pageWith({turns:[user,old,fresh],busy:false}),baseline)).map(x=>x.src),['blob:fresh']);
   assert.deepStrictEqual(await patch.generatedDomCandidates(pageWith({turns:[user,old,fresh],busy:true}),baseline),[]);
+  // Execute the production DOM evaluator, rather than faking its output:
+  // newer ChatGPT markup with data-turn, no user author-role node, and a
+  // previous assistant image plus a newly generated image.
+  const {JSDOM}=require('jsdom');
+  const dom=new JSDOM('<main><article data-turn="user"><img src="https://example.test/ref.png"></article><article data-turn="assistant" data-testid="conversation-turn-2"><img src="https://example.test/old.png"></article><article data-turn="assistant" data-testid="conversation-turn-3"><img src="https://example.test/fresh.png"></article><div id="prompt-textarea"></div></main>');
+  const win=dom.window;
+  for(const img of win.document.images){
+   Object.defineProperties(img,{naturalWidth:{value:1024},naturalHeight:{value:1024},complete:{value:true}});
+   img.getClientRects=()=>[{width:400,height:400}];
+  }
+  const realDOMPage={evaluate:async fn=>{
+   const oldDocument=global.document,oldStyle=global.getComputedStyle;
+   global.document=win.document;global.getComputedStyle=win.getComputedStyle.bind(win);
+   try{return fn()}finally{global.document=oldDocument;global.getComputedStyle=oldStyle}
+  }};
+  const domBaseline={assistantCount:1,lastAssistantId:'conversation-turn-2',userCount:1,known:new Set(['conversation-turn-2']),sources:new Set(['https://example.test/old.png'])};
+  assert.deepStrictEqual((await patch.generatedDomCandidates(realDOMPage,domBaseline)).map(x=>x.src),['https://example.test/fresh.png']);
+  win.document.querySelector('[data-testid="conversation-turn-3"]').remove();
+  assert.deepStrictEqual(await patch.generatedDomCandidates(realDOMPage,domBaseline),[]);
+  dom.window.close();
   console.log('ChatGPT consecutive reference uploads: stale first input rejected, second job sent, reload recovery, failed upload never sent: OK');
  }finally{
   Date.now=originalNow;Module._load=originalLoad;
