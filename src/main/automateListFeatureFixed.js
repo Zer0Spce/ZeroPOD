@@ -2,7 +2,6 @@ const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const ExcelJS = require('exceljs');
 const { AutomationQueueStore } = require('./automationQueueStore');
 const { ResearchStore } = require('./researchStore');
 const { ZeroPODBuiltInProvider, extractAsin, marketplaceFromUrl } = require('./researchProvider');
@@ -32,19 +31,28 @@ function isAmazonHost(value) {
 }
 
 async function extractUrlsFromXlsx(filePath) {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(filePath);
+  const XLSX = require('xlsx');
+  const workbook = XLSX.readFile(filePath, {cellFormula:true, cellText:true});
   const urls = [];
-  for (const sheet of workbook.worksheets) {
-    sheet.eachRow({ includeEmpty: false }, (row) => {
-      row.eachCell({ includeEmpty: false }, (cell) => {
-        if (cell.hyperlink) urls.push(...extractUrls(cell.hyperlink));
-        if (cell.text) urls.push(...extractUrls(cell.text));
-        else if (typeof cell.value === 'string') urls.push(...extractUrls(cell.value));
-      });
+  for (const name of workbook.SheetNames) {
+    const sheet = workbook.Sheets[name];
+    const cells = Object.keys(sheet).filter(key => /^[A-Z]+[1-9][0-9]*$/.test(key));
+    cells.sort((a,b) => {
+      const x=XLSX.utils.decode_cell(a), y=XLSX.utils.decode_cell(b);
+      return x.r-y.r || x.c-y.c;
     });
+    for (const key of cells) {
+      const cell=sheet[key];
+      if (cell.l?.Target) urls.push(...extractUrls(cell.l.Target));
+      if (typeof cell.v==='string') urls.push(...extractUrls(cell.v));
+      else if (cell.w) urls.push(...extractUrls(cell.w));
+      if (typeof cell.f==='string' && /^\s*(?:_xlfn\.)?HYPERLINK\s*\(/i.test(cell.f)) {
+        const match=cell.f.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
+        if(match) urls.push(...extractUrls(match[1]));
+      }
+    }
   }
-  return urls;
+  return [...new Set(urls)];
 }
 
 async function extractUrlsFromFile(filePath) {
