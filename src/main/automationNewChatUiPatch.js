@@ -16,6 +16,8 @@ function installZeroPODRendererPatches(window) {
     try {
       await window.webContents.executeJavaScript(rendererScript('automationNewChat.js'));
       await window.webContents.executeJavaScript(rendererScript('sourceImageAutofetch.js'));
+      await window.webContents.executeJavaScript(rendererScript('automationCapacity50.js'));
+      await window.webContents.executeJavaScript(rendererScript('automationHeaderLock.js'));
     } catch {}
   };
 
@@ -26,7 +28,7 @@ function installZeroPODRendererPatches(window) {
   // on a dynamically inserted script tag or relative file URL resolution.
   setTimeout(() => {
     if (window.isDestroyed() || window.webContents.isDestroyed()) return;
-    window.webContents.executeJavaScript(`Boolean(document.getElementById('automationNewChatOption'))`)
+    window.webContents.executeJavaScript(`Boolean(document.getElementById('automationNewChatOption') && window.__zeroPODAutomationCapacity50Installed && window.__zeroPODAutomationHeaderLockInstalled)`)
       .then((mounted) => { if (!mounted) inject(); })
       .catch(() => {});
   }, 2500);

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
@@ -11,6 +11,9 @@ const { ExportController } = require('./exportController');
 const { RedbubbleController } = require('./redbubbleController');
 const { AutomationQueueStore } = require('./automationQueueStore');
 const { AutomationQueueController } = require('./automationQueueController');
+const { TaskWorkload } = require('./taskWorkload');
+const { readTaskWorkbook } = require('./taskWorkloadSpreadsheet');
+const { readMarcinWorkbook } = require('./taskMarcinSpreadsheet');
 const { WorkspaceManager } = require('./workspaceManager');
 const { parseCsv, toCsv } = require('./automationCsv');
 const { readAutomationWorkbook, writeAutomationWorkbook } = require('./automationSpreadsheet');
@@ -46,6 +49,8 @@ const exporter = new ExportController({ projects });
 const redbubble = new RedbubbleController({ sessions, projects });
 const automationStore = new AutomationQueueStore();
 const automation = new AutomationQueueController({ store: automationStore, projects, chatgpt, metadata, vectorizer, exporter, redbubble });
+const taskWorkload = new TaskWorkload({projects,chatgpt,vectorizer,exporter});
+const taskMarcin = new TaskWorkload({projects,chatgpt,vectorizer,exporter,mode:'marcin'});
 const workspace = new WorkspaceManager({ projects, automationStore });
 
 function enrich(project) { return { ...project, workflow: workflow.describe(project) }; }
@@ -144,6 +149,56 @@ app.whenReady().then(async () => {
     if (!validation.ok) throw new Error(`Quality check failed: ${validation.errors.join(' ')}`); return redbubble.publish(projectId);
   });
 
+  ipcMain.handle('task:list', () => taskWorkload.snapshot());
+  ipcMain.handle('task:set', (_e, rows) => taskWorkload.setRows(rows));
+  ipcMain.handle('task:start', () => taskWorkload.start());
+  ipcMain.handle('task:pause', () => taskWorkload.pause());
+  ipcMain.handle('task:stop', () => taskWorkload.stop());
+  ipcMain.handle('task:retry-row', (_e, index) => taskWorkload.retryRow(index));
+  ipcMain.handle('task:retry-rows', (_e, indices) => taskWorkload.retryRows(indices));
+  ipcMain.handle('task:delete-rows', (_e, indices) => taskWorkload.deleteRows(indices));
+  ipcMain.handle('task:preview', (_e, index) => taskWorkload.preview(index));
+  ipcMain.handle('task:clear', (_e, status) => taskWorkload.clear(status));
+  ipcMain.handle('task:import-xlsx', async () => {
+    if (taskWorkload.running) throw new Error('Stop Task Workload before importing another list.');
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: 'Add Task Workload List (.xlsx)',
+      properties: ['openFile'],
+      filters: [{ name: 'Excel workbooks', extensions: ['xlsx'] }]
+    });
+    if (picked.canceled || !picked.filePaths?.length) return { canceled: true };
+    const imported = await readTaskWorkbook(picked.filePaths[0]);
+    return { canceled: false, ...taskWorkload.appendRows(imported), file: path.basename(picked.filePaths[0]) };
+  });
+  ipcMain.handle('task:open-output-folder', async () => {
+    const folder = taskWorkload.outputRoot;
+    fs.mkdirSync(folder, { recursive: true });
+    const error = await shell.openPath(folder);
+    if (error) throw new Error(`Could not open Task Workload output folder: ${error}`);
+    return { ok: true, path: folder };
+  });
+  ipcMain.handle('marcin:list', () => taskMarcin.snapshot());
+  ipcMain.handle('marcin:set', (_e, rows) => taskMarcin.setRows(rows));
+  ipcMain.handle('marcin:start', () => taskMarcin.start());
+  ipcMain.handle('marcin:pause', () => taskMarcin.pause());
+  ipcMain.handle('marcin:stop', () => taskMarcin.stop());
+  ipcMain.handle('marcin:retry-rows', (_e, indices) => taskMarcin.retryRows(indices));
+  ipcMain.handle('marcin:delete-rows', (_e, indices) => taskMarcin.deleteRows(indices));
+  ipcMain.handle('marcin:preview', (_e, index) => taskMarcin.preview(index));
+  ipcMain.handle('marcin:clear', (_e, status) => taskMarcin.clear(status));
+  ipcMain.handle('marcin:import-xlsx', async () => {
+    if(taskMarcin.running)throw Error('Stop Task [Marcin] before importing.');
+    const picked=await dialog.showOpenDialog(mainWindow,{title:'Import Task [Marcin] Excel List',properties:['openFile'],filters:[{name:'Excel Workbook',extensions:['xlsx']}]});
+    if(picked.canceled||!picked.filePaths?.length)return {canceled:true};
+    const rows=await readMarcinWorkbook(picked.filePaths[0]);
+    return {canceled:false,...taskMarcin.appendRows(rows),file:path.basename(picked.filePaths[0])};
+  });
+  ipcMain.handle('marcin:open-output-folder',async()=>{
+    const folder=taskMarcin.outputRoot;fs.mkdirSync(folder,{recursive:true});
+    const error=await shell.openPath(folder);
+    if(error)throw Error('Could not open Task [Marcin] output folder: '+error);
+    return {ok:true,path:folder};
+  });
   ipcMain.handle('automation:list', () => automation.snapshot());
   ipcMain.handle('automation:add', (_event, rows) => automation.addRows(rows));
   ipcMain.handle('automation:update', (_event, { rowId, patch }) => automation.updateRow(rowId, patch));

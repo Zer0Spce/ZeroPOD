@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     logout: (serviceId) => ipcRenderer.invoke('connections:logout', serviceId)
   },
   pod: { rules: () => ipcRenderer.invoke('pod:rules') },
+  promptSettings: {
+    get: () => ipcRenderer.invoke('prompt-settings:get'),
+    save: (payload) => ipcRenderer.invoke('prompt-settings:save', payload),
+    reset: () => ipcRenderer.invoke('prompt-settings:reset'),
+    pasteClipboard: () => ipcRenderer.invoke('prompt-settings:paste-clipboard')
+  },
   projects: {
     list: () => ipcRenderer.invoke('projects:list'),
     archived: () => ipcRenderer.invoke('projects:archived'),
@@ -51,6 +57,48 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     checkUploadLimit: () => ipcRenderer.invoke('redbubble:check-upload-limit'),
     limitCheckSettings: () => ipcRenderer.invoke('redbubble:limit-check-settings'),
     updateLimitCheckSettings: (patch) => ipcRenderer.invoke('redbubble:update-limit-check-settings', patch)
+  },
+  spreadshirt: {
+    login: () => ipcRenderer.invoke('spreadshirt:login'),
+    test: () => ipcRenderer.invoke('spreadshirt:test'),
+    open: () => ipcRenderer.invoke('spreadshirt:open'),
+    markProject: (payload) => ipcRenderer.invoke('spreadshirt:mark-project', payload),
+    deriveMetadata: (projectId) => ipcRenderer.invoke('spreadshirt:derive-metadata', projectId),
+    saveMetadata: (payload) => ipcRenderer.invoke('spreadshirt:save-metadata', payload),
+    exportPng: (projectId) => ipcRenderer.invoke('spreadshirt:export-png', projectId),
+    check: (projectId) => ipcRenderer.invoke('spreadshirt:check', projectId),
+    prepare: (projectId) => ipcRenderer.invoke('spreadshirt:prepare', projectId),
+    publish: (projectId) => ipcRenderer.invoke('spreadshirt:publish', projectId),
+    usage: () => ipcRenderer.invoke('spreadshirt:usage'),
+    settings: () => ipcRenderer.invoke('spreadshirt:settings'),
+    updateSettings: (patch) => ipcRenderer.invoke('spreadshirt:update-settings', patch)
+  },
+  taskWorkload: {
+    list: () => ipcRenderer.invoke('task:list'),
+    set: rows => ipcRenderer.invoke('task:set', rows),
+    start: () => ipcRenderer.invoke('task:start'),
+    pause: () => ipcRenderer.invoke('task:pause'),
+    stop: () => ipcRenderer.invoke('task:stop'),
+    retryRow: index => ipcRenderer.invoke('task:retry-row', index),
+    retryRows: indices => ipcRenderer.invoke('task:retry-rows', indices),
+    deleteRows: indices => ipcRenderer.invoke('task:delete-rows', indices),
+    preview: index => ipcRenderer.invoke('task:preview', index),
+    clear: status => ipcRenderer.invoke('task:clear', status),
+    openOutputFolder: () => ipcRenderer.invoke('task:open-output-folder'),
+    importXlsx: () => ipcRenderer.invoke('task:import-xlsx')
+  },
+  taskMarcin: {
+    list: () => ipcRenderer.invoke('marcin:list'),
+    set: rows => ipcRenderer.invoke('marcin:set',rows),
+    start: () => ipcRenderer.invoke('marcin:start'),
+    pause: () => ipcRenderer.invoke('marcin:pause'),
+    stop: () => ipcRenderer.invoke('marcin:stop'),
+    retryRows: indices => ipcRenderer.invoke('marcin:retry-rows',indices),
+    deleteRows: indices => ipcRenderer.invoke('marcin:delete-rows',indices),
+    preview: index => ipcRenderer.invoke('marcin:preview',index),
+    clear: status => ipcRenderer.invoke('marcin:clear',status),
+    importXlsx: () => ipcRenderer.invoke('marcin:import-xlsx'),
+    openOutputFolder: () => ipcRenderer.invoke('marcin:open-output-folder')
   },
   automation: {
     list: () => ipcRenderer.invoke('automation:list'),
@@ -100,6 +148,7 @@ contextBridge.exposeInMainWorld('zeroPOD', {
     capture: () => ipcRenderer.invoke('flying:capture'),
     nextPage: () => ipcRenderer.invoke('flying:next-page'),
     workflow: (key) => ipcRenderer.invoke('flying:workflow', key),
+    spreadshirt: (key) => ipcRenderer.invoke('flying:spreadshirt', key),
     addToAutomation: (payload) => ipcRenderer.invoke('flying:automation', payload),
     openAmazon: (key) => ipcRenderer.invoke('flying:amazon', key)
   },
