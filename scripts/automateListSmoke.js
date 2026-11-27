@@ -27,6 +27,28 @@ const { extractUrls, extractUrlsFromFile } = require('../src/main/automateListFe
   assert.ok(fromWorkbook[0].includes('/dp/B07VCFBBMF'));
   assert.ok(fromWorkbook[1].includes('/dp/B0F5N8QFL5'));
 
+  // Reproduce the reported namespace-prefixed shared string table.
+  const JSZip = require(require.resolve('jszip',{paths:[require.resolve('exceljs')]}));
+  const zip = await JSZip.loadAsync(fs.readFileSync(file));
+  const shared = zip.file('xl/sharedStrings.xml');
+  assert.ok(shared, 'fixture must contain shared strings');
+  const xml = await shared.async('string');
+  zip.file('xl/sharedStrings.xml', xml
+    .replace(/<(\/?)(sst|si|t|r|rPr)(?=[\s/>])/g, '<$1x:$2')
+    .replace(/xmlns="http:\/\/schemas.openxmlformats.org\/spreadsheetml\/2006\/main"/, 'xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'));
+  const prefixed = path.join(dir,'prefixed.xlsx');
+  fs.writeFileSync(prefixed,await zip.generateAsync({type:'nodebuffer'}));
+  assert.deepStrictEqual(await extractUrlsFromFile(prefixed),fromWorkbook);
+  const XLSX = require('xlsx');
+  const linked = XLSX.utils.book_new();
+  const links = XLSX.utils.aoa_to_sheet([['Product'],['Japan'],['Canada']]);
+  links.A2.l={Target:'https://www.amazon.co.jp/dp/B07VCFBBMF'};
+  links.A3.l={Target:'https://www.amazon.ca/dp/B0F5N8QFL5'};
+  XLSX.utils.book_append_sheet(linked,links,'Links');
+  const linkedFile=path.join(dir,'hyperlinks.xlsx');
+  XLSX.writeFile(linked,linkedFile);
+  assert.deepStrictEqual(await extractUrlsFromFile(linkedFile),[links.A2.l.Target,links.A3.l.Target]);
+
   fs.rmSync(dir, { recursive: true, force: true });
   console.log('Automate List smoke test passed.');
 })().catch((error) => {
